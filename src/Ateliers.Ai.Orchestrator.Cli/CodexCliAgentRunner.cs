@@ -10,6 +10,7 @@ using Ateliers.Ai.Orchestrator.Core;
 /// <summary>Codex CLIのJSONL実行をCoreのAgentRunner境界へ接続します。</summary>
 internal sealed class CodexCliAgentRunner : IAgentRunner
 {
+    private const string ScopeBoundaryInstruction = "作業範囲はAgentへの指示であり、OSレベルで範囲外アクセスを完全に防ぐ保証ではありません。";
     private readonly CodexCliRunnerOptions options;
     private readonly ConcurrentDictionary<string, string> initialCommits = new(StringComparer.Ordinal);
 
@@ -247,10 +248,10 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
         {
             var artifactPath = ResolveArtifactPath(request);
             var artifact = File.ReadAllText(artifactPath);
-            return $"ROLE=REVIEWER\nREVIEW_ATTEMPT: {request.Attempt}\nあなたは独立したReviewerです。実装者の会話・自己評価は受け取っていません。読み取り専用で、以下の固定成果物だけをレビューし、受け入れ条件に照らした阻害指摘または「レビュー合格:」で始まる結論を返してください。\n対象SHA-256: {request.ArtifactSha256}\n\n契約:\n{contract}\n\n固定成果物:\n{artifact}";
+            return $"ROLE=REVIEWER\nREVIEW_ATTEMPT: {request.Attempt}\nあなたは独立したReviewerです。実装者の会話・自己評価は受け取っていません。読み取り専用で、以下の固定成果物だけをレビューし、受け入れ条件に照らした阻害指摘または「レビュー合格:」で始まる結論を返してください。契約に記された作業範囲と許可操作を守ってください。{ScopeBoundaryInstruction}\n対象SHA-256: {request.ArtifactSha256}\n\n契約:\n{contract}\n\n固定成果物:\n{artifact}";
         }
         var revision = request.ReviewFinding is null ? "" : $"\n前回レビュー指摘:\n{request.ReviewFinding}\n";
-        return $"ROLE=IMPLEMENTER\nあなたはImplementerです。以下の契約範囲でのみ作業し、外部書込・削除・マージを行わず、変更後の unified diff とテスト結果を最終応答に含めてください。\n\n契約:\n{contract}{revision}";
+        return $"ROLE=IMPLEMENTER\nあなたはImplementerです。契約に記された作業領域と許可操作の範囲内でのみ作業し、外部書込・削除・マージを行わず、変更後の unified diff とテスト結果を最終応答に含めてください。{ScopeBoundaryInstruction}\n\n契約:\n{contract}{revision}";
     }
 
     private void PrepareEnvironment(ProcessStartInfo start, string profileRoot)

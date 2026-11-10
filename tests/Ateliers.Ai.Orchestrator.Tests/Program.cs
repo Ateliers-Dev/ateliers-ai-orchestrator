@@ -58,6 +58,7 @@ return suite.Run().ExitCode;
 
 static int RunFakeCodexFixture(string[] args)
 {
+    Console.InputEncoding = new System.Text.UTF8Encoding(false);
     Console.OutputEncoding = new System.Text.UTF8Encoding(false);
     var mode = args.Length > 1 ? args[1] : "success";
     if (mode == "child-sleeper") { Thread.Sleep(10_000); return 0; }
@@ -68,6 +69,16 @@ static int RunFakeCodexFixture(string[] args)
         return 0;
     }
     var prompt = Console.In.ReadToEnd();
+    if (prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal) || prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal))
+    {
+        var policy = new
+        {
+            scope_included_present = prompt.Contains("\"Included\"", StringComparison.Ordinal),
+            scope_excluded_present = prompt.Contains("\"Excluded\"", StringComparison.Ordinal),
+            os_boundary_disclaimed = prompt.Contains("作業範囲はAgentへの指示であり、OSレベルで範囲外アクセスを完全に防ぐ保証ではありません。", StringComparison.Ordinal)
+        };
+        Console.WriteLine($"{{\"type\":\"fixture.prompt_policy\",\"policy\":{JsonSerializer.Serialize(policy)}}}");
+    }
     Console.Error.WriteLine("fixture warning: stderr is independent from the terminal status");
     if (mode == "timeout-with-child")
     {
@@ -527,10 +538,12 @@ static void CodexFakeProcessesCompleteIndependentReviewSlice()
             .Contains("IMPLEMENTER-SELF-ASSESSMENT-SECRET", StringComparison.Ordinal));
         var implementerStdout = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "codex.stdout.jsonl"));
         Assert.False(implementerStdout.Contains("--version", StringComparison.Ordinal), "Codex版確認プロセスが起動しています。");
+        AssertCodexFixturePolicy(implementerStdout, "workspace-write", "Implementer");
         var firstReviewStdoutPath = Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "codex.stdout.jsonl");
         var firstReviewStdout = File.ReadAllText(firstReviewStdoutPath);
         Assert.True(firstReviewStdout.Contains("\"self_assessment_present\":false", StringComparison.Ordinal),
             "ReviewerプロンプトにImplementerの自己評価が混入しました。");
+        AssertCodexFixturePolicy(firstReviewStdout, "read-only", "Reviewer");
         var implementerPaths = ReadFakeEnvironmentPaths(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "codex.stdout.jsonl"));
         var reviewerPaths = ReadFakeEnvironmentPaths(firstReviewStdoutPath);
         Assert.True(implementerPaths.Values.All(path => path.StartsWith(Path.Combine(root.Path, "implementer-profile"), StringComparison.OrdinalIgnoreCase)),
@@ -543,6 +556,25 @@ static void CodexFakeProcessesCompleteIndependentReviewSlice()
             reviewerPaths.Values.Any(path => IsNestedPath(path, request.Contract.WorkingDirectory)),
             "役割別profileが作業リポジトリと重複しています。");
     }
+}
+
+static void AssertCodexFixturePolicy(string stdout, string expectedSandbox, string role)
+{
+    var policyLine = stdout.Split('\n').First(line => line.Contains("fixture.prompt_policy", StringComparison.Ordinal));
+    using var policyEvent = JsonDocument.Parse(policyLine);
+    var policy = policyEvent.RootElement.GetProperty("policy");
+    Assert.True(policy.GetProperty("scope_included_present").GetBoolean(), "Agent要求に含める作業範囲がありません。");
+    Assert.True(policy.GetProperty("scope_excluded_present").GetBoolean(), "Agent要求に除外範囲がありません。");
+    Assert.True(policy.GetProperty("os_boundary_disclaimed").GetBoolean(), $"{role}要求にOS境界の説明がありません: {policyEvent.RootElement.GetRawText()}");
+
+    var argumentsLine = stdout.Split('\n').First(line => line.Contains("fixture.arguments", StringComparison.Ordinal));
+    using var argumentsEvent = JsonDocument.Parse(argumentsLine);
+    var arguments = argumentsEvent.RootElement.GetProperty("arguments").EnumerateArray().Select(value => value.GetString()).ToArray();
+    var sandboxIndex = Array.IndexOf(arguments, "--sandbox");
+    Assert.True(sandboxIndex >= 0 && sandboxIndex + 1 < arguments.Length && arguments[sandboxIndex + 1] == expectedSandbox,
+        $"Codex sandboxに {expectedSandbox} を指定していません。");
+    Assert.True(arguments.Contains("--ask-for-approval", StringComparer.Ordinal) && arguments.Contains("never", StringComparer.Ordinal),
+        "非対話Codex runの承認設定が確認できません。");
 }
 
 static Dictionary<string, string> ReadFakeEnvironmentPaths(string stdoutPath)
