@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "taskId": "sample-task-001",
+  "purpose": "変更案を作成し、根拠を報告する",
+  "workingDirectory": "C:/work/target-repository",
+  "scope": {
+    "included": ["src/"],
+    "excluded": ["production deployment"]
+  },
+  "inputs": [
+    {
+      "description": "作業要件",
+      "reference": "https://example.invalid/task",
+      "revision": "issue revision or commit SHA"
+    }
+  ],
+  "requirements": ["変更内容を記録する"],
+  "acceptanceCriteria": ["変更をテストで確認する"],
+  "delegatedOperations": ["対象作業領域のファイルを編集する"],
+  "limits": {
+    "maxDurationMinutes": 120,
+    "maxRevisionAttempts": 2,
+    "maxRetries": 2
+  },
+  "stopConditions": ["委譲範囲外の判断が必要になった場合"],
+  "reporting": {
+    "pullRequestExpected": true,
+    "finalReportFormat": "markdown"
+  }
+}
