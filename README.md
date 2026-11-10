@@ -11,15 +11,18 @@ Codex経路はImplementerを最大1回、独立Reviewerを最大1回だけ起動
 
 実Codex CLIによる受入は未実施であり、実証済み・運用可能とはみなしません。この承認はFake実装とテストに限られ、実Codex CLI（`--help` / `--version` を含む）の起動は別途具体的な安全条件を提示し、追加承認を得るまで禁止です。
 
+オーケストレーターは、Agentの実行条件と制御を保証する。Agentの判断結果および実行環境に残るリスクは、利用者の責任範囲とする。
+
+ここでいう実行条件と制御には、契約で指定した作業領域と操作範囲をAgentへ伝えること、実行時のsandboxモード設定、ImplementerとReviewerを各1回までに制限すること、時間上限を適用すること、終了後は人間判断待ちで停止することを含みます。Agentへの指示やworkspace sandboxは、OSレベルで指定範囲外へのアクセスが完全に不可能であることを保証しません。ローカル実行に残るリスクは利用者が受容する前提です。
+
 ### 後続で必須の安全機能・実行条件
 
-以下は今回見送ったままにする任意項目ではなく、実Codex実行へ進む前に設計・実装が必要な後続項目です。
+以下は現在のPoC完了条件ではなく、後続で維持する機能です。
 
-- 専用Windowsユーザーによる隔離
-- APIキー方式の認証
-- 金額上限の事前設計と制御
+- APIキー方式の認証（Issue #6）
+- 金額上限の理論設計・Fake/モック検証（Issue #7）。実課金、自動チャージ、実際の上限到達による検証は対象外です。
 
-今回の実行環境候補は使い捨てVM（推奨）、ChatGPT契約によるCodexログイン、ImplementerとReviewerを各1回に限定する方式です。VM、認証、許可ネットワーク、費用・時間上限などの具体条件は別途提示し、実Codex実行前に追加承認を得ます。
+実行方式はローカルディスク上でのCodex CLI直接実行を標準とし、DockerやVM、専用Windowsユーザーを利用者へ必須とはしません。Docker・VM・専用Windowsユーザーによる隔離は任意の将来方式です（専用WindowsユーザーはIssue #5で扱います）。実Codex CLI起動、ChatGPT認証、実モデル呼び出し、課金・利用枠消費は、このPoC変更の承認範囲外です。
 
 ## 必要環境
 
@@ -49,7 +52,9 @@ Fake Agentの縦断フローを実行します。シナリオは `Success`、`Re
 dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- run examples/task-contract.json --scenario RevisionThenSuccess --runs ./.ateliers-orchestrator/runs
 ```
 
-**安全ゲート完了と追加の明示承認までは、実Codex CLIを起動しないでください。--help と --version も起動に含みます。** 下記コマンドは仕様例であり、現時点での実行手順ではありません。
+**安全ゲート完了と実Codex CLI起動の追加承認までは、実Codex CLIを起動しないでください。--help と --version も起動に含みます。** 下記コマンドは仕様例であり、現時点での実行手順ではありません。
+
+実行対象には破棄可能なコピーを使い、契約の `workingDirectory` にそのコピーの絶対パスを明示してください。実データや通常作業中のcheckoutは対象にしないでください。Implementerには `workspace-write`、Reviewerには固定差分だけを渡して `read-only` を設定します。契約の `scope` と操作範囲はAgentへの指示です。ローカル実行では、その範囲を超えるアクセスをOSが完全に封じるものではありません。
 
 Codex CLI経路は、ImplementerとReviewerに**別々の使い捨てCODEX_HOME**を指定する設計です。既定のユーザープロファイル、`--ephemeral`、既存認証情報のコピーは使いません。各プロファイルは事前に作成し、専用ディレクトリ内へ次の確認ファイルを置く必要があります。
 
@@ -68,7 +73,7 @@ dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- run examples/task-contr
   --runs ./.ateliers-orchestrator/runs
 ```
 
-Implementerは契約の作業領域で `workspace-write`、ReviewerはGit差分を含む固定成果物だけを別の一時作業領域へ受け取り `read-only` で実行します。子プロセスにはAPI/GitHub秘密値を親環境から渡さず、ImplementerとReviewerで別々の新規 `codex exec` を起動します。`--ask-for-approval never` を指定するため、非対話run中に承認待ち画面は出ません。通常の変更はworkspace sandboxで制限し、拒否された操作はAgent失敗として記録します。子Agent/再委譲を無効化できることは実証していないため、完全に記録できたとは扱いません。timeoutとCtrl+C停止要求を区別し、kill結果、終了確認、stream切断を分けて保存します。killはCodex turn中断の保証ではありません。Unattended `codex exec` の例は[OpenAI Cookbook](https://developers.openai.com/cookbook/examples/codex/build_iterative_repair_loops_with_codex)を参照しています。
+Implementerは契約の作業領域で `workspace-write`、ReviewerはGit差分を含む固定成果物だけを別の一時作業領域へ受け取り `read-only` で実行します。Codex CLIを各役割につき1回だけ起動し、失敗時の再試行、自動修正、PR作成・mergeは行わず、人間判断待ちで停止します。子プロセスには許可した環境変数だけを渡し、役割ごとに別の `CODEX_HOME`、`HOME`、`APPDATA`、`LOCALAPPDATA`、一時領域を設定します。`--ask-for-approval never` を指定するため、非対話run中に承認待ち画面は出ません。Codexのsandboxモード設定は行いますが、OS全体の隔離境界としては扱いません。拒否された操作はAgent失敗として記録します。子Agent/再委譲を無効化できることは実証していないため、完全に記録できたとは扱いません。timeoutとCtrl+C停止要求を区別し、kill結果、終了確認、stream切断を分けて保存します。killはCodex turn中断の保証ではありません。Unattended `codex exec` の例は[OpenAI Cookbook](https://developers.openai.com/cookbook/examples/codex/build_iterative_repair_loops_with_codex)を参照しています。
 
 実行ごとにCLI JSONL、stderr、最終応答、process/thread識別子、terminal event、終了コード、取得できたtoken usageを保存します。CLI版情報は追加プロセスを起動せず「未取得」と記録します。stderr警告単独では成功・失敗を判定しません。token数は実費・請求額・硬い予算上限ではありません。生ログと応答は秘密情報を含む可能性があるため、実行ディレクトリのアクセスと保持を管理してください。GitHub push・PR作成・mergeはこのコマンドから行わず、人間が最終PR判断を行います。
 
