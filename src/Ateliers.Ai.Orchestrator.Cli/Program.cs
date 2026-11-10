@@ -79,7 +79,13 @@ internal static class OrchestratorCli
                 using var eventStore = JsonlRunEventStore.CreateNew(Path.Combine(fakeRunDirectory, "events.jsonl"), fakeRunId);
                 IAgentRunner runner = agentKind == "codex" ? new CodexCliAgentRunner(codexOptions!) : new FakeAgentRunner(scenario);
                 var result = new FakeAgentWorkflow().Run(contract, contractHash, fakeRunId, fakeRunDirectory,
-                    runner, eventStore, evidence);
+                    runner, eventStore, evidence, codexOneShot: agentKind == "codex");
+                if (!result.PersistenceSucceeded)
+                {
+                    Console.Error.WriteLine($"実行は人間判断待ちで停止しましたが、成果物または実行記録の保存に失敗しました: {fakeRunDirectory}");
+                    if (result.Detail is not null) Console.Error.WriteLine(result.Detail);
+                    return 3;
+                }
                 Console.WriteLine($"{(agentKind == "codex" ? "Codex CLI実行" : "Fake実行")}を記録しました: {fakeRunId}");
                 Console.WriteLine($"状態: {result.State}");
                 Console.WriteLine($"記録先: {fakeRunDirectory}");

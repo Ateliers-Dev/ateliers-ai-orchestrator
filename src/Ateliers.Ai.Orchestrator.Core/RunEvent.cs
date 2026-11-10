@@ -185,6 +185,9 @@ public sealed class RunExecution(IRunEventWriter eventStore, TaskContract? contr
     /// <summary>現在の実行状態です。</summary>
     public RunState State { get; private set; } = RunState.Prepared;
 
+    /// <summary>永続化に失敗した場合に、追加処理を止めるため状態だけを人間判断待ちへ固定します。</summary>
+    public void StopInMemoryAfterPersistenceFailure() => State = RunState.NeedsHumanInput;
+
     /// <summary>許可遷移を記録してから実行状態を更新します。</summary>
     /// <param name="target">遷移先の状態です。</param>
     /// <exception cref="InvalidRunTransitionException">遷移が許可されていない場合に発生します。</exception>

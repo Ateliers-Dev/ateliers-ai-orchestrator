@@ -36,7 +36,7 @@ public sealed record AgentResponse(string Content, bool Succeeded = true, bool T
 /// <summary>Agentプロセスから取得できた実行識別子と終了証跡です。</summary>
 /// <param name="ProcessId">起動したプロセスのIDです。</param>
 /// <param name="ThreadId">CLIイベントから取得したthread IDです。</param>
-/// <param name="CliVersion">実行前に取得したCLI版です。</param>
+/// <param name="CliVersion">CLI版です。PoCでは起動前確認を行わないため未取得です。</param>
 /// <param name="TerminalEvent">最後に観測したterminal eventです。</param>
 /// <param name="ExitCode">取得できた終了コードです。</param>
 /// <param name="UsageJson">取得できたtoken usage JSONです。金額や請求額を表しません。</param>
@@ -56,9 +56,7 @@ public sealed record AgentExecutionEvidence(int? ProcessId, string? ThreadId, st
     string? TerminalEvent, int? ExitCode, string? UsageJson, string? StandardOutputReference,
     string? StandardErrorReference, bool TimedOut, bool KillAttempted, bool? ProcessExitObserved,
     bool? StreamsClosed, bool StopRequested, string? StopReason, string? RequestSha256, string? WorkingDirectory, string? ArtifactSha256,
-    string? Error = null, int? VersionProbeProcessId = null, bool VersionProbeKillAttempted = false,
-    bool? VersionProbeExitObserved = null, string? VersionProbeStandardOutputReference = null,
-    string? VersionProbeStandardErrorReference = null);
+    string? Error = null);
 
 /// <summary>ImplementerとReviewerを呼び出す差し替え可能な境界です。</summary>
 public interface IAgentRunner
@@ -123,9 +121,17 @@ public sealed class FakeAgentRunner(FakeScenario scenario) : IAgentRunner
     }
 }
 
-/// <summary>Agentによる一実行と、成果物・イベント・Markdown報告の保存をまとめます。</summary>
-public sealed class FakeAgentWorkflow
+/// <summary>Fakeワークフローのファイル永続化境界です。</summary>
+public interface IFakeWorkflowStorage
 {
+    void WriteAllText(string path, string content, Encoding encoding);
+    byte[] ReadAllBytes(string path);
+}
+
+/// <summary>Agentによる一実行と、成果物・イベント・Markdown報告の保存をまとめます。</summary>
+public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
+{
+    private readonly IFakeWorkflowStorage storage = storage ?? new PhysicalFakeWorkflowStorage();
     /// <summary>契約を実行し、修正・再レビューの上限を守って終端状態を記録します。</summary>
     /// <param name="contract">検証済みのタスク契約です。</param>
     /// <param name="contractSha256">契約JSONのSHA-256です。</param>
@@ -135,10 +141,10 @@ public sealed class FakeAgentWorkflow
     /// <param name="eventWriter">イベントを永続化する記録先です。</param>
     /// <param name="reviewEvidence">すべての外部証跡を別経路で取得できた場合のみ渡します。</param>
     /// <returns>最終状態、成果物ハッシュ、試行数、報告先を返します。</returns>
-    /// <exception cref="IOException">成果物、イベント、または報告の永続化に失敗した場合に発生します。</exception>
+    /// <exception cref="IOException">実行開始前に保存先を準備できない場合に発生します。</exception>
     public FakeWorkflowResult Run(TaskContract contract, string contractSha256, string runId, string runDirectory,
         IAgentRunner agentRunner, IRunEventWriter eventWriter, HumanReviewEvidence? reviewEvidence = null,
-        CancellationToken stopToken = default)
+        CancellationToken stopToken = default, bool codexOneShot = false)
     {
         var startGate = new RunStartGate();
         using var stopRegistration = stopToken.Register(static state => ((RunStartGate)state!).RequestStop(), startGate);
@@ -159,19 +165,20 @@ public sealed class FakeAgentWorkflow
         string? currentHash = null;
         string? lastFinding = null;
         string? failure = null;
+        string? oneShotReviewOutcome = null;
         var reviewAttempt = 0;
         var implementationAttempt = 0;
         var executionEvidence = new List<(string Role, int Attempt, AgentExecutionEvidence Evidence)>();
+        var persistenceFailed = false;
 
         var isFake = agentRunner is FakeAgentRunner;
-        eventWriter.Append("run_started", "accepted", to: RunState.Prepared,
-            detail: isFake ? "Fake Agentシナリオを開始しました。実Agent・GitHub操作は行いません。" :
-                "実Agent実行を開始しました。GitHub操作は行いません。",
-            inputReference: $"sha256:{contractSha256}",
-            role: "Orchestrator");
-
         try
         {
+            eventWriter.Append("run_started", "accepted", to: RunState.Prepared,
+                detail: isFake ? "Fake Agentシナリオを開始しました。実Agent・GitHub操作は行いません。" :
+                    "実Agent実行を開始しました。GitHub操作は行いません。",
+                inputReference: $"sha256:{contractSha256}",
+                role: "Orchestrator");
             run.Transition(RunState.Implementing);
             while (true)
             {
@@ -212,7 +219,7 @@ public sealed class FakeAgentWorkflow
                     elapsedMilliseconds: stopwatch.ElapsedMilliseconds, role: "Implementer");
                 if (!implementResponse.Succeeded || implementResponse.StopRequested || implementResponse.TimedOut || string.IsNullOrWhiteSpace(implementResponse.Content))
                 {
-                    if (!implementResponse.TimedOut && !implementResponse.StopRequested && retryAttempts < contract.Limits.MaxRetries)
+                    if (!codexOneShot && !implementResponse.TimedOut && !implementResponse.StopRequested && retryAttempts < contract.Limits.MaxRetries)
                     {
                         retryAttempts++;
                         eventWriter.Append("retry_scheduled", "accepted", from: run.State, to: run.State,
@@ -220,14 +227,14 @@ public sealed class FakeAgentWorkflow
                         continue;
                     }
                     failure = AgentFailure("Implementer", implementResponse);
-                    run.Transition(implementResponse.TimedOut || implementResponse.StopRequested ? RunState.NeedsHumanInput : RunState.Failed);
+                    run.Transition(codexOneShot || implementResponse.TimedOut || implementResponse.StopRequested ? RunState.NeedsHumanInput : RunState.Failed);
                     break;
                 }
 
                 currentArtifact = Path.Combine("artifacts", $"artifact-{implementationAttempt}.md");
                 var fullArtifactPath = Path.Combine(runDirectory, currentArtifact);
-                File.WriteAllText(fullArtifactPath, implementResponse.Content + Environment.NewLine, new UTF8Encoding(false));
-                var fixedBytes = File.ReadAllBytes(fullArtifactPath);
+                storage.WriteAllText(fullArtifactPath, implementResponse.Content + Environment.NewLine, new UTF8Encoding(false));
+                var fixedBytes = storage.ReadAllBytes(fullArtifactPath);
                 currentHash = Convert.ToHexStringLower(SHA256.HashData(fixedBytes));
                 eventWriter.Append("artifact_fixed", "accepted", from: run.State, to: run.State,
                     detail: "レビュー対象を保存し、保存済みの同一バイト列からSHA-256を計算しました。",
@@ -235,7 +242,7 @@ public sealed class FakeAgentWorkflow
 
                 run.Transition(RunState.Reviewing);
                 lastFinding = null;
-                for (var attempt = 1; attempt <= contract.Limits.MaxRetries + 1; attempt++)
+                for (var attempt = 1; attempt <= (codexOneShot ? 1 : contract.Limits.MaxRetries + 1); attempt++)
                 {
                     if (stopwatch.Elapsed >= TimeSpan.FromMinutes(contract.Limits.MaxDurationMinutes))
                     {
@@ -258,6 +265,11 @@ public sealed class FakeAgentWorkflow
                     var reviewResponse = InvokeAgent(() => agentRunner.Review(reviewRequest));
                     if (StopWasRequested(stopToken, startGate))
                         reviewResponse = reviewResponse with { Succeeded = false, StopRequested = true };
+                    oneShotReviewOutcome = !reviewResponse.Succeeded || reviewResponse.StopRequested || reviewResponse.TimedOut || string.IsNullOrWhiteSpace(reviewResponse.Content)
+                        ? Outcome(reviewResponse)
+                        : reviewResponse.Content.StartsWith("レビュー合格:", StringComparison.Ordinal) ? "合格"
+                        : reviewResponse.Content.StartsWith("要件に判断が必要です:", StringComparison.Ordinal) ? "人間判断が必要"
+                        : "指摘";
                     if (reviewResponse.ExecutionEvidence is { } reviewExecutionEvidence)
                         executionEvidence.Add(("Reviewer", reviewAttempt, reviewExecutionEvidence));
                     var reviewRef = SaveExchange(runDirectory, "reviewer", reviewAttempt, "request.json",
@@ -273,7 +285,7 @@ public sealed class FakeAgentWorkflow
 
                     if (!reviewResponse.Succeeded || reviewResponse.StopRequested || reviewResponse.TimedOut || string.IsNullOrWhiteSpace(reviewResponse.Content))
                     {
-                        if (!reviewResponse.StopRequested && !reviewResponse.TimedOut && attempt <= contract.Limits.MaxRetries && retryAttempts < contract.Limits.MaxRetries)
+                        if (!codexOneShot && !reviewResponse.StopRequested && !reviewResponse.TimedOut && attempt <= contract.Limits.MaxRetries && retryAttempts < contract.Limits.MaxRetries)
                         {
                             retryAttempts++;
                             eventWriter.Append("retry_scheduled", "accepted", from: run.State, to: run.State,
@@ -282,12 +294,18 @@ public sealed class FakeAgentWorkflow
                             continue;
                         }
                         failure = AgentFailure("Reviewer", reviewResponse);
-                        run.Transition(reviewResponse.TimedOut || reviewResponse.StopRequested ? RunState.NeedsHumanInput : RunState.Failed);
+                        run.Transition(codexOneShot || reviewResponse.TimedOut || reviewResponse.StopRequested ? RunState.NeedsHumanInput : RunState.Failed);
                         break;
                     }
 
                     if (reviewResponse.Content.StartsWith("レビュー合格:", StringComparison.Ordinal))
                     {
+                        if (codexOneShot)
+                        {
+                            failure = "Reviewerは合格しました。PoC完了地点で人間判断待ちに停止しました（受入・PR証跡は未確認）。";
+                            run.Transition(RunState.NeedsHumanInput);
+                            break;
+                        }
                         var evidence = reviewEvidence;
                         var expectedCriteriaSha256 = Convert.ToHexStringLower(SHA256.HashData(
                             Encoding.UTF8.GetBytes(string.Join("\n", contract.AcceptanceCriteria))));
@@ -319,6 +337,12 @@ public sealed class FakeAgentWorkflow
                     }
 
                     lastFinding = reviewResponse.Content;
+                    if (codexOneShot)
+                    {
+                        failure = $"Reviewerの指摘を記録しました。自動修正・再レビューは行わず人間判断待ちで停止します: {lastFinding}";
+                        run.Transition(RunState.NeedsHumanInput);
+                        break;
+                    }
                     if (revisionAttempts >= contract.Limits.MaxRevisionAttempts)
                     {
                         failure = $"修正上限 {contract.Limits.MaxRevisionAttempts} 回に到達しました。最後の指摘: {lastFinding}";
@@ -337,10 +361,20 @@ public sealed class FakeAgentWorkflow
                 if (run.State is RunState.ReadyForHumanReview or RunState.NeedsHumanInput or RunState.Failed) break;
             }
         }
-        catch (IOException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            // 失敗した保存先には追記できない可能性があるため、例外を呼び出し元へ伝播し部分記録を保持する。
-            throw;
+            failure = $"保存失敗のため人間判断待ちで停止しました。追加Agentは起動していません。永続化状態は個別に確認してください。 ({exception.GetType().Name})";
+            persistenceFailed = true;
+            run.StopInMemoryAfterPersistenceFailure();
+        }
+
+        var persistenceSucceeded = !persistenceFailed;
+        if (codexOneShot)
+        {
+            var reviewerOutcome = oneShotReviewOutcome ?? "未起動";
+            persistenceSucceeded &= TryPersist(() => eventWriter.Append("codex_one_shot_stopped", "needs_human_input", from: run.State, to: run.State,
+                detail: $"Implementer呼び出し={implementationAttempt}; Reviewer呼び出し={reviewAttempt}; 成果物SHA-256={currentHash ?? "未作成"}; Reviewer結果={reviewerOutcome}; 停止理由={failure ?? "実行を終了し人間判断待ち"}",
+                diffSha256: currentHash, role: "Orchestrator"));
         }
 
         var reportPath = Path.Combine(runDirectory, "report.md");
@@ -369,37 +403,48 @@ public sealed class FakeAgentWorkflow
         }
         reportLines.AddRange(["", "## 未取得・未保証", "", "- 実費・請求額・硬い予算上限: 未取得", "- 子Agent/再委譲の完全な観測・無効化: 未検証", "- GitHubへの書込・PR作成: AgentRunnerでは未実施", "- CLIプロセスkillはAgent turnの中断保証ではありません。", "", "ローカル実行記録は耐改ざん・完全監査の台帳ではありません。", ""]);
         var report = string.Join(Environment.NewLine, reportLines);
-        File.WriteAllText(reportPath, report, new UTF8Encoding(false));
-        eventWriter.Append("report_written", "accepted", from: run.State, to: run.State,
+        persistenceSucceeded &= TryPersist(() => storage.WriteAllText(reportPath, report, new UTF8Encoding(false)));
+        persistenceSucceeded &= TryPersist(() => eventWriter.Append("report_written", "accepted", from: run.State, to: run.State,
             outputReference: "report.md", elapsedMilliseconds: stopwatch.ElapsedMilliseconds,
             unknownInformation: isFake ? ["実モデル・使用量・費用・PR操作は取得していません。"] :
                 ["モデル名・実費・請求額・硬い予算上限・PR操作は未取得です。", "子Agentの完全な観測・停止保証は未検証です。"],
-            role: "Orchestrator");
+            role: "Orchestrator"));
+        if (!persistenceSucceeded && (failure is null || !failure.StartsWith("保存失敗のため", StringComparison.Ordinal)))
+        {
+            failure = "停止イベントまたはレポートの保存に失敗しました。状態は人間判断待ちですが、実行記録が不完全です。";
+            run.StopInMemoryAfterPersistenceFailure();
+        }
         return new FakeWorkflowResult(run.State, currentArtifact, currentHash, implementationAttempt,
-            reviewAttempt, revisionAttempts, retryAttempts, "report.md", failure);
+            reviewAttempt, revisionAttempts, retryAttempts, "report.md", failure, persistenceSucceeded);
     }
 
-    private static string SaveExchange(string root, string role, int attempt, string name, string content)
+    private string SaveExchange(string root, string role, int attempt, string name, string content)
     {
         var relative = Path.Combine("exchanges", $"{role}-{attempt}", name);
         var path = Path.Combine(root, relative);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, content, new UTF8Encoding(false));
+        storage.WriteAllText(path, content, new UTF8Encoding(false));
         return relative.Replace('\\', '/');
     }
 
-    private static void SaveExecutionEvidence(string root, string role, int attempt, AgentExecutionEvidence? evidence)
+    private void SaveExecutionEvidence(string root, string role, int attempt, AgentExecutionEvidence? evidence)
     {
         if (evidence is null) return;
         var relative = Path.Combine("exchanges", $"{role}-{attempt}", "execution-evidence.json");
         var path = Path.Combine(root, relative);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(evidence,
+        storage.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(evidence,
             new System.Text.Json.JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine,
             new UTF8Encoding(false));
     }
 
-    private static string Outcome(AgentResponse response) => response.StopRequested ? response.TimedOut ? "timeout" : "stop_requested" :
+    private static bool TryPersist(Action write)
+    {
+        try { write(); return true; }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { return false; }
+    }
+
+    private static string Outcome(AgentResponse response) => response.TimedOut ? "timeout" : response.StopRequested ? "stop_requested" :
         !response.Succeeded ? "failed" : string.IsNullOrWhiteSpace(response.Content) ? "empty" : "completed";
 
     private static string AgentFailure(string role, AgentResponse response) => response.TimedOut
@@ -421,6 +466,12 @@ public sealed class FakeAgentWorkflow
     }
 }
 
+internal sealed class PhysicalFakeWorkflowStorage : IFakeWorkflowStorage
+{
+    public void WriteAllText(string path, string content, Encoding encoding) => File.WriteAllText(path, content, encoding);
+    public byte[] ReadAllBytes(string path) => File.ReadAllBytes(path);
+}
+
 /// <summary>Fakeワークフローの終端状態と、追跡に必要な試行情報です。</summary>
 /// <param name="State">実行の終端状態です。</param>
 /// <param name="ArtifactReference">最後に作成した成果物参照です。</param>
@@ -433,4 +484,4 @@ public sealed class FakeAgentWorkflow
 /// <param name="Detail">停止・失敗・未取得情報の説明です。</param>
 public sealed record FakeWorkflowResult(RunState State, string? ArtifactReference, string? ArtifactSha256,
     int ImplementationCalls, int ReviewCalls, int RevisionAttempts, int RetryAttempts,
-    string ReportReference, string? Detail);
+    string ReportReference, string? Detail, bool PersistenceSucceeded = true);

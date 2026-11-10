@@ -34,12 +34,10 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
         Directory.CreateDirectory(evidenceDirectory);
         var stdoutPath = Path.Combine(evidenceDirectory, "codex.stdout.jsonl");
         var stderrPath = Path.Combine(evidenceDirectory, "codex.stderr.txt");
-        string? cliVersion = null;
-        string? versionError = null;
-        VersionProbeResult versionProbe;
-        try { versionProbe = ReadCliVersion(profileRoot, evidenceDirectory); cliVersion = versionProbe.Version; }
-        catch (InvalidOperationException exception) { versionError = exception.Message; versionProbe = exception.Data["VersionProbe"] as VersionProbeResult ?? new(null, null, false, null, null, null); }
-        string? error = versionError;
+        // The approved PoC must not launch an extra `codex --version` process.
+        // Version metadata is intentionally recorded as unavailable.
+        const string? cliVersion = null;
+        string? error = null;
         var timedOut = false;
         var stopRequested = false;
         string? stopReason = null;
@@ -193,113 +191,10 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
             Path.GetRelativePath(request.RunDirectory!, stdoutPath).Replace('\\', '/'),
             Path.GetRelativePath(request.RunDirectory!, stderrPath).Replace('\\', '/'), timedOut, killAttempted,
             processExitObserved, streamsClosed, stopRequested, stopReason, Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(prompt))),
-            start.WorkingDirectory, request.ArtifactSha256, error, versionProbe.ProcessId, versionProbe.KillAttempted,
-            versionProbe.ProcessExitObserved, versionProbe.StdoutReference, versionProbe.StderrReference);
+            start.WorkingDirectory, request.ArtifactSha256, error);
         return new AgentResponse(content, succeeded, timedOut, SelfAssessment: selfAssessment,
             ExecutionEvidence: evidence, StopRequested: stopRequested);
     }
-
-    private VersionProbeResult ReadCliVersion(string profileRoot, string evidenceDirectory)
-    {
-        var stdoutPath = Path.Combine(evidenceDirectory, "codex-version.stdout.txt");
-        var stderrPath = Path.Combine(evidenceDirectory, "codex-version.stderr.txt");
-        Process? process = null;
-        var killAttempted = false;
-        bool? exitObserved = null;
-        try
-        {
-            var start = new ProcessStartInfo(options.ExecutablePath)
-            {
-                WorkingDirectory = profileRoot,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8
-            };
-            foreach (var argument in options.PrefixArguments ?? []) start.ArgumentList.Add(argument);
-            start.ArgumentList.Add("--version");
-            PrepareEnvironment(start, profileRoot);
-            process = Process.Start(start) ?? throw new InvalidOperationException("Codex CLI版確認プロセスを開始できませんでした。");
-            var stdoutTask = process.StandardOutput.ReadToEndAsync();
-            var stderrTask = process.StandardError.ReadToEndAsync();
-            if (!process.WaitForExit(5_000))
-            {
-                killAttempted = true;
-                string? killError = null;
-                try { (options.KillProcessForTesting ?? (child => child.Kill(entireProcessTree: true)))(process); }
-                catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
-                { killError = exception.Message; }
-                if (!process.WaitForExit(10_000))
-                    throw ProbeError($"Codex CLI版確認プロセスの終了を確認できませんでした。Agent実行を中止しました。停止要求エラー: {killError ?? "なし"}");
-                exitObserved = true;
-                SaveProbeLogsAfterStreamsClose(stdoutPath, stderrPath, stdoutTask, stderrTask);
-                throw ProbeError(killError is null
-                    ? "Codex CLI版確認が5秒で完了しませんでした。Agent実行を中止しました。"
-                    : $"Codex CLI版確認の停止要求に失敗しましたが、プロセス終了を確認しました。Agent実行を中止しました: {killError}");
-            }
-            exitObserved = true;
-            SaveProbeLogsAfterStreamsClose(stdoutPath, stderrPath, stdoutTask, stderrTask);
-            if (process.ExitCode != 0)
-                throw ProbeError($"Codex CLI版確認が終了コード{process.ExitCode}で失敗しました: {(stderrTask.Result).Trim()}");
-            var version = stdoutTask.Result.Trim();
-            if (string.IsNullOrWhiteSpace(version)) throw ProbeError("Codex CLI版確認が空の応答を返しました。");
-            return new VersionProbeResult(version, process.Id, killAttempted, exitObserved,
-                ProbeReference(stdoutPath), ProbeReference(stderrPath));
-        }
-        catch (InvalidOperationException exception)
-        {
-            var wrapped = new InvalidOperationException($"Codex CLI版を安全に確認できないため実行を中止しました: {exception.Message}", exception);
-            wrapped.Data["VersionProbe"] = new VersionProbeResult(null, SafeId(process), killAttempted,
-                exitObserved,
-                ProbeReference(stdoutPath), ProbeReference(stderrPath));
-            throw wrapped;
-        }
-        catch (Exception exception) when (exception is IOException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
-        {
-            var wrapped = new InvalidOperationException($"Codex CLI版を安全に確認できないため実行を中止しました: {exception.Message}", exception);
-            wrapped.Data["VersionProbe"] = new VersionProbeResult(null, SafeId(process), killAttempted,
-                exitObserved,
-                ProbeReference(stdoutPath), ProbeReference(stderrPath));
-            throw wrapped;
-        }
-        finally { process?.Dispose(); }
-
-        InvalidOperationException ProbeError(string message)
-        {
-            if (process is { HasExited: true }) exitObserved = true;
-            return new InvalidOperationException(message);
-        }
-
-        static int? SafeId(Process? candidate)
-        { try { return candidate?.Id; } catch (InvalidOperationException) { return null; } }
-
-        string? ProbeReference(string path) => File.Exists(path)
-            ? Path.GetRelativePath(Path.GetFullPath(Path.Combine(evidenceDirectory, "..", "..")), path).Replace('\\', '/')
-            : null;
-
-        void SaveProbeLogsAfterStreamsClose(string outPath, string errPath, Task<string> stdout, Task<string> stderr)
-        {
-            try
-            {
-                if (!Task.WhenAll(stdout, stderr).Wait(TimeSpan.FromSeconds(5)))
-                    throw ProbeError("Codex CLI版確認の標準出力・標準エラーを5秒以内に閉じられませんでした。");
-            }
-            catch (AggregateException exception)
-            { throw ProbeError($"Codex CLI版確認の出力読取に失敗しました: {exception.GetBaseException().Message}"); }
-            WriteProbeLogs(outPath, errPath, stdout, stderr);
-        }
-
-        static void WriteProbeLogs(string outPath, string errPath, Task<string> stdout, Task<string> stderr)
-        {
-            File.WriteAllText(outPath, stdout.Result, new UTF8Encoding(false));
-            File.WriteAllText(errPath, stderr.Result, new UTF8Encoding(false));
-        }
-    }
-
-    private sealed record VersionProbeResult(string? Version, int? ProcessId, bool KillAttempted,
-        bool? ProcessExitObserved, string? StdoutReference, string? StderrReference);
 
     private static async Task PumpStdoutAsync(Process process, StreamWriter writer, Action<string> onLine)
     {
