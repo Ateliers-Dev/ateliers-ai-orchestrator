@@ -31,6 +31,8 @@ suite.Add("Fake停止・失敗・空応答・タイムアウトを正しく報�
 suite.Add("再試行上限でReviewer失敗を終了する", ReviewerRetriesStopAtLimit);
 suite.Add("修正上限到達時に人間へ停止を報告する", RevisionLimitStopsForHuman);
 suite.Add("イベント保存失敗時に成功状態へ進まず部分成果物を保持する", EventWriteFailureDoesNotClaimSuccess);
+suite.Add("Fake成果物保存失敗はReviewerを起動せず停止理由を記録する", FakeArtifactWriteFailureStopsAndReports);
+suite.Add("Fake Reviewer応答の途中保存失敗は追加Agentなしで停止する", FakeMidwayWriteFailureStopsAndReports);
 suite.Add("既存実行保存先を上書きせずに拒否する", ExistingRunDirectoryIsPreserved);
 suite.Add("人間確認待ちは独立証跡とPR操作記録が揃わなければ拒否する", ReadyRequiresIndependentEvidenceRecords);
 suite.Add("空のrunパス指定を終了コード2の入力エラーとして返す", EmptyRunPathsReturnInputError);
@@ -1194,6 +1196,17 @@ static void CodexOneShotStopsWithoutRetries()
         Assert.True(result.Detail is not null, $"{scenario} の停止理由が空です。");
         var events = File.ReadAllText(Path.Combine(runDirectory, "events.jsonl"));
         Assert.True(events.Contains("codex_one_shot_stopped", StringComparison.Ordinal), $"{scenario} の停止理由イベントがありません。");
+        if (scenario == FakeScenario.ReviewerTimeout)
+        {
+            using var reviewerEvent = JsonDocument.Parse(File.ReadAllLines(Path.Combine(runDirectory, "events.jsonl"))
+                .First(line => line.Contains("\"eventType\":\"agent_call\"", StringComparison.Ordinal) &&
+                    line.Contains("\"role\":\"Reviewer\"", StringComparison.Ordinal)));
+            Assert.Equal("timeout", reviewerEvent.RootElement.GetProperty("result").GetString());
+            using var stopEvent = JsonDocument.Parse(File.ReadAllLines(Path.Combine(runDirectory, "events.jsonl"))
+                .Last(line => line.Contains("codex_one_shot_stopped", StringComparison.Ordinal)));
+            Assert.True(stopEvent.RootElement.GetProperty("detail").GetString()!.Contains("Reviewer結果=timeout", StringComparison.Ordinal));
+            Assert.True(stopEvent.RootElement.GetProperty("detail").GetString()!.Contains("停止理由=Reviewerがタイムアウトしました。", StringComparison.Ordinal));
+        }
         if (result.ArtifactSha256 is not null)
         {
             Assert.True(events.Contains(result.ArtifactSha256, StringComparison.Ordinal), $"{scenario} の成果物SHA-256が記録されていません。");
@@ -1263,10 +1276,53 @@ static void EventWriteFailureDoesNotClaimSuccess()
     var runDirectory = Path.Combine(temp.Path, "run");
     Directory.CreateDirectory(runDirectory);
     var writer = new FailingEventWriter("artifact_fixed");
-    Assert.Throws<IOException>(() => new FakeAgentWorkflow().Run(SampleContract(), new string('e', 64), "write-fails", runDirectory,
-        new FakeAgentRunner(FakeScenario.Success), writer));
+    var result = new FakeAgentWorkflow().Run(SampleContract(), new string('e', 64), "write-fails", runDirectory,
+        new FakeAgentRunner(FakeScenario.Success), writer);
+    Assert.Equal(RunState.NeedsHumanInput, result.State);
+    Assert.False(result.PersistenceSucceeded, "イベント保存失敗を永続化成功として返しました。");
+    Assert.True(result.Detail!.Contains("保存失敗", StringComparison.Ordinal));
     Assert.True(File.Exists(Path.Combine(runDirectory, "artifacts", "artifact-1.md")), "保存済みの部分成果物が消去されています。");
     Assert.Equal(0, writer.ReadyTransitions);
+}
+
+static void FakeArtifactWriteFailureStopsAndReports()
+{
+    using var temp = new TemporaryDirectory();
+    var runDirectory = Path.Combine(temp.Path, "run");
+    Directory.CreateDirectory(runDirectory);
+    var runner = new CountingFakeAgentRunner(FakeScenario.Success);
+    FakeWorkflowResult result;
+    using (var store = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "artifact-write-fails"))
+        result = new FakeAgentWorkflow(new FailingFakeWorkflowStorage("artifacts\\artifact-1.md"))
+            .Run(SampleContract(), new string('f', 64), "artifact-write-fails", runDirectory, runner, store, codexOneShot: true);
+
+    Assert.Equal(RunState.NeedsHumanInput, result.State);
+    Assert.False(result.PersistenceSucceeded);
+    Assert.Equal(1, runner.ImplementationCalls);
+    Assert.Equal(0, runner.ReviewCalls, "成果物保存失敗後にReviewerを起動しました。");
+    Assert.True(File.Exists(Path.Combine(runDirectory, "report.md")), "保存可能な場合の停止レポートがありません。");
+    Assert.True(File.ReadAllText(Path.Combine(runDirectory, "report.md")).Contains("保存失敗", StringComparison.Ordinal));
+    Assert.True(File.ReadAllText(Path.Combine(runDirectory, "events.jsonl")).Contains("codex_one_shot_stopped", StringComparison.Ordinal));
+}
+
+static void FakeMidwayWriteFailureStopsAndReports()
+{
+    using var temp = new TemporaryDirectory();
+    var runDirectory = Path.Combine(temp.Path, "run");
+    Directory.CreateDirectory(runDirectory);
+    var runner = new CountingFakeAgentRunner(FakeScenario.Success);
+    FakeWorkflowResult result;
+    using (var store = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "review-write-fails"))
+        result = new FakeAgentWorkflow(new FailingFakeWorkflowStorage("reviewer-1\\response.md"))
+            .Run(SampleContract(), new string('f', 64), "review-write-fails", runDirectory, runner, store, codexOneShot: true);
+
+    Assert.Equal(RunState.NeedsHumanInput, result.State);
+    Assert.False(result.PersistenceSucceeded);
+    Assert.Equal(1, runner.ImplementationCalls);
+    Assert.Equal(1, runner.ReviewCalls);
+    Assert.True(File.Exists(Path.Combine(runDirectory, "report.md")), "保存可能な場合の停止レポートがありません。");
+    Assert.True(File.ReadAllText(Path.Combine(runDirectory, "report.md")).Contains("保存失敗", StringComparison.Ordinal));
+    Assert.True(File.ReadAllText(Path.Combine(runDirectory, "events.jsonl")).Contains("codex_one_shot_stopped", StringComparison.Ordinal));
 }
 
 static void ExistingRunDirectoryIsPreserved()
@@ -1642,6 +1698,37 @@ sealed class TemporaryDirectory : IDisposable
             Directory.Delete(AdditionalPath, recursive: true);
         }
         Directory.Delete(Path, recursive: true);
+    }
+}
+
+sealed class FailingFakeWorkflowStorage(string failingPathFragment) : IFakeWorkflowStorage
+{
+    public void WriteAllText(string path, string content, System.Text.Encoding encoding)
+    {
+        if (path.Contains(failingPathFragment, StringComparison.OrdinalIgnoreCase))
+            throw new IOException("テスト用のファイル保存失敗です。");
+        File.WriteAllText(path, content, encoding);
+    }
+
+    public byte[] ReadAllBytes(string path) => File.ReadAllBytes(path);
+}
+
+sealed class CountingFakeAgentRunner(FakeScenario scenario) : IAgentRunner
+{
+    private readonly FakeAgentRunner inner = new(scenario);
+    public int ImplementationCalls { get; private set; }
+    public int ReviewCalls { get; private set; }
+
+    public AgentResponse Implement(AgentRequest request)
+    {
+        ImplementationCalls++;
+        return inner.Implement(request);
+    }
+
+    public AgentResponse Review(AgentRequest request)
+    {
+        ReviewCalls++;
+        return inner.Review(request);
     }
 }
 
