@@ -36,7 +36,7 @@ public sealed record AgentResponse(string Content, bool Succeeded = true, bool T
 /// <summary>Agentプロセスから取得できた実行識別子と終了証跡です。</summary>
 /// <param name="ProcessId">起動したプロセスのIDです。</param>
 /// <param name="ThreadId">CLIイベントから取得したthread IDです。</param>
-/// <param name="CliVersion">実行前に取得したCLI版です。</param>
+/// <param name="CliVersion">CLI版です。PoCでは起動前確認を行わないため未取得です。</param>
 /// <param name="TerminalEvent">最後に観測したterminal eventです。</param>
 /// <param name="ExitCode">取得できた終了コードです。</param>
 /// <param name="UsageJson">取得できたtoken usage JSONです。金額や請求額を表しません。</param>
@@ -56,9 +56,7 @@ public sealed record AgentExecutionEvidence(int? ProcessId, string? ThreadId, st
     string? TerminalEvent, int? ExitCode, string? UsageJson, string? StandardOutputReference,
     string? StandardErrorReference, bool TimedOut, bool KillAttempted, bool? ProcessExitObserved,
     bool? StreamsClosed, bool StopRequested, string? StopReason, string? RequestSha256, string? WorkingDirectory, string? ArtifactSha256,
-    string? Error = null, int? VersionProbeProcessId = null, bool VersionProbeKillAttempted = false,
-    bool? VersionProbeExitObserved = null, string? VersionProbeStandardOutputReference = null,
-    string? VersionProbeStandardErrorReference = null);
+    string? Error = null);
 
 /// <summary>ImplementerとReviewerを呼び出す差し替え可能な境界です。</summary>
 public interface IAgentRunner
@@ -138,7 +136,7 @@ public sealed class FakeAgentWorkflow
     /// <exception cref="IOException">成果物、イベント、または報告の永続化に失敗した場合に発生します。</exception>
     public FakeWorkflowResult Run(TaskContract contract, string contractSha256, string runId, string runDirectory,
         IAgentRunner agentRunner, IRunEventWriter eventWriter, HumanReviewEvidence? reviewEvidence = null,
-        CancellationToken stopToken = default)
+        CancellationToken stopToken = default, bool codexOneShot = false)
     {
         var startGate = new RunStartGate();
         using var stopRegistration = stopToken.Register(static state => ((RunStartGate)state!).RequestStop(), startGate);
@@ -159,6 +157,7 @@ public sealed class FakeAgentWorkflow
         string? currentHash = null;
         string? lastFinding = null;
         string? failure = null;
+        string? oneShotReviewOutcome = null;
         var reviewAttempt = 0;
         var implementationAttempt = 0;
         var executionEvidence = new List<(string Role, int Attempt, AgentExecutionEvidence Evidence)>();
@@ -212,7 +211,7 @@ public sealed class FakeAgentWorkflow
                     elapsedMilliseconds: stopwatch.ElapsedMilliseconds, role: "Implementer");
                 if (!implementResponse.Succeeded || implementResponse.StopRequested || implementResponse.TimedOut || string.IsNullOrWhiteSpace(implementResponse.Content))
                 {
-                    if (!implementResponse.TimedOut && !implementResponse.StopRequested && retryAttempts < contract.Limits.MaxRetries)
+                    if (!codexOneShot && !implementResponse.TimedOut && !implementResponse.StopRequested && retryAttempts < contract.Limits.MaxRetries)
                     {
                         retryAttempts++;
                         eventWriter.Append("retry_scheduled", "accepted", from: run.State, to: run.State,
@@ -220,7 +219,7 @@ public sealed class FakeAgentWorkflow
                         continue;
                     }
                     failure = AgentFailure("Implementer", implementResponse);
-                    run.Transition(implementResponse.TimedOut || implementResponse.StopRequested ? RunState.NeedsHumanInput : RunState.Failed);
+                    run.Transition(codexOneShot || implementResponse.TimedOut || implementResponse.StopRequested ? RunState.NeedsHumanInput : RunState.Failed);
                     break;
                 }
 
@@ -235,7 +234,7 @@ public sealed class FakeAgentWorkflow
 
                 run.Transition(RunState.Reviewing);
                 lastFinding = null;
-                for (var attempt = 1; attempt <= contract.Limits.MaxRetries + 1; attempt++)
+                for (var attempt = 1; attempt <= (codexOneShot ? 1 : contract.Limits.MaxRetries + 1); attempt++)
                 {
                     if (stopwatch.Elapsed >= TimeSpan.FromMinutes(contract.Limits.MaxDurationMinutes))
                     {
@@ -258,6 +257,11 @@ public sealed class FakeAgentWorkflow
                     var reviewResponse = InvokeAgent(() => agentRunner.Review(reviewRequest));
                     if (StopWasRequested(stopToken, startGate))
                         reviewResponse = reviewResponse with { Succeeded = false, StopRequested = true };
+                    oneShotReviewOutcome = !reviewResponse.Succeeded || reviewResponse.StopRequested || reviewResponse.TimedOut || string.IsNullOrWhiteSpace(reviewResponse.Content)
+                        ? Outcome(reviewResponse)
+                        : reviewResponse.Content.StartsWith("レビュー合格:", StringComparison.Ordinal) ? "合格"
+                        : reviewResponse.Content.StartsWith("要件に判断が必要です:", StringComparison.Ordinal) ? "人間判断が必要"
+                        : "指摘";
                     if (reviewResponse.ExecutionEvidence is { } reviewExecutionEvidence)
                         executionEvidence.Add(("Reviewer", reviewAttempt, reviewExecutionEvidence));
                     var reviewRef = SaveExchange(runDirectory, "reviewer", reviewAttempt, "request.json",
@@ -273,7 +277,7 @@ public sealed class FakeAgentWorkflow
 
                     if (!reviewResponse.Succeeded || reviewResponse.StopRequested || reviewResponse.TimedOut || string.IsNullOrWhiteSpace(reviewResponse.Content))
                     {
-                        if (!reviewResponse.StopRequested && !reviewResponse.TimedOut && attempt <= contract.Limits.MaxRetries && retryAttempts < contract.Limits.MaxRetries)
+                        if (!codexOneShot && !reviewResponse.StopRequested && !reviewResponse.TimedOut && attempt <= contract.Limits.MaxRetries && retryAttempts < contract.Limits.MaxRetries)
                         {
                             retryAttempts++;
                             eventWriter.Append("retry_scheduled", "accepted", from: run.State, to: run.State,
@@ -282,12 +286,18 @@ public sealed class FakeAgentWorkflow
                             continue;
                         }
                         failure = AgentFailure("Reviewer", reviewResponse);
-                        run.Transition(reviewResponse.TimedOut || reviewResponse.StopRequested ? RunState.NeedsHumanInput : RunState.Failed);
+                        run.Transition(codexOneShot || reviewResponse.TimedOut || reviewResponse.StopRequested ? RunState.NeedsHumanInput : RunState.Failed);
                         break;
                     }
 
                     if (reviewResponse.Content.StartsWith("レビュー合格:", StringComparison.Ordinal))
                     {
+                        if (codexOneShot)
+                        {
+                            failure = "Reviewerは合格しました。PoC完了地点で人間判断待ちに停止しました（受入・PR証跡は未確認）。";
+                            run.Transition(RunState.NeedsHumanInput);
+                            break;
+                        }
                         var evidence = reviewEvidence;
                         var expectedCriteriaSha256 = Convert.ToHexStringLower(SHA256.HashData(
                             Encoding.UTF8.GetBytes(string.Join("\n", contract.AcceptanceCriteria))));
@@ -319,6 +329,12 @@ public sealed class FakeAgentWorkflow
                     }
 
                     lastFinding = reviewResponse.Content;
+                    if (codexOneShot)
+                    {
+                        failure = $"Reviewerの指摘を記録しました。自動修正・再レビューは行わず人間判断待ちで停止します: {lastFinding}";
+                        run.Transition(RunState.NeedsHumanInput);
+                        break;
+                    }
                     if (revisionAttempts >= contract.Limits.MaxRevisionAttempts)
                     {
                         failure = $"修正上限 {contract.Limits.MaxRevisionAttempts} 回に到達しました。最後の指摘: {lastFinding}";
@@ -341,6 +357,14 @@ public sealed class FakeAgentWorkflow
         {
             // 失敗した保存先には追記できない可能性があるため、例外を呼び出し元へ伝播し部分記録を保持する。
             throw;
+        }
+
+        if (codexOneShot)
+        {
+            var reviewerOutcome = oneShotReviewOutcome ?? "未起動";
+            eventWriter.Append("codex_one_shot_stopped", "needs_human_input", from: run.State, to: run.State,
+                detail: $"Implementer呼び出し={implementationAttempt}; Reviewer呼び出し={reviewAttempt}; 成果物SHA-256={currentHash ?? "未作成"}; Reviewer結果={reviewerOutcome}; 停止理由={failure ?? "実行を終了し人間判断待ち"}",
+                diffSha256: currentHash, role: "Orchestrator");
         }
 
         var reportPath = Path.Combine(runDirectory, "report.md");

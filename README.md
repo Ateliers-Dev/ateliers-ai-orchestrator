@@ -7,7 +7,19 @@
 
 今回のPoCの完了地点は、**Codex Implementer → Codex Reviewer → 結果集約 → 停止**です。実行結果とレビュー結果を記録した後、人間の判断待ちで止まります。
 
-レビュー指摘に応じた自動修正・再レビューの反復や、本格的な運用管理は今回の完了条件に含めず、後続フェーズで扱います。現行コードにはFakeとCLIの反復処理がありますが、この反復経路は今回の受入対象ではありません。実Codex CLIによる受入も未実施であり、実証済み・運用可能とはみなしません。
+Codex経路はImplementerを最大1回、独立Reviewerを最大1回だけ起動し、成果物SHA-256、応答、停止理由を記録して `NeedsHumanInput` で停止します。Implementer/Reviewerの失敗、レビュー指摘、レビュー合格のいずれの場合も、自動修正・再レビュー・再試行やPR作成へ進みません。Fake経路の既存反復シナリオは維持します。
+
+実Codex CLIによる受入は未実施であり、実証済み・運用可能とはみなしません。この承認はFake実装とテストに限られ、実Codex CLI（`--help` / `--version` を含む）の起動は別途具体的な安全条件を提示し、追加承認を得るまで禁止です。
+
+### 後続で必須の安全機能・実行条件
+
+以下は今回見送ったままにする任意項目ではなく、実Codex実行へ進む前に設計・実装が必要な後続項目です。
+
+- 専用Windowsユーザーによる隔離
+- APIキー方式の認証
+- 金額上限の事前設計と制御
+
+今回の実行環境候補は使い捨てVM（推奨）、ChatGPT契約によるCodexログイン、ImplementerとReviewerを各1回に限定する方式です。VM、認証、許可ネットワーク、費用・時間上限などの具体条件は別途提示し、実Codex実行前に追加承認を得ます。
 
 ## 必要環境
 
@@ -58,7 +70,7 @@ dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- run examples/task-contr
 
 Implementerは契約の作業領域で `workspace-write`、ReviewerはGit差分を含む固定成果物だけを別の一時作業領域へ受け取り `read-only` で実行します。子プロセスにはAPI/GitHub秘密値を親環境から渡さず、ImplementerとReviewerで別々の新規 `codex exec` を起動します。`--ask-for-approval never` を指定するため、非対話run中に承認待ち画面は出ません。通常の変更はworkspace sandboxで制限し、拒否された操作はAgent失敗として記録します。子Agent/再委譲を無効化できることは実証していないため、完全に記録できたとは扱いません。timeoutとCtrl+C停止要求を区別し、kill結果、終了確認、stream切断を分けて保存します。killはCodex turn中断の保証ではありません。Unattended `codex exec` の例は[OpenAI Cookbook](https://developers.openai.com/cookbook/examples/codex/build_iterative_repair_loops_with_codex)を参照しています。
 
-実行ごとにCLI JSONL、stderr、最終応答、process/thread識別子、terminal event、終了コード、取得できたtoken usageを保存します。stderr警告単独では成功・失敗を判定しません。token数は実費・請求額・硬い予算上限ではありません。生ログと応答は秘密情報を含む可能性があるため、実行ディレクトリのアクセスと保持を管理してください。GitHub push・PR作成・mergeはこのコマンドから行わず、人間が最終PR判断を行います。
+実行ごとにCLI JSONL、stderr、最終応答、process/thread識別子、terminal event、終了コード、取得できたtoken usageを保存します。CLI版情報は追加プロセスを起動せず「未取得」と記録します。stderr警告単独では成功・失敗を判定しません。token数は実費・請求額・硬い予算上限ではありません。生ログと応答は秘密情報を含む可能性があるため、実行ディレクトリのアクセスと保持を管理してください。GitHub push・PR作成・mergeはこのコマンドから行わず、人間が最終PR判断を行います。
 
 Fake Agentは実行ごとに同じ入力へ同じ応答を返します。成果物は版ごとに別ファイルへ保存し、保存後の同じバイト列のSHA-256をReviewer要求とイベントに記録します。役割別の要求・応答、試行数、状態遷移、最終報告は実行ディレクトリへ保存されます。初回Reviewer入力にはImplementerの自己評価を含めません。
 

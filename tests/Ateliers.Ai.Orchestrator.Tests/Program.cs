@@ -37,8 +37,8 @@ suite.Add("空のrunパス指定を終了コード2の入力エラーとして�
 suite.Add("証跡ファイルの読込・JSON形式エラーを実行前に拒否する", ReviewEvidenceReadErrorsAreInputFailures);
 suite.Add("NUL文字を含む外部証跡参照を不一致として拒否する", InvalidEvidenceReferenceIsRejected);
 suite.Add("Fake CodexプロセスのJSONL・stderr・usage・未知eventを別々に記録する", CodexProcessCapturesJsonlAndSeparatesStreams);
-suite.Add("CLI版probeのtimeoutとkill失敗後も自然終了・証跡を確認する", CodexVersionProbeKillFailureIsRecorded);
-suite.Add("Fake CLI起動失敗時は実行処理へ進まず停止する", CodexVersionProbeStartFailureStopsBeforeExecution);
+suite.Add("Fake Codex実行でkill処理とCLI版確認が起動しない", CodexVersionProbeKillFailureIsRecorded);
+suite.Add("Fake Codex実行ファイル起動失敗を安全に記録する", CodexVersionProbeStartFailureStopsBeforeExecution);
 suite.Add("terminal eventと終了コードの不一致を成功扱いしない", CodexTerminalAndExitCodeMustAgree);
 suite.Add("不正JSONL・空応答・異常終了を成功扱いしない", CodexMalformedAndEmptyResponsesFail);
 suite.Add("timeout後にkillを試し終了・stream切断を記録する", CodexTimeoutKillIsReportedSeparately);
@@ -51,6 +51,7 @@ suite.Add("Windowsの短いCODEX_HOME別名も既定profileとの重複として
 suite.Add("使い捨てCODEX_HOMEの祖先symlinkを拒否する", CodexProfileSymlinkAncestorsAreRejected);
 suite.Add("使い捨てCODEX_HOMEの祖先junctionを拒否する", CodexProfileJunctionAncestorsAreRejected);
 suite.Add("Codex Fakeプロセスで独立レビューまで縦断し固定hashを引き継ぐ", CodexFakeProcessesCompleteIndependentReviewSlice);
+suite.Add("Codex一回モードは成功・指摘・失敗を記録し追加起動せず人間判断待ちで止まる", CodexOneShotStopsWithoutRetries);
 return suite.Run().ExitCode;
 
 static int RunFakeCodexFixture(string[] args)
@@ -143,10 +144,10 @@ static void CodexProcessCapturesJsonlAndSeparatesStreams()
         Assert.True(rawEvents.Contains("never", StringComparison.Ordinal), "非対話プロセスのapproval policy引数がありません。");
         Assert.False(rawEvents.Contains("--ephemeral", StringComparison.Ordinal));
         Assert.True(File.ReadAllText(Path.Combine(request.RunDirectory!, response.ExecutionEvidence.StandardErrorReference!)).Contains("fixture warning", StringComparison.Ordinal));
-        Assert.True(response.ExecutionEvidence.CliVersion!.Contains("fixture-1", StringComparison.Ordinal));
-        Assert.True(response.ExecutionEvidence.VersionProbeProcessId > 0);
-        Assert.True(response.ExecutionEvidence.VersionProbeExitObserved == true);
-        Assert.True(File.Exists(Path.Combine(request.RunDirectory!, response.ExecutionEvidence.VersionProbeStandardOutputReference!)));
+        Assert.True(response.ExecutionEvidence.CliVersion is null, "PoCで取得していないCLI版が値を持っています。");
+        Assert.False(Directory.EnumerateFiles(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1"), "*version*", SearchOption.AllDirectories).Any(),
+            "余分なCLI版確認プロセスの証跡が作られています。");
+        Assert.False(rawEvents.Contains("--version", StringComparison.Ordinal), "codex --version が起動引数に含まれています。");
         Assert.True(response.ExecutionEvidence.ProcessId > 0);
         Assert.True(response.ExecutionEvidence.ProcessExitObserved == true && response.ExecutionEvidence.StreamsClosed == true);
     }
@@ -154,18 +155,16 @@ static void CodexProcessCapturesJsonlAndSeparatesStreams()
 
 static void CodexVersionProbeKillFailureIsRecorded()
 {
-    var (runner, request, root) = CreateCodexFixture("version-timeout", killOverride: _ =>
-        throw new InvalidOperationException("fixture version probe kill failure"));
+    var killCalls = 0;
+    var (runner, request, root) = CreateCodexFixture("success", killOverride: _ =>
+    { killCalls++; throw new InvalidOperationException("unexpected kill invocation"); });
     using (root)
     {
         var response = runner.Implement(request);
-        Assert.False(response.Succeeded, "version probeが停止要求に失敗したのにAgent処理へ進みました。");
-        Assert.True(response.ExecutionEvidence!.VersionProbeKillAttempted, "version probe kill attemptが記録されませんでした。");
-        Assert.True(response.ExecutionEvidence.VersionProbeProcessId > 0, "version probe PIDが記録されませんでした。");
-        Assert.True(response.ExecutionEvidence.VersionProbeExitObserved == true, $"version probeの終了状態が違います: {response.ExecutionEvidence.Error}");
-        Assert.True(response.ExecutionEvidence.Error!.Contains("fixture version probe kill failure", StringComparison.Ordinal), $"kill失敗が証跡にありません: {response.ExecutionEvidence.Error}");
-        Assert.True(File.Exists(Path.Combine(request.RunDirectory!, response.ExecutionEvidence.VersionProbeStandardOutputReference!)), $"version probe stdout証跡がありません: {response.ExecutionEvidence.VersionProbeStandardOutputReference}");
-        Assert.True(response.ExecutionEvidence.ProcessId is null, "version probe失敗後にAgent processが起動しました。");
+        Assert.True(response.Succeeded, response.ExecutionEvidence?.Error ?? "Fake Agent runが成功しませんでした。");
+        Assert.Equal(0, killCalls, "通常終了時に停止処理が呼び出されました。");
+        Assert.True(response.ExecutionEvidence!.CliVersion is null);
+        Assert.False(Directory.EnumerateFiles(Path.Combine(request.RunDirectory!, "exchanges"), "*version*", SearchOption.AllDirectories).Any());
     }
 }
 
@@ -196,11 +195,11 @@ static void CodexVersionProbeStartFailureStopsBeforeExecution()
 
     var response = new CodexCliAgentRunner(options).Implement(request);
     Assert.False(response.Succeeded);
-    Assert.True(response.ExecutionEvidence!.VersionProbeProcessId is null,
+    Assert.True(response.ExecutionEvidence!.ProcessId is null,
         "起動に失敗したCLIのprocess IDが記録されました。");
-    Assert.True(response.ExecutionEvidence.ProcessId is null,
-        "版probeの起動失敗後にagent processの起動が試みられました。");
-    Assert.True(response.ExecutionEvidence.Error!.Contains("安全に確認できない", StringComparison.Ordinal));
+    Assert.True(response.ExecutionEvidence.Error is not null,
+        "Fake CLI実行ファイルの起動エラーが記録されていません。");
+    Assert.True(response.ExecutionEvidence.CliVersion is null);
 }
 
 static void CodexTerminalAndExitCodeMustAgree()
@@ -504,11 +503,11 @@ static void CodexFakeProcessesCompleteIndependentReviewSlice()
         FakeWorkflowResult result;
         using (var events = JsonlRunEventStore.CreateNew(eventPath, request.RunId))
             result = new FakeAgentWorkflow().Run(request.Contract, new string('d', 64), request.RunId,
-                request.RunDirectory!, runner, events);
+                request.RunDirectory!, runner, events, codexOneShot: true);
         Assert.Equal(RunState.NeedsHumanInput, result.State, "レビュー合格のみでPR確認待ちに進みました。");
-        Assert.Equal(1, result.RevisionAttempts);
-        Assert.Equal(2, result.ImplementationCalls);
-        Assert.Equal(2, result.ReviewCalls);
+        Assert.Equal(0, result.RevisionAttempts);
+        Assert.Equal(1, result.ImplementationCalls);
+        Assert.Equal(1, result.ReviewCalls);
         var firstReviewRequest = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "request.json"));
         Assert.True(firstReviewRequest.Contains(result.ArtifactSha256!, StringComparison.Ordinal));
         Assert.False(firstReviewRequest.Contains("自己評価", StringComparison.Ordinal));
@@ -518,11 +517,14 @@ static void CodexFakeProcessesCompleteIndependentReviewSlice()
         var report = File.ReadAllText(Path.Combine(request.RunDirectory!, result.ReportReference));
         Assert.True(report.Contains("thread-fixture-implementer", StringComparison.Ordinal));
         Assert.True(report.Contains("thread-fixture-reviewer-1", StringComparison.Ordinal));
-        Assert.True(report.Contains("thread-fixture-reviewer-2", StringComparison.Ordinal));
+        Assert.False(report.Contains("thread-fixture-reviewer-2", StringComparison.Ordinal), "Reviewerが二回起動しています。");
+        Assert.True(report.Contains("CLI=未取得", StringComparison.Ordinal));
         Assert.True(report.Contains("実費・請求額・硬い予算上限: 未取得", StringComparison.Ordinal));
         Assert.True(File.Exists(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "self-assessment.md")));
         Assert.True(File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "self-assessment.md"))
             .Contains("IMPLEMENTER-SELF-ASSESSMENT-SECRET", StringComparison.Ordinal));
+        var implementerStdout = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "codex.stdout.jsonl"));
+        Assert.False(implementerStdout.Contains("--version", StringComparison.Ordinal), "Codex版確認プロセスが起動しています。");
         var firstReviewStdoutPath = Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "codex.stdout.jsonl");
         var firstReviewStdout = File.ReadAllText(firstReviewStdoutPath);
         Assert.True(firstReviewStdout.Contains("\"self_assessment_present\":false", StringComparison.Ordinal),
@@ -1168,6 +1170,37 @@ static void FakeRevisionIsBoundedAndReReviewed()
     using var firstReviewEvent = JsonDocument.Parse(eventLines.First(line => line.Contains("\"role\":\"Reviewer\"", StringComparison.Ordinal)));
     Assert.Equal("exchanges/reviewer-1/request.json", firstReviewEvent.RootElement.GetProperty("inputReference").GetString());
     Assert.Equal(result.ArtifactSha256, Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(Path.Combine(runDirectory, result.ArtifactReference!)))));
+}
+
+static void CodexOneShotStopsWithoutRetries()
+{
+    foreach (var scenario in new[] { FakeScenario.Success, FakeScenario.RevisionThenSuccess,
+        FakeScenario.Stop, FakeScenario.ImplementerFailure, FakeScenario.ReviewerFailure,
+        FakeScenario.EmptyResponse, FakeScenario.ReviewerEmptyResponse, FakeScenario.Timeout, FakeScenario.ReviewerTimeout })
+    {
+        using var temp = new TemporaryDirectory();
+        var runDirectory = Path.Combine(temp.Path, "run");
+        Directory.CreateDirectory(runDirectory);
+        FakeWorkflowResult result;
+        using (var store = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), $"one-shot-{scenario}"))
+            result = new FakeAgentWorkflow().Run(SampleContract(), new string('a', 64), $"one-shot-{scenario}", runDirectory,
+                new FakeAgentRunner(scenario), store, codexOneShot: true);
+
+        Assert.Equal(RunState.NeedsHumanInput, result.State, $"{scenario} が人間判断待ちで止まりませんでした。");
+        Assert.True(result.ImplementationCalls <= 1, $"{scenario} でImplementerを複数回起動しました。");
+        Assert.True(result.ReviewCalls <= 1, $"{scenario} でReviewerを複数回起動しました。");
+        Assert.Equal(0, result.RevisionAttempts, $"{scenario} で自動修正しました。");
+        Assert.Equal(0, result.RetryAttempts, $"{scenario} で再試行しました。");
+        Assert.True(result.Detail is not null, $"{scenario} の停止理由が空です。");
+        var events = File.ReadAllText(Path.Combine(runDirectory, "events.jsonl"));
+        Assert.True(events.Contains("codex_one_shot_stopped", StringComparison.Ordinal), $"{scenario} の停止理由イベントがありません。");
+        if (result.ArtifactSha256 is not null)
+        {
+            Assert.True(events.Contains(result.ArtifactSha256, StringComparison.Ordinal), $"{scenario} の成果物SHA-256が記録されていません。");
+            Assert.True(File.Exists(Path.Combine(runDirectory, "exchanges", "reviewer-1", "response.md")),
+                $"{scenario} のReviewer結果が記録されていません。");
+        }
+    }
 }
 
 static void FakeStopAndFailureScenariosAreRecorded()
