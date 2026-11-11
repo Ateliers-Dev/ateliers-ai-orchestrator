@@ -77,11 +77,13 @@ static int RunFakeCodexFixture(string[] args)
         Console.WriteLine($"{{\"type\":\"fixture.prompt_policy\",\"policy\":{JsonSerializer.Serialize(policy)}}}");
     }
     Console.Error.WriteLine("fixture warning: stderr is independent from the terminal status");
-    var proxy = Environment.GetEnvironmentVariable("HTTPS_PROXY");
+    var proxy = new[] { "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "https_proxy", "http_proxy", "all_proxy" }
+        .Select(Environment.GetEnvironmentVariable).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
     if (mode == "proxy-output")
     {
-        Console.Error.WriteLine($"proxy diagnostic URL: {proxy}; credentials: proxy-user:proxy-password");
-        Console.WriteLine($"{{\"type\":\"fixture.proxy_diagnostic\",\"message\":{JsonSerializer.Serialize($"proxy diagnostic URL: {proxy}; credentials: proxy-user:proxy-password")}}}");
+        Console.WriteLine("{\"type\":\"fixture.proxy_username\",\"username\":\"split-proxy-user\"}");
+        Console.Error.WriteLine("proxy diagnostic password: split-proxy-password");
+        Console.WriteLine($"{{\"type\":\"fixture.proxy_diagnostic\",\"message\":{JsonSerializer.Serialize($"proxy diagnostic URL: {proxy}")}}}");
     }
     if (mode == "timeout-with-child")
     {
@@ -124,8 +126,8 @@ static int RunFakeCodexFixture(string[] args)
     if (mode != "empty")
     {
         var message = mode == "proxy-output" && prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal)
-            ? $"レビュー合格: proxy response {proxy}; credentials proxy-user:proxy-password"
-            : mode == "proxy-output" ? $"proxy response {proxy}; credentials proxy-user:proxy-password"
+            ? "レビュー合格: proxy credentials split-proxy-user / split-proxy-password"
+            : mode == "proxy-output" ? "proxy credentials split-proxy-user / split-proxy-password"
             : mode == "workflow" && prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal)
             ? prompt.Contains("REVIEW_ATTEMPT: 1", StringComparison.Ordinal) ? "指摘: テスト結果を明記してください。" : "レビュー合格: fixture reviewed fixed artifact"
             : mode == "workflow" ? "IMPLEMENTER-SELF-ASSESSMENT-SECRET" : "fixture response";
@@ -147,44 +149,50 @@ static int RunExternalProcessFixture(string[] args)
 
 static void CodexProxyCredentialsAreRedactedFromPersistedOutputs()
 {
-    const string secret = "proxy-user:proxy-password";
-    const string proxyUrl = "http://proxy-user:proxy-password@proxy.example.invalid:8080";
-    var originalHttpsProxy = Environment.GetEnvironmentVariable("HTTPS_PROXY");
-    var originalHttpProxy = Environment.GetEnvironmentVariable("HTTP_PROXY");
-    Environment.SetEnvironmentVariable("HTTPS_PROXY", proxyUrl);
-    Environment.SetEnvironmentVariable("HTTP_PROXY", null);
-    var (runner, request, root) = CreateCodexFixture("proxy-output");
+    const string username = "split-proxy-user";
+    const string password = "split-proxy-password";
+    var proxyVariables = new[] { "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "https_proxy", "http_proxy", "all_proxy" };
+    var originalValues = proxyVariables.ToDictionary(name => name, Environment.GetEnvironmentVariable, StringComparer.Ordinal);
     try
     {
-        using (root)
+        foreach (var name in proxyVariables)
         {
-            var eventPath = Path.Combine(request.RunDirectory!, "events.jsonl");
-            FakeWorkflowResult result;
-            using (var events = JsonlRunEventStore.CreateNew(eventPath, request.RunId))
-                result = new FakeAgentWorkflow().Run(request.Contract, new string('d', 64), request.RunId,
-                    request.RunDirectory!, runner, events, codexOneShot: true);
-
-            Assert.Equal(RunState.NeedsHumanInput, result.State);
-            var persistedFiles = Directory.EnumerateFiles(request.RunDirectory!, "*", SearchOption.AllDirectories);
-            foreach (var file in persistedFiles)
+            foreach (var proxyVariable in proxyVariables) Environment.SetEnvironmentVariable(proxyVariable, null);
+            var proxyUrl = $"http://{username}:{password}@{name.ToLowerInvariant()}.proxy.example.invalid:8080";
+            Environment.SetEnvironmentVariable(name, proxyUrl);
+            var (runner, request, root) = CreateCodexFixture("proxy-output");
+            using (root)
             {
-                var contents = File.ReadAllText(file);
-                Assert.False(contents.Contains(secret, StringComparison.Ordinal), $"認証情報が記録に残っています: {Path.GetFileName(file)}");
-                Assert.False(contents.Contains(proxyUrl, StringComparison.Ordinal), $"プロキシURLが記録に残っています: {Path.GetFileName(file)}");
+                var eventPath = Path.Combine(request.RunDirectory!, "events.jsonl");
+                FakeWorkflowResult result;
+                using (var events = JsonlRunEventStore.CreateNew(eventPath, request.RunId))
+                    result = new FakeAgentWorkflow().Run(request.Contract, new string('d', 64), request.RunId,
+                        request.RunDirectory!, runner, events, codexOneShot: true);
+
+                Assert.Equal(RunState.NeedsHumanInput, result.State);
+                var persistedFiles = Directory.EnumerateFiles(request.RunDirectory!, "*", SearchOption.AllDirectories);
+                foreach (var file in persistedFiles)
+                {
+                    var contents = File.ReadAllText(file);
+                    Assert.False(contents.Contains(username, StringComparison.Ordinal), $"ユーザー名が記録に残っています ({name}): {Path.GetFileName(file)}");
+                    Assert.False(contents.Contains(password, StringComparison.Ordinal), $"パスワードが記録に残っています ({name}): {Path.GetFileName(file)}");
+                    Assert.False(contents.Contains(proxyUrl, StringComparison.Ordinal), $"プロキシURLが記録に残っています ({name}): {Path.GetFileName(file)}");
+                }
+                var stdout = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "codex.stdout.jsonl"));
+                var stderr = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "codex.stderr.txt"));
+                Assert.True(stdout.Contains("[REDACTED_PROXY]", StringComparison.Ordinal));
+                Assert.True(stderr.Contains("[REDACTED_PROXY]", StringComparison.Ordinal));
+                var selfAssessmentPath = Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "self-assessment.md");
+                Assert.True(File.Exists(selfAssessmentPath), $"Implementer自己評価が保存されていません ({name}): {File.ReadAllText(Path.Combine(request.RunDirectory!, result.ReportReference))}");
+                var selfAssessment = File.ReadAllText(selfAssessmentPath);
+                Assert.True(selfAssessment.Contains("[REDACTED_PROXY]", StringComparison.Ordinal));
+                Assert.True(File.Exists(Path.Combine(request.RunDirectory!, result.ReportReference)));
             }
-            var stdout = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "codex.stdout.jsonl"));
-            var stderr = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "codex.stderr.txt"));
-            Assert.True(stdout.Contains("[REDACTED_PROXY]", StringComparison.Ordinal));
-            Assert.True(stderr.Contains("[REDACTED_PROXY]", StringComparison.Ordinal));
-            var selfAssessment = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "self-assessment.md"));
-            Assert.True(selfAssessment.Contains("[REDACTED_PROXY]", StringComparison.Ordinal));
-            Assert.True(File.Exists(Path.Combine(request.RunDirectory!, result.ReportReference)));
         }
     }
     finally
     {
-        Environment.SetEnvironmentVariable("HTTPS_PROXY", originalHttpsProxy);
-        Environment.SetEnvironmentVariable("HTTP_PROXY", originalHttpProxy);
+        foreach (var (name, value) in originalValues) Environment.SetEnvironmentVariable(name, value);
     }
 }
 
@@ -1760,3 +1768,4 @@ sealed class CancellationObservingExecutor : IIsolationExecutor
 sealed class DiagnosticTestFailure(string details) : Exception(details)
 {
 }
+
