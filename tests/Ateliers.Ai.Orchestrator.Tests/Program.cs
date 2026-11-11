@@ -37,6 +37,7 @@ suite.Add("人間確認待ちは独立証跡とPR操作記録が揃わなけれ�
 suite.Add("空のrunパス指定を終了コード2の入力エラーとして返す", EmptyRunPathsReturnInputError);
 suite.Add("証跡ファイルの読込・JSON形式エラーを実行前に拒否する", ReviewEvidenceReadErrorsAreInputFailures);
 suite.Add("NUL文字を含む外部証跡参照を不一致として拒否する", InvalidEvidenceReferenceIsRejected);
+suite.Add("Fake Codex出力の既知プロキシ認証情報を保存前にマスクする", CodexProxyCredentialsAreRedactedFromPersistedOutputs);
 suite.Add("Fake CodexプロセスのJSONL・stderr・usage・未知eventを別々に記録する", CodexProcessCapturesJsonlAndSeparatesStreams);
 suite.Add("Fake Codex実行でkill処理とCLI版確認が起動しない", CodexVersionProbeKillFailureIsRecorded);
 suite.Add("Fake Codex実行ファイル起動失敗を安全に記録する", CodexVersionProbeStartFailureStopsBeforeExecution);
@@ -76,6 +77,12 @@ static int RunFakeCodexFixture(string[] args)
         Console.WriteLine($"{{\"type\":\"fixture.prompt_policy\",\"policy\":{JsonSerializer.Serialize(policy)}}}");
     }
     Console.Error.WriteLine("fixture warning: stderr is independent from the terminal status");
+    var proxy = Environment.GetEnvironmentVariable("HTTPS_PROXY");
+    if (mode == "proxy-output")
+    {
+        Console.Error.WriteLine($"proxy diagnostic URL: {proxy}; credentials: proxy-user:proxy-password");
+        Console.WriteLine($"{{\"type\":\"fixture.proxy_diagnostic\",\"message\":{JsonSerializer.Serialize($"proxy diagnostic URL: {proxy}; credentials: proxy-user:proxy-password")}}}");
+    }
     if (mode == "timeout-with-child")
     {
         var child = Process.Start(new ProcessStartInfo(Environment.ProcessPath!)
@@ -116,7 +123,10 @@ static int RunFakeCodexFixture(string[] args)
     Console.WriteLine("{\"type\":\"future.unknown\",\"extra\":true}");
     if (mode != "empty")
     {
-        var message = mode == "workflow" && prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal)
+        var message = mode == "proxy-output" && prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal)
+            ? $"レビュー合格: proxy response {proxy}; credentials proxy-user:proxy-password"
+            : mode == "proxy-output" ? $"proxy response {proxy}; credentials proxy-user:proxy-password"
+            : mode == "workflow" && prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal)
             ? prompt.Contains("REVIEW_ATTEMPT: 1", StringComparison.Ordinal) ? "指摘: テスト結果を明記してください。" : "レビュー合格: fixture reviewed fixed artifact"
             : mode == "workflow" ? "IMPLEMENTER-SELF-ASSESSMENT-SECRET" : "fixture response";
         var serializedMessage = JsonSerializer.Serialize(message);
@@ -133,6 +143,49 @@ static int RunExternalProcessFixture(string[] args)
     Console.WriteLine("C:\\Users\\Local User\\private-output.txt /home/local-user/private-output.txt");
     Console.Error.WriteLine("C:\\Users\\Local User\\private-error.txt /home/local-user/private-error.txt");
     return mode == "fail" ? 7 : 0;
+}
+
+static void CodexProxyCredentialsAreRedactedFromPersistedOutputs()
+{
+    const string secret = "proxy-user:proxy-password";
+    const string proxyUrl = "http://proxy-user:proxy-password@proxy.example.invalid:8080";
+    var originalHttpsProxy = Environment.GetEnvironmentVariable("HTTPS_PROXY");
+    var originalHttpProxy = Environment.GetEnvironmentVariable("HTTP_PROXY");
+    Environment.SetEnvironmentVariable("HTTPS_PROXY", proxyUrl);
+    Environment.SetEnvironmentVariable("HTTP_PROXY", null);
+    var (runner, request, root) = CreateCodexFixture("proxy-output");
+    try
+    {
+        using (root)
+        {
+            var eventPath = Path.Combine(request.RunDirectory!, "events.jsonl");
+            FakeWorkflowResult result;
+            using (var events = JsonlRunEventStore.CreateNew(eventPath, request.RunId))
+                result = new FakeAgentWorkflow().Run(request.Contract, new string('d', 64), request.RunId,
+                    request.RunDirectory!, runner, events, codexOneShot: true);
+
+            Assert.Equal(RunState.NeedsHumanInput, result.State);
+            var persistedFiles = Directory.EnumerateFiles(request.RunDirectory!, "*", SearchOption.AllDirectories);
+            foreach (var file in persistedFiles)
+            {
+                var contents = File.ReadAllText(file);
+                Assert.False(contents.Contains(secret, StringComparison.Ordinal), $"認証情報が記録に残っています: {Path.GetFileName(file)}");
+                Assert.False(contents.Contains(proxyUrl, StringComparison.Ordinal), $"プロキシURLが記録に残っています: {Path.GetFileName(file)}");
+            }
+            var stdout = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "codex.stdout.jsonl"));
+            var stderr = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "codex.stderr.txt"));
+            Assert.True(stdout.Contains("[REDACTED_PROXY]", StringComparison.Ordinal));
+            Assert.True(stderr.Contains("[REDACTED_PROXY]", StringComparison.Ordinal));
+            var selfAssessment = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "self-assessment.md"));
+            Assert.True(selfAssessment.Contains("[REDACTED_PROXY]", StringComparison.Ordinal));
+            Assert.True(File.Exists(Path.Combine(request.RunDirectory!, result.ReportReference)));
+        }
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("HTTPS_PROXY", originalHttpsProxy);
+        Environment.SetEnvironmentVariable("HTTP_PROXY", originalHttpProxy);
+    }
 }
 
 static void CodexProcessCapturesJsonlAndSeparatesStreams()

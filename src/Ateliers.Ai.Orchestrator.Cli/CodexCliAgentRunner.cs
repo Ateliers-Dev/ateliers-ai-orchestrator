@@ -56,6 +56,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
         foreach (var argument in new[] { "exec", "--json", "--sandbox", sandbox, "--config", "approval_policy=\"never\"", "-" })
             start.ArgumentList.Add(argument);
         PrepareEnvironment(start, profileRoot);
+        var redactOutput = CreateProxyOutputRedactor(start.Environment);
         var prompt = BuildPrompt(request);
         string? reviewWorkspace = null;
         if (role == "implementer" && request.Attempt == 1)
@@ -88,7 +89,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
             processId = process.Id;
             using var stdoutWriter = new StreamWriter(new FileStream(stdoutPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read), new UTF8Encoding(false));
             using var stderrWriter = new StreamWriter(new FileStream(stderrPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read), new UTF8Encoding(false));
-            var stdoutTask = PumpStdoutAsync(process, stdoutWriter, text =>
+            var stdoutTask = PumpStdoutAsync(process, stdoutWriter, redactOutput, text =>
             {
                 if (!TryParseEvent(text, out var type, out var eventThreadId, out var message, out var usage, out var parseError))
                 {
@@ -100,7 +101,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
                 if (type is "turn.completed" or "turn.failed" or "error") terminalEvent = type;
                 if (usage is not null) usageJson = usage;
             });
-            var stderrTask = PumpStderrAsync(process, stderrWriter);
+            var stderrTask = PumpStderrAsync(process, stderrWriter, redactOutput);
             process.StandardInput.Write(prompt);
             process.StandardInput.Close();
             var timeout = request.RemainingTime is { } remaining && remaining < TimeSpan.FromMinutes(request.Contract.Limits.MaxDurationMinutes)
@@ -142,12 +143,12 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception or ArgumentException)
         {
-            error = exception.Message;
+            error = redactOutput(exception.Message);
             if (!File.Exists(stderrPath)) File.WriteAllText(stderrPath, error + Environment.NewLine, new UTF8Encoding(false));
             if (process is { HasExited: false })
             {
                 killAttempted = true;
-                try { (options.KillProcessForTesting ?? (child => child.Kill(entireProcessTree: true)))(process); } catch (Exception killError) { error += $"; 停止要求失敗: {killError.Message}"; }
+                try { (options.KillProcessForTesting ?? (child => child.Kill(entireProcessTree: true)))(process); } catch (Exception killError) { error += $"; 停止要求失敗: {redactOutput(killError.Message)}"; }
                 try { process.WaitForExit(10_000); processExitObserved = process.HasExited; if (process.HasExited) exitCode = process.ExitCode; }
                 catch (InvalidOperationException) { processExitObserved = false; }
             }
@@ -187,6 +188,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
                 error ??= $"Reviewer作業領域の一時ファイルを削除できませんでした: {exception.Message}";
             }
         }
+        error = error is null ? null : redactOutput(error);
         var evidence = new AgentExecutionEvidence(processId, threadId, cliVersion, terminalEvent, exitCode, usageJson,
             Path.GetRelativePath(request.RunDirectory!, stdoutPath).Replace('\\', '/'),
             Path.GetRelativePath(request.RunDirectory!, stderrPath).Replace('\\', '/'), timedOut, killAttempted,
@@ -196,21 +198,60 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
             ExecutionEvidence: evidence, StopRequested: stopRequested);
     }
 
-    private static async Task PumpStdoutAsync(Process process, StreamWriter writer, Action<string> onLine)
+    private static Func<string, string> CreateProxyOutputRedactor(IDictionary<string, string?> environment)
+    {
+        var proxyVariables = new HashSet<string>(
+            ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"],
+            StringComparer.OrdinalIgnoreCase);
+        var secrets = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var (name, value) in environment)
+        {
+            if (!proxyVariables.Contains(name) || string.IsNullOrWhiteSpace(value)) continue;
+            secrets.Add(value);
+            if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || string.IsNullOrEmpty(uri.UserInfo)) continue;
+
+            secrets.Add(uri.AbsoluteUri);
+            var userInfo = uri.UserInfo;
+            AddCredentialParts(userInfo);
+            AddCredentialParts(Uri.UnescapeDataString(userInfo));
+        }
+
+        var orderedSecrets = secrets.Where(secret => secret.Length > 0)
+            .OrderByDescending(secret => secret.Length).ToArray();
+        return output =>
+        {
+            foreach (var secret in orderedSecrets)
+                output = output.Replace(secret, "[REDACTED_PROXY]", StringComparison.Ordinal);
+            return output;
+        };
+
+        void AddCredentialParts(string userInfo)
+        {
+            secrets.Add(userInfo);
+            var separator = userInfo.IndexOf(':');
+            if (separator < 0) return;
+            secrets.Add(userInfo[..separator]);
+            secrets.Add(userInfo[(separator + 1)..]);
+        }
+    }
+
+    private static async Task PumpStdoutAsync(Process process, StreamWriter writer, Func<string, string> redact, Action<string> onLine)
     {
         while (await process.StandardOutput.ReadLineAsync() is { } line)
         {
+            line = redact(line);
             await writer.WriteLineAsync(line);
             await writer.FlushAsync();
             onLine(line);
         }
     }
 
-    private static async Task PumpStderrAsync(Process process, StreamWriter writer)
+    private static async Task PumpStderrAsync(Process process, StreamWriter writer, Func<string, string> redact)
     {
         while (await process.StandardError.ReadLineAsync() is { } line)
         {
-            await writer.WriteLineAsync(line);
+            await writer.WriteLineAsync(redact(line));
             await writer.FlushAsync();
         }
     }

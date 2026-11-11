@@ -23,6 +23,10 @@ Codex CLIは利用者のローカルディスク上で直接実行する方式�
 7. timeout、停止要求、プロセス終了確認、出力stream切断を区別して記録する。終了状態が不明、証跡が不完全、永続化に失敗した場合は成功とみなさず停止する。
 8. 本ゲートと具体的な実行範囲を説明した後、実Codex CLI起動について別途明示承認を得る。`--help`、`--version`、loginもCLI起動に含む。
 
+## プロキシ認証情報の記録
+
+HTTP(S)プロキシ環境変数は接続のためCodex CLI子プロセスへ引き継ぎます。既知のHTTP(S)・ALL_PROXY URLとURLのuser-infoに含まれる認証情報は、標準出力・標準エラーを保存する前にマスキングします。未知の秘密値や、CLIが変形・分割した秘密の断片、別形式の出力まで完全に秘匿する保証ではありません。実行記録にはこの保護範囲外の秘密情報が含まれる可能性があるため、アクセスと保持を管理してください。
+
 ## Issueとの関係
 
 - [ateliers-workspace Issue #11](https://github.com/Ateliers-Dev/ateliers-workspace/issues/11) は別リポジトリのopen issueで、通常profileとの差分・使い捨てprofile・OS隔離の強い条件を含む。このローカル直接実行PoCではそれらを起動条件にしない。Issue自体の更新や完了扱いはこの変更の範囲外とする。
