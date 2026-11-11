@@ -1,7 +1,6 @@
 using System.Text.Json;
 using System.Security.Cryptography;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using Ateliers.Ai.Orchestrator.Core;
 using Ateliers.Ai.Orchestrator.Docker;
 
@@ -48,10 +47,7 @@ suite.Add("timeout時にFakeプロセスの子プロセス停止も確認する"
 suite.Add("kill失敗を記録しプロセス終了未確認を成功扱いしない", CodexKillFailureIsNotReportedAsSuccess);
 suite.Add("Ctrl+C停止要求とtimeoutを区別しkill・終了・stream結果を記録する", CodexCancellationIsDistinctFromTimeout);
 suite.Add("Codex子プロセスへ親のAPI secret環境変数を渡さない", CodexChildEnvironmentFiltersSecrets);
-suite.Add("使い捨てCODEX_HOMEの既存データを再利用しない", CodexDisposableProfilesMustBeFresh);
-suite.Add("Windowsの短いCODEX_HOME別名も既定profileとの重複として拒否する", CodexShortPathAliasesCannotBypassProfileProtection);
-suite.Add("使い捨てCODEX_HOMEの祖先symlinkを拒否する", CodexProfileSymlinkAncestorsAreRejected);
-suite.Add("使い捨てCODEX_HOMEの祖先junctionを拒否する", CodexProfileJunctionAncestorsAreRejected);
+suite.Add("既存CODEX_HOMEと通常のユーザープロファイルを使える", CodexExistingProfilesAreAccepted);
 suite.Add("Codex Fakeプロセスで独立レビューまで縦断し固定hashを引き継ぐ", CodexFakeProcessesCompleteIndependentReviewSlice);
 suite.Add("Codex一回モードは成功・指摘・失敗を記録し追加起動せず人間判断待ちで止まる", CodexOneShotStopsWithoutRetries);
 return suite.Run().ExitCode;
@@ -97,7 +93,7 @@ static int RunFakeCodexFixture(string[] args)
     if (mode == "kill-failure") { Thread.Sleep(500); return 0; }
     if (prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal)) File.WriteAllText("example.txt", "fixture change\n");
     Console.WriteLine($"{{\"type\":\"fixture.arguments\",\"arguments\":{JsonSerializer.Serialize(args)}}}");
-    Console.WriteLine($"{{\"type\":\"fixture.environment\",\"openai_key_present\":{(Environment.GetEnvironmentVariable("OPENAI_API_KEY") is null ? "false" : "true")}}}");
+    Console.WriteLine($"{{\"type\":\"fixture.environment\",\"openai_key_present\":{(Environment.GetEnvironmentVariable("OPENAI_API_KEY") is null ? "false" : "true")},\"https_proxy_present\":{(Environment.GetEnvironmentVariable("HTTPS_PROXY") is null ? "false" : "true")}}}");
     var environmentPaths = new Dictionary<string, string?>
     {
         ["CODEX_HOME"] = Environment.GetEnvironmentVariable("CODEX_HOME"),
@@ -187,10 +183,7 @@ static void CodexVersionProbeStartFailureStopsBeforeExecution()
     var implementer = Path.Combine(root.Path, "implementer-profile");
     var reviewer = Path.Combine(root.Path, "reviewer-profile");
     foreach (var home in new[] { implementer, reviewer })
-    {
         Directory.CreateDirectory(home);
-        File.WriteAllText(Path.Combine(home, "codex-disposable-profile.json"), "{\"disposable\":true}");
-    }
     var invalidExecutable = Path.Combine(root.Path, "not-an-executable.exe");
     File.WriteAllText(invalidExecutable, "fixture only");
     var workspace = Path.Combine(Environment.CurrentDirectory, ".test-workspaces", Guid.NewGuid().ToString("N"));
@@ -317,7 +310,9 @@ static void CodexCancellationIsDistinctFromTimeout()
 static void CodexChildEnvironmentFiltersSecrets()
 {
     var original = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+    var originalProxy = Environment.GetEnvironmentVariable("HTTPS_PROXY");
     Environment.SetEnvironmentVariable("OPENAI_API_KEY", "fixture-secret-do-not-forward");
+    Environment.SetEnvironmentVariable("HTTPS_PROXY", "http://fixture-proxy.invalid:8080");
     var (runner, request, root) = CreateCodexFixture("success");
     try
     {
@@ -327,184 +322,34 @@ static void CodexChildEnvironmentFiltersSecrets()
             Assert.True(response.Succeeded);
             var rawEvents = File.ReadAllText(Path.Combine(request.RunDirectory!, response.ExecutionEvidence!.StandardOutputReference!));
             Assert.True(rawEvents.Contains("\"openai_key_present\":false", StringComparison.Ordinal), "親環境のAPI keyがFake childへ継承されました。");
+            Assert.True(rawEvents.Contains("\"https_proxy_present\":true", StringComparison.Ordinal), "親環境のHTTPS proxy設定がFake childへ継承されませんでした。");
         }
     }
-    finally { Environment.SetEnvironmentVariable("OPENAI_API_KEY", original); }
+    finally
+    {
+        Environment.SetEnvironmentVariable("OPENAI_API_KEY", original);
+        Environment.SetEnvironmentVariable("HTTPS_PROXY", originalProxy);
+    }
 }
 
-static void CodexDisposableProfilesMustBeFresh()
+static void CodexExistingProfilesAreAccepted()
 {
     using var root = new TemporaryDirectory();
-    var implementer = Path.Combine(root.Path, "implementer");
-    var reviewer = Path.Combine(root.Path, "reviewer");
-    foreach (var home in new[] { implementer, reviewer })
-    {
-        Directory.CreateDirectory(home);
-        File.WriteAllText(Path.Combine(home, "codex-disposable-profile.json"), "{\"disposable\":true}");
-    }
-    File.WriteAllText(Path.Combine(reviewer, "state.db"), "fixture");
-    Assert.Throws<ArgumentException>(() => new CodexCliRunnerOptions(Environment.ProcessPath!, implementer, reviewer,
-        ["--fake-codex-fixture", "success"]).Validate());
-}
+    var existingHome = Path.Combine(root.Path, "existing-codex-home");
+    Directory.CreateDirectory(existingHome);
+    File.WriteAllText(Path.Combine(existingHome, "auth.json"), "fixture credentials are not used by this test");
 
-static void CodexShortPathAliasesCannotBypassProfileProtection()
-{
-    if (!OperatingSystem.IsWindows())
-        Assert.Skip("Windowsの8.3短縮名を検証できるOSではありません。");
-
-    using var root = new TemporaryDirectory();
-    var activeHome = Path.Combine(root.Path, "protected-profile");
-    var implementer = Path.Combine(activeHome, "implementer");
-    var reviewer = Path.Combine(root.Path, "reviewer");
-    foreach (var home in new[] { implementer, reviewer })
-    {
-        Directory.CreateDirectory(home);
-        File.WriteAllText(Path.Combine(home, "codex-disposable-profile.json"), "{\"disposable\":true}");
-    }
+    var options = new CodexCliRunnerOptions(Environment.ProcessPath!, existingHome, existingHome,
+        ["--fake-codex-fixture", "success"]).Validate();
+    Assert.True(options is not null, "既存のCODEX_HOMEを使用できませんでした。");
 
     var original = Environment.GetEnvironmentVariable("CODEX_HOME");
     try
     {
-        Environment.SetEnvironmentVariable("CODEX_HOME", activeHome);
-        var shortActiveHome = GetShortPathName(activeHome);
-        if (OperatingSystem.IsWindows() && !string.IsNullOrWhiteSpace(shortActiveHome) &&
-            !string.Equals(Path.GetFullPath(shortActiveHome), Path.GetFullPath(activeHome), StringComparison.OrdinalIgnoreCase))
-        {
-            var shortImplementer = Path.Combine(shortActiveHome, "implementer");
-            Assert.Throws<ArgumentException>(() => new CodexCliRunnerOptions(Environment.ProcessPath!, shortImplementer, reviewer,
-                ["--fake-codex-fixture", "success"]).Validate());
-            return;
-        }
-
-        Assert.Skip("テストボリュームで8.3短縮名の別表記を取得できませんでした。");
+        Environment.SetEnvironmentVariable("CODEX_HOME", existingHome);
+        Assert.Equal(Path.GetFullPath(existingHome), CodexCliRunnerOptions.ResolveCodexHome(null));
     }
     finally { Environment.SetEnvironmentVariable("CODEX_HOME", original); }
-}
-
-static void CodexProfileSymlinkAncestorsAreRejected()
-{
-    using var root = new TemporaryDirectory();
-    var target = Path.Combine(root.Path, "target");
-    var actualImplementer = Path.Combine(target, "implementer");
-    var linkParent = Path.Combine(root.Path, "profile-link");
-    var reviewer = Path.Combine(root.Path, "reviewer");
-    foreach (var home in new[] { actualImplementer, reviewer })
-    {
-        Directory.CreateDirectory(home);
-        File.WriteAllText(Path.Combine(home, "codex-disposable-profile.json"), "{\"disposable\":true}");
-    }
-
-    try { Directory.CreateSymbolicLink(linkParent, target); }
-    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
-    {
-        Assert.Skip($"symlinkを作成できませんでした（{exception.GetType().Name}）。");
-    }
-
-    Assert.Throws<ArgumentException>(() => new CodexCliRunnerOptions(Environment.ProcessPath!,
-        Path.Combine(linkParent, "implementer"), reviewer, ["--fake-codex-fixture", "success"]).Validate());
-}
-
-static void CodexProfileJunctionAncestorsAreRejected()
-{
-    if (!OperatingSystem.IsWindows())
-        Assert.Skip("Windowsのjunctionを検証できるOSではありません。");
-
-    var root = new TemporaryDirectory();
-    var target = Path.Combine(root.Path, "target");
-    var actualImplementer = Path.Combine(target, "implementer");
-    var linkParent = Path.Combine(root.Path, "profile-junction");
-    var reviewer = Path.Combine(root.Path, "reviewer");
-    foreach (var home in new[] { actualImplementer, reviewer })
-    {
-        Directory.CreateDirectory(home);
-        File.WriteAllText(Path.Combine(home, "codex-disposable-profile.json"), "{\"disposable\":true}");
-    }
-
-    using (var process = new Process())
-    {
-        process.StartInfo = new ProcessStartInfo("cmd.exe")
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-        process.StartInfo.ArgumentList.Add("/c");
-        process.StartInfo.ArgumentList.Add("mklink");
-        process.StartInfo.ArgumentList.Add("/J");
-        process.StartInfo.ArgumentList.Add(linkParent);
-        process.StartInfo.ArgumentList.Add(target);
-        try
-        {
-            process.Start();
-            process.WaitForExit();
-        }
-        catch (Exception exception) when (exception is IOException or System.ComponentModel.Win32Exception)
-        {
-            try { root.Dispose(); } catch { }
-            Assert.Skip($"junction probeを開始できませんでした（{exception.GetType().Name}）。");
-        }
-        if (process.ExitCode != 0 || !Directory.Exists(linkParent))
-        {
-            root.Dispose();
-            Assert.Skip("使い捨て領域内にjunctionを作成できませんでした。");
-        }
-    }
-
-    Exception? validationFailure = null;
-    try
-    {
-        Assert.Throws<ArgumentException>(() => new CodexCliRunnerOptions(Environment.ProcessPath!,
-            Path.Combine(linkParent, "implementer"), reviewer, ["--fake-codex-fixture", "success"]).Validate());
-    }
-    catch (Exception exception)
-    {
-        validationFailure = exception;
-    }
-
-    Exception? cleanupFailure = null;
-    var junctionRemoved = false;
-    try
-    {
-        var junctionAttributes = File.GetAttributes(linkParent);
-        if ((junctionAttributes & FileAttributes.ReparsePoint) == 0)
-            throw new IOException("fixture path stopped being a reparse point; recursive cleanup was withheld.");
-        Directory.Delete(linkParent); // Non-recursive: remove the junction entry without traversing its target.
-        junctionRemoved = !Directory.Exists(linkParent);
-        if (!junctionRemoved) throw new IOException("junction path remained after non-recursive removal.");
-    }
-    catch (Exception exception) { cleanupFailure = exception; }
-
-    if (junctionRemoved)
-    {
-        try { root.Dispose(); }
-        catch (Exception exception) { cleanupFailure ??= exception; }
-    }
-
-    if (validationFailure is not null || cleanupFailure is not null)
-    {
-        var diagnostics = new List<string>();
-        if (validationFailure is not null)
-            diagnostics.Add($"属性検証の例外型: {validationFailure.GetType().Name}");
-        if (cleanupFailure is not null)
-            diagnostics.Add($"fixture cleanupの例外型: {cleanupFailure.GetType().Name}");
-        throw new DiagnosticTestFailure(string.Join("; ", diagnostics));
-    }
-}
-
-static string? GetShortPathName(string path)
-{
-    if (!OperatingSystem.IsWindows()) return null;
-    var buffer = new System.Text.StringBuilder(512);
-    var length = WindowsPathNames.GetShortPathName(path, buffer, (uint)buffer.Capacity);
-    if (length == 0) return null;
-    if (length >= buffer.Capacity)
-    {
-        buffer = new System.Text.StringBuilder(checked((int)length + 1));
-        length = WindowsPathNames.GetShortPathName(path, buffer, (uint)buffer.Capacity);
-        if (length == 0 || length >= buffer.Capacity) return null;
-    }
-    return buffer.ToString();
 }
 
 static void CodexFakeProcessesCompleteIndependentReviewSlice()
@@ -546,15 +391,14 @@ static void CodexFakeProcessesCompleteIndependentReviewSlice()
         AssertCodexFixturePolicy(firstReviewStdout, "read-only", "Reviewer");
         var implementerPaths = ReadFakeEnvironmentPaths(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "codex.stdout.jsonl"));
         var reviewerPaths = ReadFakeEnvironmentPaths(firstReviewStdoutPath);
-        Assert.True(implementerPaths.Values.All(path => path.StartsWith(Path.Combine(root.Path, "implementer-profile"), StringComparison.OrdinalIgnoreCase)),
-            "ImplementerのHOME/APPDATA/TEMPの一部が役割別profile外を指しています。");
-        Assert.True(reviewerPaths.Values.All(path => path.StartsWith(Path.Combine(root.Path, "reviewer-profile"), StringComparison.OrdinalIgnoreCase)),
-            "ReviewerのHOME/APPDATA/TEMPの一部が役割別profile外を指しています。");
-        Assert.False(implementerPaths.Values.Intersect(reviewerPaths.Values, StringComparer.OrdinalIgnoreCase).Any(),
-            "ImplementerとReviewerが同じ環境ディレクトリを共有しています。");
-        Assert.False(implementerPaths.Values.Any(path => IsNestedPath(path, request.Contract.WorkingDirectory)) ||
-            reviewerPaths.Values.Any(path => IsNestedPath(path, request.Contract.WorkingDirectory)),
-            "役割別profileが作業リポジトリと重複しています。");
+        Assert.Equal(Path.Combine(root.Path, "implementer-profile"), implementerPaths["CODEX_HOME"]);
+        Assert.Equal(Path.Combine(root.Path, "reviewer-profile"), reviewerPaths["CODEX_HOME"]);
+        foreach (var name in new[] { "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "TMPDIR" })
+        {
+            var inherited = Environment.GetEnvironmentVariable(name);
+            Assert.Equal(inherited, implementerPaths[name], $"{name}を既存ユーザー環境から変更しました。");
+            Assert.Equal(inherited, reviewerPaths[name], $"{name}を既存ユーザー環境から変更しました。");
+        }
     }
 }
 
@@ -573,7 +417,9 @@ static void AssertCodexFixturePolicy(string stdout, string expectedSandbox, stri
     var sandboxIndex = Array.IndexOf(arguments, "--sandbox");
     Assert.True(sandboxIndex >= 0 && sandboxIndex + 1 < arguments.Length && arguments[sandboxIndex + 1] == expectedSandbox,
         $"Codex sandboxに {expectedSandbox} を指定していません。");
-    Assert.True(arguments.Contains("--ask-for-approval", StringComparer.Ordinal) && arguments.Contains("never", StringComparer.Ordinal),
+    var approvalConfigIndex = Array.IndexOf(arguments, "--config");
+    Assert.True(approvalConfigIndex >= 0 && approvalConfigIndex + 1 < arguments.Length &&
+        arguments[approvalConfigIndex + 1] == "approval_policy=\"never\"",
         "非対話Codex runの承認設定が確認できません。");
 }
 
@@ -587,15 +433,6 @@ static Dictionary<string, string> ReadFakeEnvironmentPaths(string stdoutPath)
                 .ToDictionary(property => property.Name, property => property.Value.GetString()!, StringComparer.Ordinal);
     }
     throw new Exception("Fake childの実効profile環境を取得できませんでした。");
-}
-
-static bool IsNestedPath(string candidate, string parent)
-{
-    var fullCandidate = Path.GetFullPath(candidate).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-    var fullParent = Path.GetFullPath(parent).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-    return string.Equals(fullCandidate, fullParent, StringComparison.OrdinalIgnoreCase) ||
-        fullCandidate.StartsWith(fullParent + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
-        fullParent.StartsWith(fullCandidate + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
 }
 
 static (CodexCliAgentRunner Runner, AgentRequest Request, TemporaryDirectory Root) CreateCodexFixture(
@@ -614,10 +451,7 @@ static (CodexCliAgentRunner Runner, AgentRequest Request, TemporaryDirectory Roo
     RunGitFixture(workspace, "add", "example.txt");
     RunGitFixture(workspace, "-c", "user.name=Orchestrator Test", "-c", "user.email=orchestrator-test@example.invalid", "commit", "-qm", "baseline");
     foreach (var home in new[] { implementerHome, reviewerHome })
-    {
         Directory.CreateDirectory(home);
-        File.WriteAllText(Path.Combine(home, "codex-disposable-profile.json"), "{\"disposable\":true}");
-    }
     var executable = Environment.ProcessPath!;
     var options = new CodexCliRunnerOptions(executable, implementerHome, reviewerHome,
         ["--fake-codex-fixture", scenario], killOverride, cancellationToken);
@@ -1868,12 +1702,6 @@ sealed class CancellationObservingExecutor : IIsolationExecutor
         });
         return completion.Task;
     }
-}
-
-static class WindowsPathNames
-{
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    internal static extern uint GetShortPathName(string longPath, System.Text.StringBuilder shortPath, uint bufferLength);
 }
 
 sealed class DiagnosticTestFailure(string details) : Exception(details)

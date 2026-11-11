@@ -3,8 +3,6 @@ using System.Text;
 using System.Text.Json;
 using System.Security.Cryptography;
 using System.Collections.Concurrent;
-using System.Runtime.InteropServices;
-using Microsoft.Win32.SafeHandles;
 using Ateliers.Ai.Orchestrator.Core;
 
 /// <summary>Codex CLIのJSONL実行をCoreのAgentRunner境界へ接続します。</summary>
@@ -14,7 +12,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
     private readonly CodexCliRunnerOptions options;
     private readonly ConcurrentDictionary<string, string> initialCommits = new(StringComparer.Ordinal);
 
-    /// <summary>CLI実行ファイルと役割別の使い捨てプロファイルを設定します。</summary>
+    /// <summary>CLI実行ファイルと任意の役割別プロファイルを設定します。</summary>
     /// <param name="options">Codex CLIの実行設定です。</param>
     public CodexCliAgentRunner(CodexCliRunnerOptions options) => this.options = options.Validate();
 
@@ -29,7 +27,8 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
     private async Task<AgentResponse> InvokeAsync(AgentRequest request, string sandbox)
     {
         var role = request.Role == "Reviewer" ? "reviewer" : "implementer";
-        var profileRoot = role == "reviewer" ? options.ReviewerCodexHome : options.ImplementerCodexHome;
+        var profileRoot = CodexCliRunnerOptions.ResolveCodexHome(
+            role == "reviewer" ? options.ReviewerCodexHome : options.ImplementerCodexHome);
         var evidenceDirectory = Path.Combine(request.RunDirectory ?? throw new InvalidOperationException("実行記録先が必要です。"),
             "exchanges", $"{role}-{request.Attempt}");
         Directory.CreateDirectory(evidenceDirectory);
@@ -54,7 +53,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
             StandardErrorEncoding = Encoding.UTF8
         };
         foreach (var argument in options.PrefixArguments ?? []) start.ArgumentList.Add(argument);
-        foreach (var argument in new[] { "exec", "--json", "--sandbox", sandbox, "--ask-for-approval", "never", "-" })
+        foreach (var argument in new[] { "exec", "--json", "--sandbox", sandbox, "--config", "approval_policy=\"never\"", "-" })
             start.ArgumentList.Add(argument);
         PrepareEnvironment(start, profileRoot);
         var prompt = BuildPrompt(request);
@@ -256,30 +255,17 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
 
     private void PrepareEnvironment(ProcessStartInfo start, string profileRoot)
     {
-        // profile別ディレクトリ作成の直前にも再検証し、パス差替え競合の窓を狭めます。
-        // プロセス起動までハンドルを保持しないため、競合を完全には排除できません。
-        options.ValidateProfileLocations();
-        profileRoot = CodexCliRunnerOptions.ResolveFinalPath(profileRoot)!;
+        profileRoot = Path.GetFullPath(profileRoot);
         var inherited = start.Environment.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
         start.Environment.Clear();
         var allowed = new[] { "PATH", "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "PROCESSOR_ARCHITECTURE",
-            "NUMBER_OF_PROCESSORS", "DOTNET_ROOT", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR" };
+            "NUMBER_OF_PROCESSORS", "DOTNET_ROOT", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR",
+            "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "TMPDIR",
+            "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy" };
         foreach (var name in allowed)
             if (inherited.TryGetValue(name, out var value) && value is not null) start.Environment[name] = value;
-        var local = Path.Combine(profileRoot, "local");
-        var roaming = Path.Combine(profileRoot, "roaming");
-        var temporary = Path.Combine(profileRoot, "tmp");
-        Directory.CreateDirectory(local);
-        Directory.CreateDirectory(roaming);
-        Directory.CreateDirectory(temporary);
+        Directory.CreateDirectory(profileRoot);
         start.Environment["CODEX_HOME"] = profileRoot;
-        start.Environment["HOME"] = profileRoot;
-        start.Environment["USERPROFILE"] = profileRoot;
-        start.Environment["LOCALAPPDATA"] = local;
-        start.Environment["APPDATA"] = roaming;
-        start.Environment["TEMP"] = temporary;
-        start.Environment["TMP"] = temporary;
-        start.Environment["TMPDIR"] = temporary;
     }
 
     private string PrepareReviewerWorkspace(AgentRequest request)
@@ -368,146 +354,36 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
     }
 }
 
-/// <summary>Codex CLI起動に必要な実行パスと独立プロファイルを保持します。</summary>
+/// <summary>Codex CLI起動に必要な実行パスと任意のプロファイルを保持します。</summary>
 /// <param name="ExecutablePath">codex CLI実行ファイルの絶対パスです。</param>
-/// <param name="ImplementerCodexHome">Implementer専用の使い捨てCODEX_HOMEです。</param>
-/// <param name="ReviewerCodexHome">Reviewer専用の使い捨てCODEX_HOMEです。</param>
+/// <param name="ImplementerCodexHome">Implementerで使うCODEX_HOMEです。</param>
+/// <param name="ReviewerCodexHome">Reviewerで使うCODEX_HOMEです。</param>
 /// <param name="PrefixArguments">ラッパー実行ファイルを使う場合の先行引数です。</param>
 internal sealed record CodexCliRunnerOptions(string ExecutablePath, string ImplementerCodexHome,
     string ReviewerCodexHome, IReadOnlyList<string>? PrefixArguments = null,
     Action<Process>? KillProcessForTesting = null, CancellationToken CancellationToken = default)
 {
-    /// <summary>絶対パスと相互に異なるプロファイルを検証します。</summary>
+    /// <summary>CLIと、指定または既定のCODEX_HOMEを検証します。</summary>
     /// <returns>検証済み設定です。</returns>
     public CodexCliRunnerOptions Validate()
     {
         if (!Path.IsPathFullyQualified(ExecutablePath) || !File.Exists(ExecutablePath))
             throw new ArgumentException("Codex CLIの実行ファイルには存在する絶対パスが必要です。");
-        if (!Path.IsPathFullyQualified(ImplementerCodexHome) || !Path.IsPathFullyQualified(ReviewerCodexHome))
-            throw new ArgumentException("役割別CODEX_HOMEには絶対パスが必要です。");
-        var implementer = ResolveFinalPath(Path.GetFullPath(ImplementerCodexHome))!.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var reviewer = ResolveFinalPath(Path.GetFullPath(ReviewerCodexHome))!.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        if (string.Equals(implementer, reviewer, StringComparison.OrdinalIgnoreCase))
-            throw new ArgumentException("ImplementerとReviewerには別々のCODEX_HOMEが必要です。");
-        ValidateProfileLocations();
-        ValidateDisposableProfile(implementer);
-        ValidateDisposableProfile(reviewer);
+        _ = ResolveCodexHome(ImplementerCodexHome);
+        _ = ResolveCodexHome(ReviewerCodexHome);
         return this;
     }
 
-    internal void ValidateProfileLocations()
+    internal static string ResolveCodexHome(string? requestedHome)
     {
-        var implementer = ResolveFinalPath(Path.GetFullPath(ImplementerCodexHome))!
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var reviewer = ResolveFinalPath(Path.GetFullPath(ReviewerCodexHome))!
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        RejectReparseAncestors(ImplementerCodexHome);
-        RejectReparseAncestors(ReviewerCodexHome);
-        if (string.Equals(implementer, reviewer, StringComparison.OrdinalIgnoreCase))
-            throw new ArgumentException("ImplementerとReviewerには別々のCODEX_HOMEが必要です。");
-        var defaultHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex");
-        var activeHome = Environment.GetEnvironmentVariable("CODEX_HOME");
-        if (IsSameOrNested(implementer, defaultHome) || IsSameOrNested(reviewer, defaultHome) ||
-            IsSameOrNested(implementer, ResolveFinalPath(ResolveExistingLinks(defaultHome))) ||
-            IsSameOrNested(reviewer, ResolveFinalPath(ResolveExistingLinks(defaultHome))) ||
-            IsSameOrNested(implementer, activeHome) || IsSameOrNested(reviewer, activeHome) ||
-            IsSameOrNested(implementer, ResolveFinalPath(ResolveExistingLinks(activeHome))) ||
-            IsSameOrNested(reviewer, ResolveFinalPath(ResolveExistingLinks(activeHome))))
-            throw new ArgumentException("ユーザー既定のCODEX_HOMEまたはその配下は使用できません。");
+        var home = string.IsNullOrWhiteSpace(requestedHome)
+            ? Environment.GetEnvironmentVariable("CODEX_HOME")
+            : requestedHome;
+        if (string.IsNullOrWhiteSpace(home))
+            home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex");
+        if (!Path.IsPathFullyQualified(home))
+            throw new ArgumentException("CODEX_HOMEには絶対パスが必要です。");
+        return Path.GetFullPath(home);
     }
 
-    private static bool IsSameOrNested(string candidate, string? other)
-    {
-        if (string.IsNullOrWhiteSpace(other)) return false;
-        var normalized = Path.GetFullPath(other).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        return string.Equals(candidate, normalized, StringComparison.OrdinalIgnoreCase) ||
-            candidate.StartsWith(normalized + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
-            normalized.StartsWith(candidate + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static void RejectReparseAncestors(string path)
-    {
-        var current = new DirectoryInfo(path);
-        while (current is not null)
-        {
-            if ((current.Attributes & FileAttributes.ReparsePoint) != 0)
-                throw new ArgumentException($"使い捨てプロファイルの祖先にsymlinkまたはjunctionは指定できません: {current.FullName}");
-            current = current.Parent;
-        }
-    }
-
-    private static string? ResolveExistingLinks(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path)) return null;
-        var full = Path.GetFullPath(path);
-        var current = Path.GetPathRoot(full)!;
-        foreach (var component in full[ current.Length.. ].Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
-        {
-            if (component.Length == 0) continue;
-            current = Path.Combine(current, component);
-            var directory = new DirectoryInfo(current);
-            if (directory.Exists && (directory.Attributes & FileAttributes.ReparsePoint) != 0)
-                current = directory.ResolveLinkTarget(returnFinalTarget: true)?.FullName ??
-                    throw new ArgumentException($"保護対象プロファイルの実体パスを解決できません: {current}");
-        }
-        return Path.GetFullPath(current);
-    }
-
-    internal static string? ResolveFinalPath(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path)) return null;
-        var fullPath = Path.GetFullPath(path);
-        if (!OperatingSystem.IsWindows() || !Directory.Exists(fullPath)) return fullPath;
-
-        using var handle = CreateFileW(fullPath, 0, 0x00000007, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
-        if (handle.IsInvalid)
-            throw new ArgumentException($"ディレクトリの実体パスを確認できません: {fullPath}", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
-
-        var buffer = new System.Text.StringBuilder(512);
-        var length = GetFinalPathNameByHandleW(handle, buffer, (uint)buffer.Capacity, 0);
-        if (length == 0)
-            throw new ArgumentException($"ディレクトリの実体パスを取得できません: {fullPath}", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
-        if (length >= buffer.Capacity)
-        {
-            buffer = new System.Text.StringBuilder(checked((int)length + 1));
-            length = GetFinalPathNameByHandleW(handle, buffer, (uint)buffer.Capacity, 0);
-            if (length == 0 || length >= buffer.Capacity)
-                throw new ArgumentException($"ディレクトリの実体パスを取得できません: {fullPath}", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
-        }
-
-        var finalPath = buffer.ToString();
-        if (finalPath.StartsWith("\\\\?\\UNC\\", StringComparison.OrdinalIgnoreCase))
-            finalPath = "\\\\" + finalPath[8..];
-        else if (finalPath.StartsWith("\\\\?\\", StringComparison.Ordinal))
-            finalPath = finalPath[4..];
-        return Path.GetFullPath(finalPath);
-    }
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern SafeFileHandle CreateFileW(string fileName, uint desiredAccess, uint shareMode,
-        IntPtr securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern uint GetFinalPathNameByHandleW(SafeFileHandle file, System.Text.StringBuilder path,
-        uint pathLength, uint flags);
-
-    private static void ValidateDisposableProfile(string path)
-    {
-        var marker = Path.Combine(path, "codex-disposable-profile.json");
-        try
-        {
-            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
-                throw new ArgumentException($"使い捨てプロファイルのルートにsymlinkまたはreparse pointは指定できません: {path}");
-            if ((File.GetAttributes(marker) & FileAttributes.ReparsePoint) != 0)
-                throw new ArgumentException($"使い捨てプロファイル確認ファイルにsymlinkまたはreparse pointは指定できません: {marker}");
-            if (Directory.EnumerateFileSystemEntries(path)
-                .Any(entry => !string.Equals(Path.GetFileName(entry), Path.GetFileName(marker), StringComparison.OrdinalIgnoreCase)))
-                throw new ArgumentException($"確認ファイル以外の内容があるプロファイルは再利用できません: {path}");
-            using var document = JsonDocument.Parse(File.ReadAllBytes(marker));
-            if (!document.RootElement.TryGetProperty("disposable", out var value) || value.ValueKind != JsonValueKind.True)
-                throw new ArgumentException($"使い捨てプロファイル確認ファイルが必要です: {marker}");
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
-        { throw new ArgumentException($"役割別の使い捨てCodexプロファイルを確認できません: {marker}", exception); }
-    }
 }
