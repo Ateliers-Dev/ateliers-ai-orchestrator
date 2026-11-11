@@ -258,9 +258,14 @@ internal static class OrchestratorCli
         if (agentKind == "codex")
         {
             if (seen.Contains("--scenario")) { error = "--scenario は --agent fake と組み合わせてください。"; return false; }
-            if (executable is null || implementerHome is null || reviewerHome is null)
-            { error = "Codex実行には --codex-exe、--implementer-codex-home、--reviewer-codex-home が必要です。"; return false; }
-            try { codexOptions = new CodexCliRunnerOptions(executable, implementerHome, reviewerHome).Validate(); }
+            if (executable is null)
+            { error = "Codex実行には --codex-exe が必要です。"; return false; }
+            try
+            {
+                codexOptions = new CodexCliRunnerOptions(executable,
+                    CodexCliRunnerOptions.ResolveCodexHome(implementerHome),
+                    CodexCliRunnerOptions.ResolveCodexHome(reviewerHome)).Validate();
+            }
             catch (ArgumentException exception) { error = exception.Message; return false; }
         }
         return true;
@@ -332,6 +337,6 @@ internal static class OrchestratorCli
         Console.Error.WriteLine("使用方法:");
         Console.Error.WriteLine("  ateliers-orchestrator validate <contract.json>");
         Console.Error.WriteLine("  ateliers-orchestrator start <contract.json> [--runs <ディレクトリ>]");
-        Console.Error.WriteLine("  ateliers-orchestrator run <contract.json> [--agent fake|codex] [--scenario <FakeScenario>] [--codex-exe <絶対パス> --implementer-codex-home <絶対パス> --reviewer-codex-home <絶対パス>] [--runs <ディレクトリ>] [--review-evidence <証跡.json>]");
+        Console.Error.WriteLine("  ateliers-orchestrator run <contract.json> [--agent fake|codex] [--scenario <FakeScenario>] [--codex-exe <絶対パス>] [--implementer-codex-home <絶対パス>] [--reviewer-codex-home <絶対パス>] [--runs <ディレクトリ>] [--review-evidence <証跡.json>]");
     }
 }

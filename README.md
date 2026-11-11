@@ -54,26 +54,20 @@ dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- run examples/task-contr
 
 **安全ゲート完了と実Codex CLI起動の追加承認までは、実Codex CLIを起動しないでください。--help と --version も起動に含みます。** 下記コマンドは仕様例であり、現時点での実行手順ではありません。
 
-実行対象には破棄可能なコピーを使い、契約の `workingDirectory` にそのコピーの絶対パスを明示してください。実データや通常作業中のcheckoutは対象にしないでください。Implementerには `workspace-write`、Reviewerには固定差分だけを渡して `read-only` を設定します。契約の `scope` と操作範囲はAgentへの指示です。ローカル実行では、その範囲を超えるアクセスをOSが完全に封じるものではありません。
+実行対象は、契約の `workingDirectory` に指定した既存の開発checkoutを含むローカルディレクトリです。開始前に作業ツリーがcleanであることを確認します。変更を破棄してよいコピーの利用は推奨しますが必須ではありません。Implementerには `workspace-write`、Reviewerには固定差分だけを渡して `read-only` を設定します。契約の `scope` と操作範囲はAgentへの指示です。ローカル実行では、その範囲を超えるアクセスをOSが完全に封じるものではありません。
 
-Codex CLI経路は、ImplementerとReviewerに**別々の使い捨てCODEX_HOME**を指定する設計です。既定のユーザープロファイル、`--ephemeral`、既存認証情報のコピーは使いません。各プロファイルは事前に作成し、専用ディレクトリ内へ次の確認ファイルを置く必要があります。
+CODEX_HOMEは `CODEX_HOME` 環境変数、または通常のユーザープロファイル（`~/.codex`）を既定で使います。既存の認証情報、設定、履歴、ログを利用し、Codex CLIが更新する場合があります。ImplementerとReviewerに同じCODEX_HOMEを使います。専用CODEX_HOMEを分ける場合は、任意の追加引数で指定できます。使い捨てCODEX_HOMEや認証情報のコピーは必要ありません。
 
-```json
-{"disposable":true}
-```
-
-確認ファイルの存在は、プロファイルの使い捨て性をプログラムが保証するものではありません。作業者が専用パスであることを確認し、そのプロファイルを使う準備を済ませてください。Codex CLIが書く状態やログはそのディレクトリ内に残ります。認証を行う場合も、通常利用中のプロファイルから認証情報をコピーせず、使い捨てプロファイルごとに用意してください。
+通常のCODEX_HOMEを使うと、そのユーザーのCodex設定・認証状態を両方の呼び出しで共有します。設定や認証情報へのアクセスを分離したい場合は、専用のCODEX_HOMEやDocker・VMなどを選べますが、PoCの実行条件ではありません。
 
 ```powershell
 dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- run examples/task-contract.json `
   --agent codex `
   --codex-exe "C:/path/to/codex.exe" `
-  --implementer-codex-home "C:/scratch/codex-implementer" `
-  --reviewer-codex-home "C:/scratch/codex-reviewer" `
   --runs ./.ateliers-orchestrator/runs
 ```
 
-Implementerは契約の作業領域で `workspace-write`、ReviewerはGit差分を含む固定成果物だけを別の一時作業領域へ受け取り `read-only` で実行します。Codex CLIを各役割につき1回だけ起動し、失敗時の再試行、自動修正、PR作成・mergeは行わず、人間判断待ちで停止します。子プロセスには許可した環境変数だけを渡し、役割ごとに別の `CODEX_HOME`、`HOME`、`APPDATA`、`LOCALAPPDATA`、一時領域を設定します。`--ask-for-approval never` を指定するため、非対話run中に承認待ち画面は出ません。Codexのsandboxモード設定は行いますが、OS全体の隔離境界としては扱いません。拒否された操作はAgent失敗として記録します。子Agent/再委譲を無効化できることは実証していないため、完全に記録できたとは扱いません。timeoutとCtrl+C停止要求を区別し、kill結果、終了確認、stream切断を分けて保存します。killはCodex turn中断の保証ではありません。Unattended `codex exec` の例は[OpenAI Cookbook](https://developers.openai.com/cookbook/examples/codex/build_iterative_repair_loops_with_codex)を参照しています。
+Implementerは契約の作業領域で `workspace-write`、ReviewerはGit差分を含む固定成果物だけを別の一時作業領域へ受け取り `read-only` で実行します。Codex CLIを各役割につき1回だけ起動し、失敗時の再試行、自動修正、自動マージは行わず、人間判断待ちで停止します。子プロセスには許可した環境変数だけを渡し、APIキー等の認証環境変数は渡しませんが、HTTP(S)プロキシ変数は接続に必要なため引き継ぎます。既知のHTTP(S)・ALL_PROXY URLとuser-info内の認証情報は、CLIの標準出力・標準エラーを実行記録へ保存する前にマスキングします。これは既知の値と認証部分に限る保護であり、未知の秘密値、CLI側で変形・分割された断片、別形式で出力された値の完全な秘匿は保証しません。生ログと応答はこの範囲外の秘密情報を含む可能性があるため、実行ディレクトリのアクセスと保持を管理してください。`--config approval_policy="never"` を指定するため、非対話run中に承認待ち画面は出ません。Codexのsandboxモード設定は行いますが、OS全体の隔離境界としては扱いません。拒否された操作はAgent失敗として記録します。子Agent/再委譲を無効化できることは実証していないため、完全に記録できたとは扱いません。timeoutとCtrl+C停止要求を区別し、kill結果、終了確認、stream切断を分けて保存します。killはCodex turn中断の保証ではありません。Unattended `codex exec` の例は[OpenAI Cookbook](https://developers.openai.com/cookbook/examples/codex/build_iterative_repair_loops_with_codex)を参照しています。
 
 実行ごとにCLI JSONL、stderr、最終応答、process/thread識別子、terminal event、終了コード、取得できたtoken usageを保存します。CLI版情報は追加プロセスを起動せず「未取得」と記録します。stderr警告単独では成功・失敗を判定しません。token数は実費・請求額・硬い予算上限ではありません。生ログと応答は秘密情報を含む可能性があるため、実行ディレクトリのアクセスと保持を管理してください。GitHub push・PR作成・mergeはこのコマンドから行わず、人間が最終PR判断を行います。
 
