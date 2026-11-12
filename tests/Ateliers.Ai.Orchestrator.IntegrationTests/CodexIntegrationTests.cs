@@ -84,6 +84,23 @@ public sealed class CodexIntegrationTests
 
                 ValidateAgentEvidence(runDirectory, implementerCalls[0], "implementer", requireResponse: true);
                 ValidateAgentEvidence(runDirectory, reviewerCalls[0], "reviewer", requireResponse: false);
+                var reviewerEvidencePath = Path.Combine(runDirectory, "exchanges", "reviewer-1", "execution-evidence.json");
+                string? reviewerArtifactSha256;
+                using (var reviewerEvidence = JsonDocument.Parse(await File.ReadAllBytesAsync(reviewerEvidencePath)))
+                {
+                    var reviewerWorkingDirectory = reviewerEvidence.RootElement.GetProperty("WorkingDirectory").GetString();
+                    var expectedReviewerWorkspace = Path.Combine(runDirectory, "exchanges", "reviewer-1", "workspace");
+                    Assert.True(StringComparer.OrdinalIgnoreCase.Equals(
+                        Path.GetFullPath(expectedReviewerWorkspace), Path.GetFullPath(reviewerWorkingDirectory!)),
+                        "Reviewerの作業ディレクトリが実行記録内の専用workspaceではありません。");
+                    Assert.False(Path.GetFullPath(reviewerWorkingDirectory!).StartsWith(
+                        Path.GetFullPath(fixture.RepositoryDirectory) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase),
+                        "Reviewerの作業ディレクトリがImplementerのcheckout内です。");
+                    Assert.True(StringComparer.OrdinalIgnoreCase.Equals(Path.GetFullPath(reviewerWorkingDirectory!),
+                        Path.GetFullPath((await RunGitAsync(reviewerWorkingDirectory!, "rev-parse", "--show-toplevel")).Trim())),
+                        "Reviewerの作業ディレクトリが独立したGitルートではありません。");
+                    reviewerArtifactSha256 = reviewerEvidence.RootElement.GetProperty("ArtifactSha256").GetString();
+                }
                 ValidateReferences(runDirectory, implementerCalls[0]);
                 ValidateReferences(runDirectory, reviewerCalls[0]);
 
@@ -94,6 +111,7 @@ public sealed class CodexIntegrationTests
                 Assert.True(File.Exists(artifactPath), $"固定成果物がありません: {artifactReference}");
                 var artifact = await File.ReadAllTextAsync(artifactPath);
                 var frozenDiff = ExtractUnifiedDiff(artifact);
+                Assert.Equal(fixedArtifact.GetProperty("diffSha256").GetString(), reviewerArtifactSha256);
                 var finalDiff = await RunGitAsync(fixture.RepositoryDirectory, "diff", "--binary", "--no-ext-diff", "HEAD", "--");
                 Assert.Equal(NormalizeNewlines(frozenDiff), NormalizeNewlines(finalDiff));
                 Assert.Equal(fixedArtifact.GetProperty("diffSha256").GetString(), HashSha256(await File.ReadAllBytesAsync(artifactPath)));
