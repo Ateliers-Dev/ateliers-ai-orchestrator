@@ -29,8 +29,10 @@ public sealed record AgentRequest(
 /// <param name="Succeeded">呼び出しが成功したかを示します。</param>
 /// <param name="TimedOut">タイムアウトが観測されたかを示します。</param>
 /// <param name="SelfAssessment">役割自身による自己評価です。レビュー合格の根拠には使いません。</param>
-public sealed record AgentResponse(string Content, bool Succeeded = true, bool TimedOut = false,
-    string? SelfAssessment = null, AgentExecutionEvidence? ExecutionEvidence = null, bool StopRequested = false);
+/// <param name="ArtifactReferences">任意成果物の参照です。空またはnullを許容し、成果物形式は定めません。</param>
+public sealed record AgentResponse(string Content = "", bool Succeeded = true, bool TimedOut = false,
+    string? SelfAssessment = null, AgentExecutionEvidence? ExecutionEvidence = null, bool StopRequested = false,
+    IReadOnlyList<string>? ArtifactReferences = null);
 
 /// <summary>Agentプロセスから取得できた実行識別子と終了証跡です。</summary>
 /// <param name="ProcessId">起動したプロセスのIDです。</param>
@@ -262,8 +264,15 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                     var reviewResponse = InvokeAgent(() => agentRunner.Review(reviewRequest));
                     if (StopWasRequested(stopToken))
                         reviewResponse = reviewResponse with { Succeeded = false, StopRequested = true };
-                    oneShotReviewOutcome = !reviewResponse.Succeeded || reviewResponse.StopRequested || reviewResponse.TimedOut || string.IsNullOrWhiteSpace(reviewResponse.Content)
+                    var missingReviewerOutput = reviewResponse.Succeeded && !reviewResponse.StopRequested && !reviewResponse.TimedOut &&
+                        string.IsNullOrWhiteSpace(reviewResponse.Content) && reviewResponse.ArtifactReferences is not { Count: > 0 };
+                    if (missingReviewerOutput && reviewResponse.Succeeded)
+                        reviewResponse = reviewResponse with { Succeeded = false };
+                    oneShotReviewOutcome = !reviewResponse.Succeeded || reviewResponse.StopRequested || reviewResponse.TimedOut
                         ? Outcome(reviewResponse)
+                        : codexOneShot && reviewResponse.ArtifactReferences is { Count: > 0 } ? "任意成果物あり"
+                        : codexOneShot && string.IsNullOrWhiteSpace(reviewResponse.Content) ? "本文なし"
+                        : codexOneShot ? "応答あり"
                         : reviewResponse.Content.StartsWith("レビュー合格:", StringComparison.Ordinal) ? "合格"
                         : reviewResponse.Content.StartsWith("要件に判断が必要です:", StringComparison.Ordinal) ? "人間判断が必要"
                         : "指摘";
@@ -273,14 +282,16 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                         System.Text.Json.JsonSerializer.Serialize(new { role = "Reviewer", attempt = reviewAttempt,
                             workingDirectory = runDirectory, artifactReference = currentArtifact,
                             artifactSha256 = currentHash, contractSha256 }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
-                    var reviewResponseRef = SaveExchange(runDirectory, "reviewer", reviewAttempt, "response.md", reviewResponse.Content);
+                    var reviewResponseRef = string.IsNullOrWhiteSpace(reviewResponse.Content) ? null
+                        : SaveExchange(runDirectory, "reviewer", reviewAttempt, "response.md", reviewResponse.Content);
                     SaveExecutionEvidence(runDirectory, "reviewer", reviewAttempt, reviewResponse.ExecutionEvidence);
                     eventWriter.Append("agent_call", Outcome(reviewResponse), from: run.State, to: run.State,
-                        detail: "Reviewer応答を固定成果物参照と対応づけて記録しました。",
+                        detail: "Reviewerの実行結果と任意成果物参照を記録しました。",
                         inputReference: reviewRef, outputReference: reviewResponseRef,
-                        diffSha256: currentHash, elapsedMilliseconds: stopwatch.ElapsedMilliseconds, role: "Reviewer");
+                        diffSha256: currentHash, elapsedMilliseconds: stopwatch.ElapsedMilliseconds,
+                        role: "Reviewer", artifactReferences: reviewResponse.ArtifactReferences);
 
-                    if (!reviewResponse.Succeeded || reviewResponse.StopRequested || reviewResponse.TimedOut || string.IsNullOrWhiteSpace(reviewResponse.Content))
+                    if (!reviewResponse.Succeeded || reviewResponse.StopRequested || reviewResponse.TimedOut)
                     {
                         if (!codexOneShot && !reviewResponse.StopRequested && !reviewResponse.TimedOut && attempt <= contract.Limits.MaxRetries && retryAttempts < contract.Limits.MaxRetries)
                         {
@@ -290,19 +301,26 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                                 role: "Orchestrator");
                             continue;
                         }
-                        failure = AgentFailure("Reviewer", reviewResponse);
+                        failure = missingReviewerOutput ? "Reviewerは本文も任意成果物も返しませんでした。" : AgentFailure("Reviewer", reviewResponse);
                         run.Transition(codexOneShot || reviewResponse.TimedOut || reviewResponse.StopRequested ? RunState.NeedsHumanInput : RunState.Failed);
+                        break;
+                    }
+
+                    if (codexOneShot)
+                    {
+                        failure = "Reviewer呼び出しを完了しました。PoC完了地点で人間判断待ちに停止しました（受入・PR証跡は未確認）。";
+                        run.Transition(RunState.NeedsHumanInput);
+                        break;
+                    }
+                    if (string.IsNullOrWhiteSpace(reviewResponse.Content) && reviewResponse.ArtifactReferences is { Count: > 0 })
+                    {
+                        failure = "Reviewerは本文を返さず任意成果物を保存しました。成果物を確認するため人間判断待ちで停止します。";
+                        run.Transition(RunState.NeedsHumanInput);
                         break;
                     }
 
                     if (reviewResponse.Content.StartsWith("レビュー合格:", StringComparison.Ordinal))
                     {
-                        if (codexOneShot)
-                        {
-                            failure = "Reviewerは合格しました。PoC完了地点で人間判断待ちに停止しました（受入・PR証跡は未確認）。";
-                            run.Transition(RunState.NeedsHumanInput);
-                            break;
-                        }
                         var evidence = reviewEvidence;
                         var expectedCriteriaSha256 = Convert.ToHexStringLower(SHA256.HashData(
                             Encoding.UTF8.GetBytes(string.Join("\n", contract.AcceptanceCriteria))));

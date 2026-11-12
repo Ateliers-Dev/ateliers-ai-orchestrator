@@ -20,7 +20,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
     public AgentResponse Implement(AgentRequest request) => Invoke(request, "workspace-write");
 
     /// <inheritdoc />
-    public AgentResponse Review(AgentRequest request) => Invoke(request, "read-only");
+    public AgentResponse Review(AgentRequest request) => Invoke(request, "workspace-write");
 
     private AgentResponse Invoke(AgentRequest request, string sandbox) => InvokeAsync(request, sandbox).GetAwaiter().GetResult();
 
@@ -29,9 +29,13 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
         var role = request.Role == "Reviewer" ? "reviewer" : "implementer";
         var profileRoot = CodexCliRunnerOptions.ResolveCodexHome(
             role == "reviewer" ? options.ReviewerCodexHome : options.ImplementerCodexHome);
-        var evidenceDirectory = Path.Combine(request.RunDirectory ?? throw new InvalidOperationException("実行記録先が必要です。"),
+        var runDirectory = Path.GetFullPath(request.RunDirectory ?? throw new InvalidOperationException("実行記録先が必要です。"));
+        request = request with { RunDirectory = runDirectory };
+        var evidenceDirectory = Path.Combine(runDirectory,
             "exchanges", $"{role}-{request.Attempt}");
         Directory.CreateDirectory(evidenceDirectory);
+        var artifactDirectory = role == "reviewer" ? Path.Combine(evidenceDirectory, "artifacts") : null;
+        if (artifactDirectory is not null) Directory.CreateDirectory(artifactDirectory);
         var stdoutPath = Path.Combine(evidenceDirectory, "codex.stdout.jsonl");
         var stderrPath = Path.Combine(evidenceDirectory, "codex.stderr.txt");
         // The approved PoC must not launch an extra `codex --version` process.
@@ -43,32 +47,32 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
         string? stopReason = null;
         var start = new ProcessStartInfo(options.ExecutablePath)
         {
-            WorkingDirectory = role == "implementer" ? request.Contract.WorkingDirectory : Path.GetTempPath(),
+            WorkingDirectory = role == "implementer" ? request.Contract.WorkingDirectory : artifactDirectory!,
             UseShellExecute = false,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
+            StandardInputEncoding = Encoding.UTF8,
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8
         };
         foreach (var argument in options.PrefixArguments ?? []) start.ArgumentList.Add(argument);
-        foreach (var argument in new[] { "exec", "--json", "--sandbox", sandbox, "--config", "approval_policy=\"never\"", "-" })
+        foreach (var argument in new[] { "exec", "--json", "--sandbox", sandbox, "--config", "approval_policy=\"never\"" })
             start.ArgumentList.Add(argument);
+        if (role == "reviewer")
+        {
+            start.ArgumentList.Add("--config");
+            start.ArgumentList.Add("sandbox_workspace_write.writable_roots=[]");
+        }
+        start.ArgumentList.Add("-");
         PrepareEnvironment(start, profileRoot);
         var redactOutput = CreateProxyOutputRedactor(start.Environment);
         var prompt = BuildPrompt(request);
-        string? reviewWorkspace = null;
         if (role == "implementer" && request.Attempt == 1)
         {
             try { initialCommits[request.RunId] = PrepareCleanGitWorkspace(request.Contract.WorkingDirectory); }
             catch (Exception exception) when (exception is IOException or InvalidOperationException)
-            { error = exception.Message; }
-        }
-        else if (role == "reviewer")
-        {
-            try { reviewWorkspace = PrepareReviewerWorkspace(request); start.WorkingDirectory = reviewWorkspace; }
-            catch (Exception exception) when (exception is IOException or InvalidOperationException or UnauthorizedAccessException)
             { error = exception.Message; }
         }
         Process? process = null;
@@ -155,10 +159,22 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
         }
         finally { process?.Dispose(); }
 
+        IReadOnlyList<string> artifactReferences = [];
+        if (artifactDirectory is not null)
+        {
+            try { artifactReferences = CollectArtifactReferences(artifactDirectory, runDirectory); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                error ??= $"Reviewer任意成果物の参照を取得できませんでした: {exception.Message}";
+            }
+        }
+        var hasResponse = !string.IsNullOrWhiteSpace(response.ToString());
+        var hasArtifacts = artifactReferences.Count > 0;
         var succeeded = !stopRequested && !timedOut && error is null && terminalEvent == "turn.completed" && exitCode == 0 &&
-            !string.IsNullOrWhiteSpace(response.ToString());
+            (role == "reviewer" ? hasResponse || hasArtifacts : hasResponse);
         if (!succeeded && error is null)
-            error = stopReason == "caller-cancellation" ? "利用者の停止要求を受け付けました。" : timedOut ? "実行時間上限に到達しました。" :
+            error = role == "reviewer" && !hasResponse && !hasArtifacts ? "Reviewerは本文も任意成果物も返しませんでした。" :
+                stopReason == "caller-cancellation" ? "利用者の停止要求を受け付けました。" : timedOut ? "実行時間上限に到達しました。" :
                 $"完了条件不一致: terminal={terminalEvent ?? "未取得"}, exit={exitCode?.ToString() ?? "未取得"}, response={(string.IsNullOrWhiteSpace(response.ToString()) ? "空" : "取得済み")}";
         var content = response.ToString();
         string? selfAssessment = null;
@@ -177,17 +193,6 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
                 error = $"作業領域の変更差分を固定できませんでした: {exception.Message}";
             }
         }
-        if (reviewWorkspace is not null)
-        {
-            try { Directory.Delete(reviewWorkspace, recursive: true); }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                succeeded = false;
-                stopRequested = true;
-                stopReason = "review-workspace-cleanup-failed";
-                error ??= $"Reviewer作業領域の一時ファイルを削除できませんでした: {exception.Message}";
-            }
-        }
         error = error is null ? null : redactOutput(error);
         var evidence = new AgentExecutionEvidence(processId, threadId, cliVersion, terminalEvent, exitCode, usageJson,
             Path.GetRelativePath(request.RunDirectory!, stdoutPath).Replace('\\', '/'),
@@ -195,7 +200,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
             processExitObserved, streamsClosed, stopRequested, stopReason, Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(prompt))),
             start.WorkingDirectory, request.ArtifactSha256, error);
         return new AgentResponse(content, succeeded, timedOut, SelfAssessment: selfAssessment,
-            ExecutionEvidence: evidence, StopRequested: stopRequested);
+            ExecutionEvidence: evidence, StopRequested: stopRequested, ArtifactReferences: artifactReferences);
     }
 
     private static Func<string, string> CreateProxyOutputRedactor(IDictionary<string, string?> environment)
@@ -288,7 +293,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
         {
             var artifactPath = ResolveArtifactPath(request);
             var artifact = File.ReadAllText(artifactPath);
-            return $"ROLE=REVIEWER\nREVIEW_ATTEMPT: {request.Attempt}\nあなたは独立したReviewerです。実装者の会話・自己評価は受け取っていません。読み取り専用で、以下の固定成果物だけをレビューし、受け入れ条件に照らした阻害指摘または「レビュー合格:」で始まる結論を返してください。契約に記された作業範囲と許可操作を守ってください。{ScopeBoundaryInstruction}\n対象SHA-256: {request.ArtifactSha256}\n\n契約:\n{contract}\n\n固定成果物:\n{artifact}";
+            return $"ROLE=REVIEWER\nREVIEW_ATTEMPT: {request.Attempt}\nあなたは独立したReviewerです。実装者の会話・自己評価は受け取っていません。以下の固定成果物をレビューしてください。レビュー対象のソースコードや設計書は変更せず、必要な分析資料・提案などがあれば任意の形式・ファイル名で作業ディレクトリに保存できます。最終応答や保存ファイルに特定の成果物形式を求めません。契約に記された作業範囲と許可操作を守ってください。{ScopeBoundaryInstruction}\n任意成果物の保存先: {Path.Combine(request.RunDirectory!, "exchanges", $"reviewer-{request.Attempt}", "artifacts")}\n対象SHA-256: {request.ArtifactSha256}\n\n契約:\n{contract}\n\n固定成果物:\n{artifact}";
         }
         var revision = request.ReviewFinding is null ? "" : $"\n前回レビュー指摘:\n{request.ReviewFinding}\n";
         return $"ROLE=IMPLEMENTER\nあなたはImplementerです。契約に記された作業領域と許可操作の範囲内でのみ作業し、外部書込・削除・マージを行わず、変更後の unified diff とテスト結果を最終応答に含めてください。{ScopeBoundaryInstruction}\n\n契約:\n{contract}{revision}";
@@ -309,13 +314,25 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
         start.Environment["CODEX_HOME"] = profileRoot;
     }
 
-    private string PrepareReviewerWorkspace(AgentRequest request)
+    private static IReadOnlyList<string> CollectArtifactReferences(string artifactDirectory, string runDirectory)
     {
-        var artifactPath = ResolveArtifactPath(request);
-        var root = Path.Combine(Path.GetTempPath(), "Ateliers.Orchestrator.Reviewer", $"{request.RunId}-{request.Attempt}-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(root);
-        File.WriteAllText(Path.Combine(root, "fixed-artifact.md"), File.ReadAllText(artifactPath), new UTF8Encoding(false));
-        return root;
+        var references = new List<string>();
+        var pendingDirectories = new Stack<string>();
+        pendingDirectories.Push(artifactDirectory);
+        while (pendingDirectories.TryPop(out var directory))
+        {
+            foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+            {
+                var attributes = File.GetAttributes(entry);
+                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                    throw new IOException($"Reviewer成果物にsymlinkまたはreparse pointがあります: {Path.GetFileName(entry)}");
+                if ((attributes & FileAttributes.Directory) != 0)
+                    pendingDirectories.Push(entry);
+                else
+                    references.Add(Path.GetRelativePath(runDirectory, entry).Replace('\\', '/'));
+            }
+        }
+        return references;
     }
 
     private static string ResolveArtifactPath(AgentRequest request)

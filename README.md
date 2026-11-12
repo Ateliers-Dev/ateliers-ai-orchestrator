@@ -58,7 +58,7 @@ dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- run examples/task-contr
 
 **安全ゲート完了と実Codex CLI起動の追加承認までは、実Codex CLIを起動しないでください。--help と --version も起動に含みます。** 下記コマンドは仕様例であり、現時点での実行手順ではありません。
 
-実行対象は、契約の `workingDirectory` に指定した既存の開発checkoutを含むローカルディレクトリです。開始前に作業ツリーがcleanであることを確認します。変更を破棄してよいコピーの利用は推奨しますが必須ではありません。Implementerには `workspace-write`、Reviewerには固定差分だけを渡して `read-only` を設定します。契約の `scope` と操作範囲はAgentへの指示です。ローカル実行では、その範囲を超えるアクセスをOSが完全に封じるものではありません。
+実行対象は、契約の `workingDirectory` に指定した既存の開発checkoutを含むローカルディレクトリです。開始前に作業ツリーがcleanであることを確認します。変更を破棄してよいコピーの利用は推奨しますが必須ではありません。Implementerには `workspace-write` を適用します。Reviewerには固定差分を入力として渡し、書込可能な作業ディレクトリをレビュー対象のcheckoutから分離します。レビュー対象のソースコード・設計書は変更せず、必要な任意成果物は実行記録配下へ保存します。契約の `scope` と操作範囲はAgentへの指示です。ローカル実行では、その範囲を超えるアクセスをOSが完全に封じるものではありません。
 
 CODEX_HOMEは `CODEX_HOME` 環境変数、または通常のユーザープロファイル（`~/.codex`）を既定で使います。既存の認証情報、設定、履歴、ログを利用し、Codex CLIが更新する場合があります。ImplementerとReviewerに同じCODEX_HOMEを使います。専用CODEX_HOMEを分ける場合は、任意の追加引数で指定できます。使い捨てCODEX_HOMEや認証情報のコピーは必要ありません。
 
@@ -71,7 +71,7 @@ dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- run examples/task-contr
   --runs ./.ateliers-orchestrator/runs
 ```
 
-Implementerは契約の作業領域で `workspace-write`、ReviewerはGit差分を含む固定成果物だけを別の一時作業領域へ受け取り `read-only` で実行します。Codex CLIを各役割につき1回だけ起動し、失敗時の再試行、自動修正、自動マージは行わず、人間判断待ちで停止します。子プロセスには許可した環境変数だけを渡し、APIキー等の認証環境変数は渡しませんが、HTTP(S)プロキシ変数は接続に必要なため引き継ぎます。既知のHTTP(S)・ALL_PROXY URLとuser-info内の認証情報は、CLIの標準出力・標準エラーを実行記録へ保存する前にマスキングします。これは既知の値と認証部分に限る保護であり、未知の秘密値、CLI側で変形・分割された断片、別形式で出力された値の完全な秘匿は保証しません。生ログと応答はこの範囲外の秘密情報を含む可能性があるため、実行ディレクトリのアクセスと保持を管理してください。`--config approval_policy="never"` を指定するため、非対話run中に承認待ち画面は出ません。Codexのsandboxモード設定は行いますが、OS全体の隔離境界としては扱いません。拒否された操作はAgent失敗として記録します。子Agent/再委譲を無効化できることは実証していないため、完全に記録できたとは扱いません。timeoutとCtrl+C停止要求を区別し、kill結果、終了確認、stream切断を分けて保存します。killはCodex turn中断の保証ではありません。Unattended `codex exec` の例は[OpenAI Cookbook](https://developers.openai.com/cookbook/examples/codex/build_iterative_repair_loops_with_codex)を参照しています。
+Implementerは契約の作業領域で `workspace-write`、Reviewerは固定成果物を入力として受け取り、実際のcheckoutから分離した `exchanges/reviewer-N/artifacts` を `workspace-write` の作業ディレクトリにして実行します。Reviewer起動時はCodex CLIの `--config sandbox_workspace_write.writable_roots=[]` で、既存のユーザー・プロジェクト設定による追加書込ルートを無効にします。Reviewerはレビュー対象のソースコード・設計書を変更せず、必要な成果物を任意のファイル名・形式で保存できます。生成ファイルは `artifactReferences` として実行イベントに記録されます。Agentの処理状態と成果物参照は分けて扱い、成果物の種類やファイル形式は定めません。Codex CLIを各役割につき1回だけ起動し、失敗時の再試行、自動修正、自動マージは行わず、人間判断待ちで停止します。子プロセスには許可した環境変数だけを渡し、APIキー等の認証環境変数は渡しませんが、HTTP(S)プロキシ変数は接続に必要なため引き継ぎます。既知のHTTP(S)・ALL_PROXY URLとuser-info内の認証情報は、CLIの標準出力・標準エラーを実行記録へ保存する前にマスキングします。これは既知の値と認証部分に限る保護であり、未知の秘密値、CLI側で変形・分割された断片、別形式で出力された値の完全な秘匿は保証しません。生ログと応答はこの範囲外の秘密情報を含む可能性があるため、実行ディレクトリのアクセスと保持を管理してください。`--config approval_policy="never"` を指定するため、非対話run中に承認待ち画面は出ません。Codexのsandboxモード設定は行いますが、OS全体の隔離境界としては扱いません。拒否された操作はAgent失敗として記録します。子Agent/再委譲を無効化できることは実証していないため、完全に記録できたとは扱いません。timeoutとCtrl+C停止要求を区別し、kill結果、終了確認、stream切断を分けて保存します。killはCodex turn中断の保証ではありません。Unattended `codex exec` の例は[OpenAI Cookbook](https://developers.openai.com/cookbook/examples/codex/build_iterative_repair_loops_with_codex)を参照しています。
 
 実行ごとにCLI JSONL、stderr、最終応答、process/thread識別子、terminal event、終了コード、取得できたtoken usageを保存します。CLI版情報は追加プロセスを起動せず「未取得」と記録します。stderr警告単独では成功・失敗を判定しません。token数は実費・請求額・硬い予算上限ではありません。生ログと応答は秘密情報を含む可能性があるため、実行ディレクトリのアクセスと保持を管理してください。GitHub push・PR作成・mergeはこのコマンドから行わず、人間が最終PR判断を行います。
 

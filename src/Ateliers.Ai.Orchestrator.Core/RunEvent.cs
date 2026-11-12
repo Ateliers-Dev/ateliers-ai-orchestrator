@@ -26,6 +26,8 @@ public sealed record RunEvent
     public string? InputReference { get; init; }
     /// <summary>出力資料または応答を特定する参照です。</summary>
     public string? OutputReference { get; init; }
+    /// <summary>Agentが任意に生成した成果物の参照です。</summary>
+    public IReadOnlyList<string> ArtifactReferences { get; init; } = [];
     /// <summary>対象となるGitコミットを取得できた場合のSHAです。</summary>
     public string? TargetCommitSha { get; init; }
     /// <summary>レビュー対象差分のSHA-256です。</summary>
@@ -56,12 +58,14 @@ public interface IRunEventWriter
     /// <param name="diffSha256">対象差分のSHA-256です。</param>
     /// <param name="elapsedMilliseconds">経過時間です。</param>
     /// <param name="unknownInformation">未取得情報です。</param>
+    /// <param name="artifactReferences">任意成果物の参照です。</param>
     /// <param name="role">記録上のイベント発生役割です。</param>
     /// <returns>永続化したイベントです。</returns>
     RunEvent Append(string eventType, string result, RunState? from = null, RunState? to = null,
         string? detail = null, string? error = null, string? inputReference = null,
         string? outputReference = null, string? targetCommitSha = null, string? diffSha256 = null,
         long? elapsedMilliseconds = null, IReadOnlyList<string>? unknownInformation = null,
+        IReadOnlyList<string>? artifactReferences = null,
         string role = "Orchestrator");
 }
 
@@ -120,6 +124,7 @@ public sealed class JsonlRunEventStore : IRunEventWriter, IDisposable
         string? diffSha256 = null,
         long? elapsedMilliseconds = null,
         IReadOnlyList<string>? unknownInformation = null,
+        IReadOnlyList<string>? artifactReferences = null,
         string role = "Orchestrator")
     {
         var nextSequence = sequence + 1;
@@ -140,7 +145,8 @@ public sealed class JsonlRunEventStore : IRunEventWriter, IDisposable
             ElapsedMilliseconds = elapsedMilliseconds,
             Detail = detail,
             Error = error,
-            UnknownInformation = unknownInformation ?? []
+            UnknownInformation = unknownInformation ?? [],
+            ArtifactReferences = artifactReferences ?? []
         };
         var line = JsonSerializer.Serialize(item, JsonOptions) + "\n";
         var bytes = System.Text.Encoding.UTF8.GetBytes(line);

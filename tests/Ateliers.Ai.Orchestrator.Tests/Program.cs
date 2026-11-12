@@ -105,6 +105,12 @@ static int RunFakeCodexFixture(string[] args)
     if (mode == "cancel") { Thread.Sleep(5_000); return 0; }
     if (mode == "kill-failure") { Thread.Sleep(500); return 0; }
     if (prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal)) File.WriteAllText("example.txt", "fixture change\n");
+    if (prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal) && mode is "workflow" or "artifact-only")
+    {
+        File.WriteAllText("review-notes.txt", "fixture supplemental artifact");
+        Directory.CreateDirectory("analysis");
+        File.WriteAllText(Path.Combine("analysis", "proposal.json"), "{\"proposal\":true}");
+    }
     Console.WriteLine($"{{\"type\":\"fixture.arguments\",\"arguments\":{JsonSerializer.Serialize(args)}}}");
     Console.WriteLine($"{{\"type\":\"fixture.environment\",\"openai_key_present\":{(Environment.GetEnvironmentVariable("OPENAI_API_KEY") is null ? "false" : "true")},\"https_proxy_present\":{(Environment.GetEnvironmentVariable("HTTPS_PROXY") is null ? "false" : "true")}}}");
     var environmentPaths = new Dictionary<string, string?>
@@ -127,14 +133,15 @@ static int RunFakeCodexFixture(string[] args)
         : "thread-fixture-implementer";
     Console.WriteLine($"{{\"type\":\"thread.started\",\"thread_id\":\"{threadId}\"}}");
     Console.WriteLine("{\"type\":\"future.unknown\",\"extra\":true}");
-    if (mode != "empty")
+    if (mode != "empty" && !(mode == "artifact-only" && prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal)))
     {
         var message = mode == "proxy-output" && prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal)
             ? "レビュー合格: proxy credentials split-proxy-user / split-proxy-password"
             : mode == "proxy-output" ? "proxy credentials split-proxy-user / split-proxy-password"
             : mode == "workflow" && prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal)
             ? prompt.Contains("REVIEW_ATTEMPT: 1", StringComparison.Ordinal) ? "指摘: テスト結果を明記してください。" : "レビュー合格: fixture reviewed fixed artifact"
-            : mode == "workflow" ? "IMPLEMENTER-SELF-ASSESSMENT-SECRET" : "fixture response";
+            : (mode is "workflow" or "artifact-only") && prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal)
+                ? "IMPLEMENTER-SELF-ASSESSMENT-SECRET" : "fixture response";
         var serializedMessage = JsonSerializer.Serialize(message);
         Console.WriteLine($"{{\"type\":\"item.completed\",\"item\":{{\"type\":\"agent_message\",\"text\":{serializedMessage}}}}}");
     }
@@ -295,6 +302,16 @@ static void CodexMalformedAndEmptyResponsesFail()
             var response = runner.Implement(request);
             Assert.False(response.Succeeded, $"{scenario} が成功扱いされました。");
             Assert.True(File.Exists(Path.Combine(request.RunDirectory!, response.ExecutionEvidence!.StandardOutputReference!)));
+            if (scenario == "empty")
+            {
+                var artifactPath = Path.Combine(request.RunDirectory!, "fixture-artifact.md");
+                File.WriteAllText(artifactPath, "fixed reviewer input");
+                var artifactSha256 = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(artifactPath)));
+                var reviewerResponse = runner.Review(request with
+                    { Role = "Reviewer", ArtifactReference = "fixture-artifact.md", ArtifactSha256 = artifactSha256 });
+                Assert.False(reviewerResponse.Succeeded, "本文・成果物ともに空のReviewerを成功扱いしました。");
+                Assert.True(reviewerResponse.ExecutionEvidence!.Error!.Contains("本文も任意成果物も返しませんでした", StringComparison.Ordinal));
+            }
         }
     }
 }
@@ -419,7 +436,7 @@ static void CodexExistingProfilesAreAccepted()
 
 static void CodexFakeProcessesCompleteIndependentReviewSlice()
 {
-    var (runner, request, root) = CreateCodexFixture("workflow");
+    var (runner, request, root) = CreateCodexFixture("artifact-only");
     using (root)
     {
         var eventPath = Path.Combine(request.RunDirectory!, "events.jsonl");
@@ -432,18 +449,18 @@ static void CodexFakeProcessesCompleteIndependentReviewSlice()
         Assert.Equal(1, result.ImplementationCalls);
         Assert.Equal(1, result.ReviewCalls);
         var firstReviewRequest = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "request.json"));
-        Assert.True(firstReviewRequest.Contains(result.ArtifactSha256!, StringComparison.Ordinal));
+        Assert.True(firstReviewRequest.Contains(result.ArtifactSha256!, StringComparison.Ordinal), "レビュー要求に固定成果物ハッシュがありません。");
         Assert.False(firstReviewRequest.Contains("自己評価", StringComparison.Ordinal));
         var firstReviewEvidence = JsonDocument.Parse(File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "execution-evidence.json")));
         Assert.Equal("thread-fixture-reviewer-1", firstReviewEvidence.RootElement.GetProperty("ThreadId").GetString());
         Assert.Equal(result.ArtifactSha256, firstReviewEvidence.RootElement.GetProperty("ArtifactSha256").GetString());
         var report = File.ReadAllText(Path.Combine(request.RunDirectory!, result.ReportReference));
-        Assert.True(report.Contains("thread-fixture-implementer", StringComparison.Ordinal));
-        Assert.True(report.Contains("thread-fixture-reviewer-1", StringComparison.Ordinal));
+        Assert.True(report.Contains("thread-fixture-implementer", StringComparison.Ordinal), "レポートにImplementer実行識別子がありません。");
+        Assert.True(report.Contains("thread-fixture-reviewer-1", StringComparison.Ordinal), "レポートにReviewer実行識別子がありません。");
         Assert.False(report.Contains("thread-fixture-reviewer-2", StringComparison.Ordinal), "Reviewerが二回起動しています。");
-        Assert.True(report.Contains("CLI=未取得", StringComparison.Ordinal));
-        Assert.True(report.Contains("実費・請求額・硬い予算上限: 未取得", StringComparison.Ordinal));
-        Assert.True(File.Exists(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "self-assessment.md")));
+        Assert.True(report.Contains("CLI=未取得", StringComparison.Ordinal), "レポートにCLI版の未取得状態がありません。");
+        Assert.True(report.Contains("実費・請求額・硬い予算上限: 未取得", StringComparison.Ordinal), "レポートに費用情報の未取得状態がありません。");
+        Assert.True(File.Exists(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "self-assessment.md")), "Implementerの自己評価記録がありません。");
         Assert.True(File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "self-assessment.md"))
             .Contains("IMPLEMENTER-SELF-ASSESSMENT-SECRET", StringComparison.Ordinal));
         var implementerStdout = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "codex.stdout.jsonl"));
@@ -453,7 +470,28 @@ static void CodexFakeProcessesCompleteIndependentReviewSlice()
         var firstReviewStdout = File.ReadAllText(firstReviewStdoutPath);
         Assert.True(firstReviewStdout.Contains("\"self_assessment_present\":false", StringComparison.Ordinal),
             "ReviewerプロンプトにImplementerの自己評価が混入しました。");
-        AssertCodexFixturePolicy(firstReviewStdout, "read-only", "Reviewer");
+        AssertCodexFixturePolicy(firstReviewStdout, "workspace-write", "Reviewer");
+        var reviewerArtifact = Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "artifacts", "review-notes.txt");
+        Assert.True(File.Exists(reviewerArtifact), "Reviewerが生成した任意成果物が保持されていません。");
+        Assert.Equal("fixture supplemental artifact", File.ReadAllText(reviewerArtifact));
+        var nestedReviewerArtifact = Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "artifacts", "analysis", "proposal.json");
+        Assert.Equal("{\"proposal\":true}", File.ReadAllText(nestedReviewerArtifact));
+        Assert.False(Path.GetFullPath(reviewerArtifact).StartsWith(
+            Path.GetFullPath(request.Contract.WorkingDirectory) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase),
+            "Reviewer成果物出力先がレビュー対象の作業領域内にあります。");
+        var reviewExecutionEvidence = JsonDocument.Parse(File.ReadAllText(
+            Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "execution-evidence.json")));
+        Assert.Equal(Path.GetDirectoryName(reviewerArtifact), reviewExecutionEvidence.RootElement.GetProperty("WorkingDirectory").GetString());
+        var reviewCallEvent = JsonDocument.Parse(File.ReadAllLines(eventPath)
+            .First(line => line.Contains("\"role\":\"Reviewer\"", StringComparison.Ordinal) &&
+                line.Contains("\"eventType\":\"agent_call\"", StringComparison.Ordinal)));
+        var artifactReferences = reviewCallEvent.RootElement.GetProperty("artifactReferences").EnumerateArray()
+            .Select(item => item.GetString()).ToHashSet(StringComparer.Ordinal);
+        Assert.True(artifactReferences.SetEquals([
+            "exchanges/reviewer-1/artifacts/review-notes.txt",
+            "exchanges/reviewer-1/artifacts/analysis/proposal.json"]), "任意成果物の参照がすべてイベントに記録されていません。");
+        Assert.False(File.Exists(Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "response.md")),
+            "本文を返さないReviewerに固定形式のresponse.mdを要求しました。");
         var implementerPaths = ReadFakeEnvironmentPaths(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "codex.stdout.jsonl"));
         var reviewerPaths = ReadFakeEnvironmentPaths(firstReviewStdoutPath);
         Assert.Equal(Path.Combine(root.Path, "implementer-profile"), implementerPaths["CODEX_HOME"]);
@@ -486,6 +524,14 @@ static void AssertCodexFixturePolicy(string stdout, string expectedSandbox, stri
     Assert.True(approvalConfigIndex >= 0 && approvalConfigIndex + 1 < arguments.Length &&
         arguments[approvalConfigIndex + 1] == "approval_policy=\"never\"",
         "非対話Codex runの承認設定が確認できません。");
+    var rootsConfigIndex = Array.LastIndexOf(arguments, "--config");
+    if (role == "Reviewer")
+        Assert.True(rootsConfigIndex >= 0 && rootsConfigIndex + 1 < arguments.Length &&
+            arguments[rootsConfigIndex + 1] == "sandbox_workspace_write.writable_roots=[]",
+            "Reviewerの既存追加書込ルートが空配列で上書きされていません。");
+    else
+        Assert.False(arguments.Contains("sandbox_workspace_write.writable_roots=[]", StringComparer.Ordinal),
+            "Reviewer専用のsandbox上書きがImplementerへ適用されました。");
 }
 
 static Dictionary<string, string> ReadFakeEnvironmentPaths(string stdoutPath)
@@ -713,7 +759,19 @@ static void CodexOneShotStopsWithoutRetries()
             Assert.True(stopEvent.RootElement.GetProperty("detail").GetString()!.Contains("Reviewer結果=timeout", StringComparison.Ordinal));
             Assert.True(stopEvent.RootElement.GetProperty("detail").GetString()!.Contains("停止理由=Reviewerがタイムアウトしました。", StringComparison.Ordinal));
         }
-        if (result.ArtifactSha256 is not null)
+        if (scenario == FakeScenario.ReviewerEmptyResponse)
+        {
+            using var reviewerEvent = JsonDocument.Parse(File.ReadAllLines(Path.Combine(runDirectory, "events.jsonl"))
+                .First(line => line.Contains("\"eventType\":\"agent_call\"", StringComparison.Ordinal) &&
+                    line.Contains("\"role\":\"Reviewer\"", StringComparison.Ordinal)));
+            Assert.Equal("failed", reviewerEvent.RootElement.GetProperty("result").GetString(),
+                "本文・成果物ともに空のReviewerが成功として記録されました。");
+            using var emptyOutputStopEvent = JsonDocument.Parse(File.ReadAllLines(Path.Combine(runDirectory, "events.jsonl"))
+                .Last(line => line.Contains("codex_one_shot_stopped", StringComparison.Ordinal)));
+            Assert.True(emptyOutputStopEvent.RootElement.GetProperty("detail").GetString()!.Contains("Reviewer結果=failed", StringComparison.Ordinal),
+                "空応答がone-shot停止理由へ失敗として反映されていません。");
+        }
+        if (result.ArtifactSha256 is not null && scenario != FakeScenario.ReviewerEmptyResponse)
         {
             Assert.True(events.Contains(result.ArtifactSha256, StringComparison.Ordinal), $"{scenario} の成果物SHA-256が記録されていません。");
             Assert.True(File.Exists(Path.Combine(runDirectory, "exchanges", "reviewer-1", "response.md")),
@@ -728,7 +786,7 @@ static void FakeStopAndFailureScenariosAreRecorded()
     AssertScenario(FakeScenario.ImplementerFailure, RunState.Failed, "Implementerが失敗");
     AssertScenario(FakeScenario.EmptyResponse, RunState.Failed, "空応答");
     AssertScenario(FakeScenario.Timeout, RunState.NeedsHumanInput, "タイムアウト");
-    AssertScenario(FakeScenario.ReviewerEmptyResponse, RunState.Failed, "空応答");
+    AssertScenario(FakeScenario.ReviewerEmptyResponse, RunState.Failed, "本文も任意成果物も返しませんでした");
     AssertScenario(FakeScenario.ReviewerTimeout, RunState.NeedsHumanInput, "タイムアウト");
 
     static void AssertScenario(FakeScenario scenario, RunState expected, string detail)
@@ -1393,6 +1451,7 @@ sealed class FailingEventWriter(string failureEventType, bool failReadyTransitio
         string? detail = null, string? error = null, string? inputReference = null,
         string? outputReference = null, string? targetCommitSha = null, string? diffSha256 = null,
         long? elapsedMilliseconds = null, IReadOnlyList<string>? unknownInformation = null,
+        IReadOnlyList<string>? artifactReferences = null,
         string role = "Orchestrator")
     {
         if (to == RunState.ReadyForHumanReview) ReadyTransitions++;
@@ -1400,7 +1459,7 @@ sealed class FailingEventWriter(string failureEventType, bool failReadyTransitio
             throw new IOException("テスト用の記録失敗です。");
         if (innerWriter is not null)
             return innerWriter.Append(eventType, result, from, to, detail, error, inputReference, outputReference,
-                targetCommitSha, diffSha256, elapsedMilliseconds, unknownInformation, role);
+                targetCommitSha, diffSha256, elapsedMilliseconds, unknownInformation, artifactReferences, role);
         return new RunEvent
         {
             RunId = "test",
@@ -1413,6 +1472,7 @@ sealed class FailingEventWriter(string failureEventType, bool failReadyTransitio
             ToState = to,
             Detail = detail,
             Error = error,
+            ArtifactReferences = artifactReferences ?? [],
             InputReference = inputReference,
             OutputReference = outputReference,
             TargetCommitSha = targetCommitSha,
