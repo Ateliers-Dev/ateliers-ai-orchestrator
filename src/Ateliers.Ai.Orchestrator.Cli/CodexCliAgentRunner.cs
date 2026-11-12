@@ -178,7 +178,8 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
             (role == "reviewer" ? hasResponse || hasArtifacts : hasResponse);
         if (!succeeded && error is null)
             error = exitCode is { } failedExitCode && failedExitCode != 0
-                ? BuildCliFailureDiagnostic(failedExitCode, terminalEvent, stderrPath)
+                ? BuildCliFailureDiagnostic(failedExitCode, terminalEvent,
+                    Path.GetRelativePath(request.RunDirectory!, stderrPath).Replace('\\', '/'))
                 : role == "reviewer" && !hasResponse && !hasArtifacts ? "Reviewerは本文も任意成果物も返しませんでした。" :
                 stopReason == "caller-cancellation" ? "利用者の停止要求を受け付けました。" : timedOut ? "実行時間上限に到達しました。" :
                 $"完了条件不一致: terminal={terminalEvent ?? "未取得"}, exit={exitCode?.ToString() ?? "未取得"}, response={(string.IsNullOrWhiteSpace(response.ToString()) ? "空" : "取得済み")}";
@@ -240,15 +241,8 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
         start.ArgumentList.Add(command);
     }
 
-    private static string BuildCliFailureDiagnostic(int exitCode, string? terminalEvent, string stderrPath)
-    {
-        const int maxDiagnosticCharacters = 4_000;
-        var stderr = File.Exists(stderrPath) ? File.ReadAllText(stderrPath, StrictUtf8).Trim() : string.Empty;
-        if (stderr.Length > maxDiagnosticCharacters)
-            stderr = "…(stderr末尾を表示)\n" + stderr[^maxDiagnosticCharacters..];
-        var diagnostic = $"Codex CLIが終了コード {exitCode} で終了しました。terminal={terminalEvent ?? "未取得"}";
-        return string.IsNullOrWhiteSpace(stderr) ? diagnostic : $"{diagnostic}{Environment.NewLine}stderr:{Environment.NewLine}{stderr}";
-    }
+    private static string BuildCliFailureDiagnostic(int exitCode, string? terminalEvent, string stderrReference) =>
+        $"Codex CLIが終了コード {exitCode} で終了しました。terminal={terminalEvent ?? "未取得"}; stderrログ参照: {stderrReference}";
 
     private static Func<string, string> CreateProxyOutputRedactor(IDictionary<string, string?> environment)
     {
