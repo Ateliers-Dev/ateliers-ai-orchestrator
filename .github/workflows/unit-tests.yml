@@ -30,5 +30,8 @@ jobs:
       - name: Run Fake-only unit tests
         run: dotnet run --project tests/Ateliers.Ai.Orchestrator.Tests/Ateliers.Ai.Orchestrator.Tests.csproj --configuration Release --no-build --no-restore -- --unit
 
-      - name: Run Slack HTTP unit and opt-in integration tests
-        run: dotnet test tests/Ateliers.Slack.Tests/Ateliers.Slack.Tests.csproj --configuration Release --no-build --no-restore
+      - name: Run Slack unit tests
+        run: dotnet test tests/Ateliers.Slack.UnitTests/Ateliers.Slack.UnitTests.csproj --configuration Release --no-build --no-restore
+
+      - name: Run opt-in Slack integration tests
+        run: dotnet test tests/Ateliers.Slack.IntegrationTests/Ateliers.Slack.IntegrationTests.csproj --configuration Release --no-build --no-restore

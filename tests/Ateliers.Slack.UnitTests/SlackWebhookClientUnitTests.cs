@@ -3,9 +3,9 @@ using System.Text.Json;
 using Ateliers.Slack;
 using Xunit;
 
-namespace Ateliers.Slack.Tests;
+namespace Ateliers.Slack.UnitTests;
 
-public sealed class SlackWebhookClientTests
+public sealed class SlackWebhookClientUnitTests
 {
     private static readonly Uri TestWebhookUri = new("https://hooks.slack.com/services/test/fake/token");
 
@@ -101,36 +101,5 @@ public sealed class SlackWebhookClientTests
             RequestBodies.Add(request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken));
             return responder(request);
         }
-    }
-}
-
-public sealed class SlackWebhookIntegrationTests
-{
-    private const string TestWebhookEnvironmentVariable = "ATELIERS_SLACK_TEST_WEBHOOK_URL";
-
-    [SlackWebhookFact]
-    [Trait("Category", "ExternalIntegration")]
-    public async Task SendMessageAsync_PostsIdentifiableTestNotification()
-    {
-        var webhookUrl = Environment.GetEnvironmentVariable(TestWebhookEnvironmentVariable);
-        Assert.False(string.IsNullOrWhiteSpace(webhookUrl));
-        Assert.True(Uri.TryCreate(webhookUrl, UriKind.Absolute, out var webhookUri) &&
-            webhookUri.Scheme == Uri.UriSchemeHttps && string.IsNullOrEmpty(webhookUri.UserInfo),
-            $"{TestWebhookEnvironmentVariable} must contain an absolute HTTPS URL.");
-
-        var runId = Guid.NewGuid().ToString("N");
-        var message = $"[TEST] Ateliers.Slack Integration Test\nRun ID: {runId}";
-        using var client = new SlackWebhookClient(webhookUri!);
-
-        await client.SendMessageAsync(message);
-    }
-}
-
-public sealed class SlackWebhookFactAttribute : FactAttribute
-{
-    public SlackWebhookFactAttribute()
-    {
-        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ATELIERS_SLACK_TEST_WEBHOOK_URL")))
-            Skip = "ATELIERS_SLACK_TEST_WEBHOOK_URL is not set; live Slack delivery is opt-in.";
     }
 }
