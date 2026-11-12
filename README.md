@@ -24,6 +24,10 @@ Codex経路はImplementerを最大1回、独立Reviewerを最大1回だけ起動
 
 実行方式はローカルディスク上でのCodex CLI直接実行を標準とし、DockerやVM、専用Windowsユーザーを利用者へ必須とはしません。Docker・VM・専用Windowsユーザーによる隔離は任意の将来方式です（専用WindowsユーザーはIssue #5で扱います）。実Codex CLI起動、ChatGPT認証、実モデル呼び出し、課金・利用枠消費は、このPoC変更の承認範囲外です。
 
+### Phase 1: Dockerから独立した開発・検証
+
+Phase 1のCore、CLI、通常テストはDockerプロジェクトに依存しません。標準ソリューションにはCore、CLI、Fakeとプロセス偽物を使う通常テストだけを含め、テストから外部実行基盤の起動や可用性確認を行いません。Docker実装は将来Phase 2で再検討する任意拡張としてソースに残しますが、Phase 1のビルド、テスト、完了判定には含めません。
+
 ## 必要環境
 
 - .NET SDK 10
@@ -58,7 +62,7 @@ dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- run examples/task-contr
 
 CODEX_HOMEは `CODEX_HOME` 環境変数、または通常のユーザープロファイル（`~/.codex`）を既定で使います。既存の認証情報、設定、履歴、ログを利用し、Codex CLIが更新する場合があります。ImplementerとReviewerに同じCODEX_HOMEを使います。専用CODEX_HOMEを分ける場合は、任意の追加引数で指定できます。使い捨てCODEX_HOMEや認証情報のコピーは必要ありません。
 
-通常のCODEX_HOMEを使うと、そのユーザーのCodex設定・認証状態を両方の呼び出しで共有します。設定や認証情報へのアクセスを分離したい場合は、専用のCODEX_HOMEやDocker・VMなどを選べますが、PoCの実行条件ではありません。
+通常のCODEX_HOMEを使うと、そのユーザーのCodex設定・認証状態を両方の呼び出しで共有します。設定や認証情報へのアクセスを分離したい場合は、専用のCODEX_HOMEを指定できますが、PoCの実行条件ではありません。
 
 ```powershell
 dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- run examples/task-contract.json `
@@ -87,7 +91,7 @@ JSONLには実行ID、連番、UTC時刻、役割、イベント種別、状態�
 
 ## テスト
 
-依存パッケージを使わない自動テストハーネスを実行します。
+依存パッケージを使わない自動テストハーネスを実行します。通常テストはCoreの状態・保存処理とCLI/Codex実行境界をFakeで検証し、実モデルや外部実行基盤を起動しません。実Codex受入は通常テストとは別の opt-in 手順が整うまで未実施です。
 
 ```powershell
 dotnet run --project tests/Ateliers.Ai.Orchestrator.Tests

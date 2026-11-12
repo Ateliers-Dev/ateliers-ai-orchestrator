@@ -1,0 +1,31 @@
+name: C# unit tests
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore solution
+        run: dotnet restore Ateliers.Ai.Orchestrator.sln
+
+      - name: Build solution
+        run: dotnet build Ateliers.Ai.Orchestrator.sln --configuration Release --no-restore
+
+      - name: Run Fake-only unit tests
+        run: dotnet run --project tests/Ateliers.Ai.Orchestrator.Tests/Ateliers.Ai.Orchestrator.Tests.csproj --configuration Release --no-build --no-restore -- --unit

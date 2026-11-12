@@ -85,7 +85,7 @@ public sealed class DockerIsolationExecutor : IIsolationExecutor
 
         // This lock-protected commit is the launch linearization point. If stop wins, no start CLI is spawned;
         // if launch wins, a later stop is accepted and the bounded cleanup path runs.
-        if (!startGate.TryBeginContainerStart(out _))
+        if (!startGate.TryBeginSequencedStart(out _))
         {
             var cleanupBeforeStart = await CleanupAsync(containerId);
             return Result(IsolationExecutionStatus.StopRequested, null, cleanupBeforeStart.TerminationConfirmed,
@@ -173,8 +173,8 @@ public sealed class DockerIsolationExecutor : IIsolationExecutor
         {
             if (cancellationToken.IsCancellationRequested) startGate.RequestStop();
             var allowed = startAlreadyCommitted || (arguments.Count >= 3 && arguments[0] == "start"
-                ? startGate.TryBeginContainerStart(out _)
-                : startGate.TryBeginDockerOperation());
+                ? startGate.TryBeginSequencedStart(out _)
+                : startGate.TryBeginOperation());
             if (!allowed) return DockerCommandResult.StopBeforeStart();
         }
 

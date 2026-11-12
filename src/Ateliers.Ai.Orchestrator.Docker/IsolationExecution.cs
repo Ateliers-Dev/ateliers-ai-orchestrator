@@ -1,4 +1,6 @@
-namespace Ateliers.Ai.Orchestrator.Core;
+using Ateliers.Ai.Orchestrator.Core;
+
+namespace Ateliers.Ai.Orchestrator.Docker;
 
 /// <summary>隔離実行へ渡す最小の役割別要求です。</summary>
 public sealed record IsolationExecutionRequest(string RunId, string Role, int Attempt,
@@ -12,7 +14,7 @@ public enum IsolationExecutionStatus
     Succeeded,
     /// <summary>実行は終了しましたが正常終了しませんでした。</summary>
     Failed,
-    /// <summary>Fake AgentまたはDocker操作が期限を超えました。</summary>
+    /// <summary>隔離Agent操作が期限を超えました。</summary>
     TimedOut,
     /// <summary>呼び出し元から停止が要求されました。</summary>
     StopRequested,

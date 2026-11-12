@@ -22,8 +22,7 @@ public sealed record AgentRequest(
     string? ReviewFinding = null,
     string? RunDirectory = null,
     TimeSpan? RemainingTime = null,
-    CancellationToken StopToken = default,
-    RunStartGate? StartGate = null);
+    CancellationToken StopToken = default);
 
 /// <summary>Agent呼び出しの結果と、実行環境が観測できた範囲を表します。</summary>
 /// <param name="Content">Agentの応答本文です。</param>
@@ -146,8 +145,6 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
         IAgentRunner agentRunner, IRunEventWriter eventWriter, HumanReviewEvidence? reviewEvidence = null,
         CancellationToken stopToken = default, bool codexOneShot = false)
     {
-        var startGate = new RunStartGate();
-        using var stopRegistration = stopToken.Register(static state => ((RunStartGate)state!).RequestStop(), startGate);
         Directory.CreateDirectory(runDirectory);
         var existingEntries = Directory.EnumerateFileSystemEntries(runDirectory).ToArray();
         var onlyNewEventLog = existingEntries.Length == 1 &&
@@ -193,15 +190,15 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                 var implementRequest = new AgentRequest(runId, "Implementer", contract, implementationAttempt,
                     ReviewFinding: lastFinding, RunDirectory: runDirectory,
                     RemainingTime: TimeSpan.FromMinutes(contract.Limits.MaxDurationMinutes) - stopwatch.Elapsed,
-                    StopToken: stopToken, StartGate: startGate);
-                if (StopWasRequested(stopToken, startGate))
+                    StopToken: stopToken);
+                if (StopWasRequested(stopToken))
                 {
                     failure = "Implementer起動前に停止要求を受け付けました。";
                     run.Transition(RunState.NeedsHumanInput);
                     break;
                 }
                 var implementResponse = InvokeAgent(() => agentRunner.Implement(implementRequest));
-                if (StopWasRequested(stopToken, startGate))
+                if (StopWasRequested(stopToken))
                     implementResponse = implementResponse with { Succeeded = false, StopRequested = true };
                 if (implementResponse.ExecutionEvidence is { } implementEvidence)
                     executionEvidence.Add(("Implementer", implementationAttempt, implementEvidence));
@@ -255,15 +252,15 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                     var reviewRequest = new AgentRequest(runId, "Reviewer", contract, reviewAttempt,
                         currentArtifact, currentHash, RunDirectory: runDirectory,
                         RemainingTime: TimeSpan.FromMinutes(contract.Limits.MaxDurationMinutes) - stopwatch.Elapsed,
-                        StopToken: stopToken, StartGate: startGate);
-                    if (StopWasRequested(stopToken, startGate))
+                        StopToken: stopToken);
+                    if (StopWasRequested(stopToken))
                     {
                         failure = "Reviewer起動前に停止要求を受け付けました。成果物をhandoffしません。";
                         run.Transition(RunState.NeedsHumanInput);
                         break;
                     }
                     var reviewResponse = InvokeAgent(() => agentRunner.Review(reviewRequest));
-                    if (StopWasRequested(stopToken, startGate))
+                    if (StopWasRequested(stopToken))
                         reviewResponse = reviewResponse with { Succeeded = false, StopRequested = true };
                     oneShotReviewOutcome = !reviewResponse.Succeeded || reviewResponse.StopRequested || reviewResponse.TimedOut || string.IsNullOrWhiteSpace(reviewResponse.Content)
                         ? Outcome(reviewResponse)
@@ -459,11 +456,7 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
         catch (Exception exception) { return new($"Agent実行境界で例外が発生しました ({exception.GetType().Name})。", Succeeded: false); }
     }
 
-    private static bool StopWasRequested(CancellationToken token, RunStartGate gate)
-    {
-        if (token.IsCancellationRequested) gate.RequestStop();
-        return gate.IsStopRequested;
-    }
+    private static bool StopWasRequested(CancellationToken token) => token.IsCancellationRequested;
 }
 
 internal sealed class PhysicalFakeWorkflowStorage : IFakeWorkflowStorage
