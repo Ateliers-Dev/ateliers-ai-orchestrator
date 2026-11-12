@@ -98,7 +98,7 @@ public sealed class CodexIntegrationTests
                 Assert.Equal(NormalizeNewlines(frozenDiff), NormalizeNewlines(finalDiff));
                 Assert.Equal(fixedArtifact.GetProperty("diffSha256").GetString(), HashSha256(await File.ReadAllBytesAsync(artifactPath)));
 
-                var changedPaths = ParsePorcelainPaths(await RunGitAsync(fixture.RepositoryDirectory, "status", "--porcelain", "--untracked-files=all"));
+                var changedPaths = ParsePorcelainPaths(await RunGitAsync(fixture.RepositoryDirectory, "status", "--porcelain", "-z", "--untracked-files=all"));
                 Assert.Equal([IsolatedFixture.TargetFile], changedPaths);
                 var targetContents = await File.ReadAllTextAsync(Path.Combine(fixture.RepositoryDirectory, IsolatedFixture.TargetFile));
                 Assert.Contains(IsolatedFixture.ExpectedMarker, targetContents, StringComparison.Ordinal);
@@ -200,16 +200,16 @@ public sealed class CodexIntegrationTests
         Assert.True(File.Exists(evidencePath), $"{role}の終了証跡ファイルがありません。");
         using var evidenceDocument = JsonDocument.Parse(File.ReadAllBytes(evidencePath));
         var evidence = evidenceDocument.RootElement;
-        Assert.True(evidence.GetProperty("processExitObserved").GetBoolean(), $"{role}のプロセス終了を確認できませんでした。");
-        Assert.True(evidence.GetProperty("streamsClosed").GetBoolean(), $"{role}の出力stream終了を確認できませんでした。");
-        Assert.Equal("turn.completed", evidence.GetProperty("terminalEvent").GetString());
-        Assert.Equal(0, evidence.GetProperty("exitCode").GetInt32());
-        Assert.True(evidence.GetProperty("processId").GetInt32() > 0, $"{role}のプロセスIDがありません。");
-        Assert.False(evidence.GetProperty("stopRequested").GetBoolean() || evidence.GetProperty("timedOut").GetBoolean(),
+        Assert.True(evidence.GetProperty("ProcessExitObserved").GetBoolean(), $"{role}のプロセス終了を確認できませんでした。");
+        Assert.True(evidence.GetProperty("StreamsClosed").GetBoolean(), $"{role}の出力stream終了を確認できませんでした。");
+        Assert.Equal("turn.completed", evidence.GetProperty("TerminalEvent").GetString());
+        Assert.Equal(0, evidence.GetProperty("ExitCode").GetInt32());
+        Assert.True(evidence.GetProperty("ProcessId").GetInt32() > 0, $"{role}のプロセスIDがありません。");
+        Assert.False(evidence.GetProperty("StopRequested").GetBoolean() || evidence.GetProperty("TimedOut").GetBoolean(),
             $"{role}が停止要求またはtimeoutで終了しました。");
 
-        var stdoutReference = evidence.GetProperty("standardOutputReference").GetString();
-        var stderrReference = evidence.GetProperty("standardErrorReference").GetString();
+        var stdoutReference = evidence.GetProperty("StandardOutputReference").GetString();
+        var stderrReference = evidence.GetProperty("StandardErrorReference").GetString();
         Assert.True(stdoutReference is not null && File.Exists(ResolveRunReference(runDirectory, stdoutReference)), $"{role}のJSONL応答ログ参照が不正です。");
         Assert.True(stderrReference is not null && File.Exists(ResolveRunReference(runDirectory, stderrReference)), $"{role}のstderrログ参照が不正です。");
         if (requireResponse)
@@ -245,7 +245,7 @@ public sealed class CodexIntegrationTests
         index += start.Length;
         var end = artifact.IndexOf("\n```", index, StringComparison.Ordinal);
         Assert.True(end >= 0, "固定成果物のdiff囲みが閉じていません。");
-        return artifact[index..end] + "\n";
+        return artifact[index..end];
     }
 
     private static string[] ParsePorcelainPaths(string status) => status.Split('\0', StringSplitOptions.RemoveEmptyEntries)
