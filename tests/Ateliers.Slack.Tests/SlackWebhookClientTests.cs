@@ -13,14 +13,13 @@ public sealed class SlackWebhookClientTests
     public async Task SendMessageAsync_PostsSlackPayloadAndAcceptsOkResponse()
     {
         using var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") });
-        using var httpClient = new HttpClient(handler);
-        var client = new SlackWebhookClient(httpClient, TestWebhookUri);
+        using var client = new SlackWebhookClient(TestWebhookUri, handler);
 
         await client.SendMessageAsync("unit test notification");
 
-        Assert.Equal(HttpMethod.Post, handler.Request!.Method);
-        Assert.Equal(TestWebhookUri, handler.Request.RequestUri);
-        using var payload = JsonDocument.Parse(handler.RequestBody!);
+        Assert.Equal(HttpMethod.Post, handler.Requests[0].Method);
+        Assert.Equal(TestWebhookUri, handler.Requests[0].RequestUri);
+        using var payload = JsonDocument.Parse(handler.RequestBodies[0]!);
         Assert.Equal("unit test notification", payload.RootElement.GetProperty("text").GetString());
     }
 
@@ -31,8 +30,7 @@ public sealed class SlackWebhookClientTests
         {
             Content = new StringContent(TestWebhookUri.ToString())
         });
-        using var httpClient = new HttpClient(handler);
-        var client = new SlackWebhookClient(httpClient, TestWebhookUri);
+        using var client = new SlackWebhookClient(TestWebhookUri, handler);
 
         var exception = await Assert.ThrowsAsync<SlackNotificationException>(() => client.SendMessageAsync("test"));
 
@@ -44,8 +42,7 @@ public sealed class SlackWebhookClientTests
     public async Task SendMessageAsync_TransportErrorDoesNotExposeWebhookUrl()
     {
         using var handler = new RecordingHandler(_ => throw new HttpRequestException($"Failed at {TestWebhookUri}"));
-        using var httpClient = new HttpClient(handler);
-        var client = new SlackWebhookClient(httpClient, TestWebhookUri);
+        using var client = new SlackWebhookClient(TestWebhookUri, handler);
 
         var exception = await Assert.ThrowsAsync<SlackNotificationException>(() => client.SendMessageAsync("test"));
 
@@ -58,8 +55,7 @@ public sealed class SlackWebhookClientTests
     public async Task SendMessageAsync_UnexpectedSuccessBodyIsRejected()
     {
         using var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("not ok") });
-        using var httpClient = new HttpClient(handler);
-        var client = new SlackWebhookClient(httpClient, TestWebhookUri);
+        using var client = new SlackWebhookClient(TestWebhookUri, handler);
 
         var exception = await Assert.ThrowsAsync<SlackNotificationException>(() => client.SendMessageAsync("test"));
 
@@ -67,15 +63,42 @@ public sealed class SlackWebhookClientTests
         Assert.DoesNotContain("not ok", exception.ToString(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task SendMessageAsync_RedirectIsReturnedAsFailureWithoutPostingToLocation()
+    {
+        var redirectUri = new Uri("https://redirect-target.invalid/collect");
+        using var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.TemporaryRedirect)
+        {
+            Headers = { Location = redirectUri }
+        });
+        using var client = new SlackWebhookClient(TestWebhookUri, handler);
+
+        var exception = await Assert.ThrowsAsync<SlackNotificationException>(() => client.SendMessageAsync("redirect test"));
+
+        Assert.Equal(HttpStatusCode.TemporaryRedirect, exception.StatusCode);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(TestWebhookUri, request.RequestUri);
+        using var payload = JsonDocument.Parse(Assert.Single(handler.RequestBodies)!);
+        Assert.Equal("redirect test", payload.RootElement.GetProperty("text").GetString());
+    }
+
+    [Fact]
+    public void ProductionHandler_DisablesAutomaticRedirects()
+    {
+        using var handler = SlackWebhookClient.CreateHandler();
+
+        Assert.False(handler.AllowAutoRedirect);
+    }
+
     private sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
     {
-        public HttpRequestMessage? Request { get; private set; }
-        public string? RequestBody { get; private set; }
+        public List<HttpRequestMessage> Requests { get; } = [];
+        public List<string?> RequestBodies { get; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            Request = request;
-            RequestBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
+            Requests.Add(request);
+            RequestBodies.Add(request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken));
             return responder(request);
         }
     }
@@ -97,8 +120,7 @@ public sealed class SlackWebhookIntegrationTests
 
         var runId = Guid.NewGuid().ToString("N");
         var message = $"[TEST] Ateliers.Slack Integration Test\nRun ID: {runId}";
-        using var httpClient = new HttpClient();
-        var client = new SlackWebhookClient(httpClient, webhookUri!);
+        using var client = new SlackWebhookClient(webhookUri!);
 
         await client.SendMessageAsync(message);
     }

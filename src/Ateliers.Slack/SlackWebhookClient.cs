@@ -3,25 +3,30 @@ using System.Net.Http.Json;
 
 namespace Ateliers.Slack;
 
-public sealed class SlackWebhookClient
+public sealed class SlackWebhookClient : IDisposable
 {
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
     private readonly HttpClient httpClient;
     private readonly Uri webhookUri;
 
-    public SlackWebhookClient(HttpClient httpClient, Uri webhookUri)
+    public SlackWebhookClient(Uri webhookUri)
+        : this(webhookUri, CreateHandler())
     {
-        ArgumentNullException.ThrowIfNull(httpClient);
+    }
+
+    internal SlackWebhookClient(Uri webhookUri, HttpMessageHandler handler)
+    {
         ArgumentNullException.ThrowIfNull(webhookUri);
+        ArgumentNullException.ThrowIfNull(handler);
 
         if (!webhookUri.IsAbsoluteUri || webhookUri.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(webhookUri.UserInfo))
             throw new ArgumentException("Webhook URL must be an absolute HTTPS URL.", nameof(webhookUri));
 
-        this.httpClient = httpClient;
+        httpClient = new HttpClient(handler);
         this.webhookUri = webhookUri;
     }
 
-    public static SlackWebhookClient CreateForProduction(HttpClient httpClient)
+    public static SlackWebhookClient CreateForProduction()
     {
         var webhookUrl = Environment.GetEnvironmentVariable("ATELIERS_SLACK_WEBHOOK_URL");
         if (string.IsNullOrWhiteSpace(webhookUrl) ||
@@ -31,8 +36,10 @@ public sealed class SlackWebhookClient
             throw new InvalidOperationException("ATELIERS_SLACK_WEBHOOK_URL is missing or invalid.");
         }
 
-        return new SlackWebhookClient(httpClient, webhookUri);
+        return new SlackWebhookClient(webhookUri);
     }
+
+    internal static HttpClientHandler CreateHandler() => new() { AllowAutoRedirect = false };
 
     public async Task SendMessageAsync(string message, CancellationToken cancellationToken = default)
     {
@@ -64,6 +71,8 @@ public sealed class SlackWebhookClient
             throw SlackNotificationException.TransportFailure();
         }
     }
+
+    public void Dispose() => httpClient.Dispose();
 
     private sealed record SlackMessage(string Text);
 }
