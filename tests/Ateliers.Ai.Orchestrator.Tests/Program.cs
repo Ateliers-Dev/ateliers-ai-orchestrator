@@ -302,6 +302,16 @@ static void CodexMalformedAndEmptyResponsesFail()
             var response = runner.Implement(request);
             Assert.False(response.Succeeded, $"{scenario} が成功扱いされました。");
             Assert.True(File.Exists(Path.Combine(request.RunDirectory!, response.ExecutionEvidence!.StandardOutputReference!)));
+            if (scenario == "empty")
+            {
+                var artifactPath = Path.Combine(request.RunDirectory!, "fixture-artifact.md");
+                File.WriteAllText(artifactPath, "fixed reviewer input");
+                var artifactSha256 = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(artifactPath)));
+                var reviewerResponse = runner.Review(request with
+                    { Role = "Reviewer", ArtifactReference = "fixture-artifact.md", ArtifactSha256 = artifactSha256 });
+                Assert.False(reviewerResponse.Succeeded, "本文・成果物ともに空のReviewerを成功扱いしました。");
+                Assert.True(reviewerResponse.ExecutionEvidence!.Error!.Contains("本文も任意成果物も返しませんでした", StringComparison.Ordinal));
+            }
         }
     }
 }
@@ -514,6 +524,14 @@ static void AssertCodexFixturePolicy(string stdout, string expectedSandbox, stri
     Assert.True(approvalConfigIndex >= 0 && approvalConfigIndex + 1 < arguments.Length &&
         arguments[approvalConfigIndex + 1] == "approval_policy=\"never\"",
         "非対話Codex runの承認設定が確認できません。");
+    var rootsConfigIndex = Array.LastIndexOf(arguments, "--config");
+    if (role == "Reviewer")
+        Assert.True(rootsConfigIndex >= 0 && rootsConfigIndex + 1 < arguments.Length &&
+            arguments[rootsConfigIndex + 1] == "sandbox_workspace_write.writable_roots=[]",
+            "Reviewerの既存追加書込ルートが空配列で上書きされていません。");
+    else
+        Assert.False(arguments.Contains("sandbox_workspace_write.writable_roots=[]", StringComparer.Ordinal),
+            "Reviewer専用のsandbox上書きがImplementerへ適用されました。");
 }
 
 static Dictionary<string, string> ReadFakeEnvironmentPaths(string stdoutPath)
@@ -741,6 +759,18 @@ static void CodexOneShotStopsWithoutRetries()
             Assert.True(stopEvent.RootElement.GetProperty("detail").GetString()!.Contains("Reviewer結果=timeout", StringComparison.Ordinal));
             Assert.True(stopEvent.RootElement.GetProperty("detail").GetString()!.Contains("停止理由=Reviewerがタイムアウトしました。", StringComparison.Ordinal));
         }
+        if (scenario == FakeScenario.ReviewerEmptyResponse)
+        {
+            using var reviewerEvent = JsonDocument.Parse(File.ReadAllLines(Path.Combine(runDirectory, "events.jsonl"))
+                .First(line => line.Contains("\"eventType\":\"agent_call\"", StringComparison.Ordinal) &&
+                    line.Contains("\"role\":\"Reviewer\"", StringComparison.Ordinal)));
+            Assert.Equal("failed", reviewerEvent.RootElement.GetProperty("result").GetString(),
+                "本文・成果物ともに空のReviewerが成功として記録されました。");
+            using var emptyOutputStopEvent = JsonDocument.Parse(File.ReadAllLines(Path.Combine(runDirectory, "events.jsonl"))
+                .Last(line => line.Contains("codex_one_shot_stopped", StringComparison.Ordinal)));
+            Assert.True(emptyOutputStopEvent.RootElement.GetProperty("detail").GetString()!.Contains("Reviewer結果=failed", StringComparison.Ordinal),
+                "空応答がone-shot停止理由へ失敗として反映されていません。");
+        }
         if (result.ArtifactSha256 is not null && scenario != FakeScenario.ReviewerEmptyResponse)
         {
             Assert.True(events.Contains(result.ArtifactSha256, StringComparison.Ordinal), $"{scenario} の成果物SHA-256が記録されていません。");
@@ -756,7 +786,7 @@ static void FakeStopAndFailureScenariosAreRecorded()
     AssertScenario(FakeScenario.ImplementerFailure, RunState.Failed, "Implementerが失敗");
     AssertScenario(FakeScenario.EmptyResponse, RunState.Failed, "空応答");
     AssertScenario(FakeScenario.Timeout, RunState.NeedsHumanInput, "タイムアウト");
-    AssertScenario(FakeScenario.ReviewerEmptyResponse, RunState.Failed, "空応答");
+    AssertScenario(FakeScenario.ReviewerEmptyResponse, RunState.Failed, "本文も任意成果物も返しませんでした");
     AssertScenario(FakeScenario.ReviewerTimeout, RunState.NeedsHumanInput, "タイムアウト");
 
     static void AssertScenario(FakeScenario scenario, RunState expected, string detail)

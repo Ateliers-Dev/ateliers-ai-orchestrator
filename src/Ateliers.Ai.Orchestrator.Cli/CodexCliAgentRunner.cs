@@ -58,8 +58,14 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
             StandardErrorEncoding = Encoding.UTF8
         };
         foreach (var argument in options.PrefixArguments ?? []) start.ArgumentList.Add(argument);
-        foreach (var argument in new[] { "exec", "--json", "--sandbox", sandbox, "--config", "approval_policy=\"never\"", "-" })
+        foreach (var argument in new[] { "exec", "--json", "--sandbox", sandbox, "--config", "approval_policy=\"never\"" })
             start.ArgumentList.Add(argument);
+        if (role == "reviewer")
+        {
+            start.ArgumentList.Add("--config");
+            start.ArgumentList.Add("sandbox_workspace_write.writable_roots=[]");
+        }
+        start.ArgumentList.Add("-");
         PrepareEnvironment(start, profileRoot);
         var redactOutput = CreateProxyOutputRedactor(start.Environment);
         var prompt = BuildPrompt(request);
@@ -153,10 +159,22 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
         }
         finally { process?.Dispose(); }
 
+        IReadOnlyList<string> artifactReferences = [];
+        if (artifactDirectory is not null)
+        {
+            try { artifactReferences = CollectArtifactReferences(artifactDirectory, runDirectory); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                error ??= $"Reviewer任意成果物の参照を取得できませんでした: {exception.Message}";
+            }
+        }
+        var hasResponse = !string.IsNullOrWhiteSpace(response.ToString());
+        var hasArtifacts = artifactReferences.Count > 0;
         var succeeded = !stopRequested && !timedOut && error is null && terminalEvent == "turn.completed" && exitCode == 0 &&
-            (role == "reviewer" || !string.IsNullOrWhiteSpace(response.ToString()));
+            (role == "reviewer" ? hasResponse || hasArtifacts : hasResponse);
         if (!succeeded && error is null)
-            error = stopReason == "caller-cancellation" ? "利用者の停止要求を受け付けました。" : timedOut ? "実行時間上限に到達しました。" :
+            error = role == "reviewer" && !hasResponse && !hasArtifacts ? "Reviewerは本文も任意成果物も返しませんでした。" :
+                stopReason == "caller-cancellation" ? "利用者の停止要求を受け付けました。" : timedOut ? "実行時間上限に到達しました。" :
                 $"完了条件不一致: terminal={terminalEvent ?? "未取得"}, exit={exitCode?.ToString() ?? "未取得"}, response={(string.IsNullOrWhiteSpace(response.ToString()) ? "空" : "取得済み")}";
         var content = response.ToString();
         string? selfAssessment = null;
@@ -173,16 +191,6 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
             {
                 succeeded = false;
                 error = $"作業領域の変更差分を固定できませんでした: {exception.Message}";
-            }
-        }
-        IReadOnlyList<string> artifactReferences = [];
-        if (artifactDirectory is not null)
-        {
-            try { artifactReferences = CollectArtifactReferences(artifactDirectory, runDirectory); }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                succeeded = false;
-                error ??= $"Reviewer任意成果物の参照を取得できませんでした: {exception.Message}";
             }
         }
         error = error is null ? null : redactOutput(error);

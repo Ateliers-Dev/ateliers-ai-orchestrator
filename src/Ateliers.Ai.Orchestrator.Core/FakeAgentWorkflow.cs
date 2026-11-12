@@ -264,6 +264,10 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                     var reviewResponse = InvokeAgent(() => agentRunner.Review(reviewRequest));
                     if (StopWasRequested(stopToken))
                         reviewResponse = reviewResponse with { Succeeded = false, StopRequested = true };
+                    var missingReviewerOutput = reviewResponse.Succeeded && !reviewResponse.StopRequested && !reviewResponse.TimedOut &&
+                        string.IsNullOrWhiteSpace(reviewResponse.Content) && reviewResponse.ArtifactReferences is not { Count: > 0 };
+                    if (missingReviewerOutput && reviewResponse.Succeeded)
+                        reviewResponse = reviewResponse with { Succeeded = false };
                     oneShotReviewOutcome = !reviewResponse.Succeeded || reviewResponse.StopRequested || reviewResponse.TimedOut
                         ? Outcome(reviewResponse)
                         : codexOneShot && reviewResponse.ArtifactReferences is { Count: > 0 } ? "任意成果物あり"
@@ -287,8 +291,7 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                         diffSha256: currentHash, elapsedMilliseconds: stopwatch.ElapsedMilliseconds,
                         role: "Reviewer", artifactReferences: reviewResponse.ArtifactReferences);
 
-                    if (!reviewResponse.Succeeded || reviewResponse.StopRequested || reviewResponse.TimedOut ||
-                        (!codexOneShot && string.IsNullOrWhiteSpace(reviewResponse.Content)))
+                    if (!reviewResponse.Succeeded || reviewResponse.StopRequested || reviewResponse.TimedOut)
                     {
                         if (!codexOneShot && !reviewResponse.StopRequested && !reviewResponse.TimedOut && attempt <= contract.Limits.MaxRetries && retryAttempts < contract.Limits.MaxRetries)
                         {
@@ -298,7 +301,7 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                                 role: "Orchestrator");
                             continue;
                         }
-                        failure = AgentFailure("Reviewer", reviewResponse);
+                        failure = missingReviewerOutput ? "Reviewerは本文も任意成果物も返しませんでした。" : AgentFailure("Reviewer", reviewResponse);
                         run.Transition(codexOneShot || reviewResponse.TimedOut || reviewResponse.StopRequested ? RunState.NeedsHumanInput : RunState.Failed);
                         break;
                     }
@@ -306,6 +309,12 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                     if (codexOneShot)
                     {
                         failure = "Reviewer呼び出しを完了しました。PoC完了地点で人間判断待ちに停止しました（受入・PR証跡は未確認）。";
+                        run.Transition(RunState.NeedsHumanInput);
+                        break;
+                    }
+                    if (string.IsNullOrWhiteSpace(reviewResponse.Content) && reviewResponse.ArtifactReferences is { Count: > 0 })
+                    {
+                        failure = "Reviewerは本文を返さず任意成果物を保存しました。成果物を確認するため人間判断待ちで停止します。";
                         run.Transition(RunState.NeedsHumanInput);
                         break;
                     }
