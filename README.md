@@ -97,13 +97,15 @@ JSONLには実行ID、連番、UTC時刻、役割、イベント種別、状態�
 dotnet run --project tests/Ateliers.Ai.Orchestrator.Tests
 ```
 
-実Codex連携を一時Gitリポジトリで確認するIntegrationTestsは、別プロジェクトです。通常のbuild、Unit/Fakeテスト、GitHub Actionsからは実行されません。明示的に実行する場合は、.NET 10、Git、認証済みCodex CLI、モデル通信が可能な環境が必要です。最大2回のモデル呼び出しがあり、利用枠や費用が発生する場合があります。実行前に作業用アカウントの利用条件を確認してください。
+実Codex連携を一時Gitリポジトリで確認するIntegrationTestsは、xUnitプロジェクトです。通常の `dotnet test`、Visual Studioの全件実行、通常CIでは実Codex連携テストがSkipされ、モデル通信は起動しません。Issue #20のUnit/Fakeテストプロジェクトは今回変更していません。
 
-```powershell
-dotnet run --project tests/Ateliers.Ai.Orchestrator.IntegrationTests --configuration Release -- --run-codex "C:/path/to/codex.exe"
+明示的に実Codexを使う場合は、Windowsのユーザー環境変数に `ATELIERS_RUN_CODEX_INTEGRATION_TESTS=1` と `ATELIERS_CODEX_CLI_PATH=C:\絶対パス\codex.exe` を設定し、認証済みCodex CLIが使える環境でテストを実行してください。Visual Studioを使う場合は、環境変数を設定してからVisual Studioを起動し直し、テストエクスプローラーから個別テストまたは全件を実行します。環境変数が設定されていなければテストはSkipされます。
+
+```text
+dotnet test tests/Ateliers.Ai.Orchestrator.IntegrationTests/Ateliers.Ai.Orchestrator.IntegrationTests.csproj --configuration Release
 ```
 
-テストは一時ディレクトリにGit seed、task contract、実行記録先を作り、成功した場合に削除します。失敗した場合は診断に使えるよう一時ディレクトリを残し、場所を表示します。検証するのはImplementer/Reviewerの各1回、終了証跡とJSONLイベント・reportの整合性、`NeedsHumanInput`到達、契約対象ファイルだけの変更、Reviewerへ渡した固定差分と最終Git差分の一致、成果物参照先です。OSレベルの完全隔離を証明するテストではありません。
+opt-in時はImplementerとReviewerを各1回呼び出すため、モデル利用枠や費用が発生する場合があります。テストは一時ディレクトリにGit seed、task contract、実行記録先を作り、成功時に削除します。失敗時はfixtureとrun証跡を保持し、テスト失敗メッセージに保存場所とOrchestratorのstdout/stderrを含めます。`NeedsHumanInput` はCLI標準出力文字列だけに依存せず、永続化された `report.md` と `events.jsonl` の状態遷移・停止イベントで確認します。Implementer/Reviewerの各1回、終了証跡、イベント/report、契約対象ファイルだけの変更、固定差分と最終Git差分、成果物参照先も検証します。原因を確認できていない以前の失敗を成功扱いしません。OSレベルの完全隔離を証明するテストではありません。
 
 ソリューション全体のビルドは次の通りです。
 
