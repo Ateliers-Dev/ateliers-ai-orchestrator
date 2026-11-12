@@ -369,9 +369,12 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
         if (codexOneShot)
         {
             var reviewerOutcome = oneShotReviewOutcome ?? "未起動";
-            persistenceSucceeded &= TryPersist(() => eventWriter.Append("codex_one_shot_stopped", "needs_human_input", from: run.State, to: run.State,
+            var stopEventSaved = TryPersist(() => eventWriter.Append("codex_one_shot_stopped", "needs_human_input", from: run.State, to: run.State,
                 detail: $"Implementer呼び出し={implementationAttempt}; Reviewer呼び出し={reviewAttempt}; 成果物SHA-256={currentHash ?? "未作成"}; Reviewer結果={reviewerOutcome}; 停止理由={failure ?? "実行を終了し人間判断待ち"}",
                 diffSha256: currentHash, role: "Orchestrator"));
+            persistenceSucceeded &= stopEventSaved;
+            if (!stopEventSaved)
+                failure = AppendFailure(failure, "停止イベント codex_one_shot_stopped の保存に失敗しました。");
         }
 
         var reportPath = Path.Combine(runDirectory, "report.md");
@@ -400,15 +403,42 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
         }
         reportLines.AddRange(["", "## 未取得・未保証", "", "- 実費・請求額・硬い予算上限: 未取得", "- 子Agent/再委譲の完全な観測・無効化: 未検証", "- GitHubへの書込・PR作成: AgentRunnerでは未実施", "- CLIプロセスkillはAgent turnの中断保証ではありません。", "", "ローカル実行記録は耐改ざん・完全監査の台帳ではありません。", ""]);
         var report = string.Join(Environment.NewLine, reportLines);
-        persistenceSucceeded &= TryPersist(() => storage.WriteAllText(reportPath, report, new UTF8Encoding(false)));
-        persistenceSucceeded &= TryPersist(() => eventWriter.Append("report_written", "accepted", from: run.State, to: run.State,
-            outputReference: "report.md", elapsedMilliseconds: stopwatch.ElapsedMilliseconds,
-            unknownInformation: isFake ? ["実モデル・使用量・費用・PR操作は取得していません。"] :
-                ["モデル名・実費・請求額・硬い予算上限・PR操作は未取得です。", "子Agentの完全な観測・停止保証は未検証です。"],
-            role: "Orchestrator"));
-        if (!persistenceSucceeded && (failure is null || !failure.StartsWith("保存失敗のため", StringComparison.Ordinal)))
+        var reportSaved = TryPersist(() => storage.WriteAllText(reportPath, report, new UTF8Encoding(false)));
+        persistenceSucceeded &= reportSaved;
+        if (reportSaved)
         {
-            failure = "停止イベントまたはレポートの保存に失敗しました。状態は人間判断待ちですが、実行記録が不完全です。";
+            var reportEventSaved = TryPersist(() => eventWriter.Append("report_written", "accepted", from: run.State, to: run.State,
+                outputReference: "report.md", elapsedMilliseconds: stopwatch.ElapsedMilliseconds,
+                unknownInformation: isFake ? ["実モデル・使用量・費用・PR操作は取得していません。"] :
+                    ["モデル名・実費・請求額・硬い予算上限・PR操作は未取得です。", "子Agentの完全な観測・停止保証は未検証です。"],
+                role: "Orchestrator"));
+            persistenceSucceeded &= reportEventSaved;
+            if (!reportEventSaved)
+            {
+                failure = AppendFailure(failure, "報告保存イベント report_written の記録に失敗しました。");
+                run.StopInMemoryAfterPersistenceFailure();
+                var stateLineIndex = reportLines.FindIndex(line => line.StartsWith("- 状態: `", StringComparison.Ordinal));
+                reportLines[stateLineIndex] = $"- 状態: `{run.State}`";
+                report = string.Join(Environment.NewLine, reportLines);
+                report = report + $"{Environment.NewLine}- 永続化状態: 報告保存イベント report_written の記録に失敗しました。{Environment.NewLine}";
+                var reportUpdated = TryPersist(() => storage.WriteAllText(reportPath, report, new UTF8Encoding(false)));
+                persistenceSucceeded &= reportUpdated;
+                if (!reportUpdated)
+                    failure = AppendFailure(failure, "report.md への永続化失敗状態の追記にも失敗しました。");
+            }
+        }
+        else
+        {
+            failure = AppendFailure(failure, "報告 report.md の保存に失敗しました。");
+            var failureEventSaved = TryPersist(() => eventWriter.Append("report_write_failed", "needs_human_input", from: run.State, to: run.State,
+                detail: "報告 report.md の保存に失敗しました。", role: "Orchestrator"));
+            persistenceSucceeded &= failureEventSaved;
+            if (!failureEventSaved)
+                failure = AppendFailure(failure, "報告保存失敗イベント report_write_failed の記録にも失敗しました。");
+        }
+        if (!persistenceSucceeded)
+        {
+            failure = AppendFailure(failure, "状態は人間判断待ちですが、実行記録が不完全です。");
             run.StopInMemoryAfterPersistenceFailure();
         }
         return new FakeWorkflowResult(run.State, currentArtifact, currentHash, implementationAttempt,
@@ -440,6 +470,8 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
         try { write(); return true; }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { return false; }
     }
+
+    private static string AppendFailure(string? current, string addition) => current is null ? addition : $"{current} {addition}";
 
     private static string Outcome(AgentResponse response) => response.TimedOut ? "timeout" : response.StopRequested ? "stop_requested" :
         !response.Succeeded ? "failed" : string.IsNullOrWhiteSpace(response.Content) ? "empty" : "completed";

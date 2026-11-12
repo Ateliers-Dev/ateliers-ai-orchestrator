@@ -31,6 +31,9 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("再試行上限でReviewer失敗を終了する", ReviewerRetriesStopAtLimit);
     suite.Add("修正上限到達時に人間へ停止を報告する", RevisionLimitStopsForHuman);
     suite.Add("イベント保存失敗時に成功状態へ進まず部分成果物を保持する", EventWriteFailureDoesNotClaimSuccess);
+    suite.Add("停止イベント・報告保存失敗を実JSONLと結果へ反映する", ReportPersistenceFailuresAreConsistent);
+    suite.Add("report_written記録失敗後に保存済み報告を更新する", ReportWrittenEventFailureUpdatesReport);
+    suite.Add("Ready遷移後のreport_written失敗を報告状態へ反映する", ReadyReportWrittenEventFailureUpdatesState);
     suite.Add("Fake成果物保存失敗はReviewerを起動せず停止理由を記録する", FakeArtifactWriteFailureStopsAndReports);
     suite.Add("Fake Reviewer応答の途中保存失敗は追加Agentなしで停止する", FakeMidwayWriteFailureStopsAndReports);
     suite.Add("既存実行保存先を上書きせずに拒否する", ExistingRunDirectoryIsPreserved);
@@ -788,6 +791,155 @@ static void EventWriteFailureDoesNotClaimSuccess()
     Assert.Equal(0, writer.ReadyTransitions);
 }
 
+static void ReportPersistenceFailuresAreConsistent()
+{
+    using (var temp = new TemporaryDirectory())
+    {
+        var runDirectory = Path.Combine(temp.Path, "stop-event-fails");
+        Directory.CreateDirectory(runDirectory);
+        var runner = new CountingFakeAgentRunner(FakeScenario.Success);
+        FakeWorkflowResult result;
+        using (var store = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "stop-event-fails"))
+        {
+            var writer = new FailingEventWriter("codex_one_shot_stopped", innerWriter: store);
+            result = new FakeAgentWorkflow().Run(SampleContract(), new string('a', 64), "stop-event-fails", runDirectory,
+                runner, writer, codexOneShot: true);
+        }
+
+        Assert.Equal(RunState.NeedsHumanInput, result.State);
+        Assert.False(result.PersistenceSucceeded, "停止イベント保存失敗を永続化成功として返しました。");
+        Assert.Equal(1, runner.ImplementationCalls, "停止イベント保存失敗後にImplementerを再起動しました。");
+        Assert.Equal(1, runner.ReviewCalls, "停止イベント保存失敗後にReviewerを再起動しました。");
+        var report = File.ReadAllText(Path.Combine(runDirectory, "report.md"));
+        Assert.True(report.Contains("停止イベント codex_one_shot_stopped の保存に失敗", StringComparison.Ordinal),
+            "停止イベント保存失敗が保存済みレポートにありません。");
+        var events = File.ReadAllText(Path.Combine(runDirectory, "events.jsonl"));
+        Assert.True(events.Contains("\"eventType\":\"report_written\"", StringComparison.Ordinal),
+            "実在する報告を参照するreport_writtenイベントが記録されませんでした。");
+        Assert.False(events.Contains("\"eventType\":\"codex_one_shot_stopped\"", StringComparison.Ordinal),
+            "失敗注入した停止イベントがJSONLに記録されています。");
+    }
+
+    using (var temp = new TemporaryDirectory())
+    {
+        var runDirectory = Path.Combine(temp.Path, "report-write-fails");
+        Directory.CreateDirectory(runDirectory);
+        var runner = new CountingFakeAgentRunner(FakeScenario.Success);
+        FakeWorkflowResult result;
+        using (var store = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "report-write-fails"))
+        {
+            var writer = new FailingEventWriter("codex_one_shot_stopped", innerWriter: store);
+            result = new FakeAgentWorkflow(new FailingFakeWorkflowStorage("report.md"))
+                .Run(SampleContract(), new string('b', 64), "report-write-fails", runDirectory, runner, writer, codexOneShot: true);
+        }
+
+        Assert.Equal(RunState.NeedsHumanInput, result.State);
+        Assert.False(result.PersistenceSucceeded, "レポートと停止イベントの保存失敗を成功として返しました。");
+        Assert.True(result.Detail!.Contains("停止イベント codex_one_shot_stopped", StringComparison.Ordinal));
+        Assert.True(result.Detail.Contains("報告 report.md", StringComparison.Ordinal));
+        Assert.Equal(1, runner.ImplementationCalls, "永続化失敗後にImplementerを再起動しました。");
+        Assert.Equal(1, runner.ReviewCalls, "永続化失敗後にReviewerを再起動しました。");
+        Assert.False(File.Exists(Path.Combine(runDirectory, "report.md")), "保存失敗したレポートが存在しています。");
+        var events = File.ReadAllText(Path.Combine(runDirectory, "events.jsonl"));
+        Assert.True(events.Contains("\"eventType\":\"report_write_failed\"", StringComparison.Ordinal),
+            "報告保存失敗イベントがJSONLに記録されませんでした。");
+        Assert.False(events.Contains("\"eventType\":\"report_written\"", StringComparison.Ordinal),
+            "保存失敗した報告にreport_writtenを記録しました。");
+    }
+}
+
+static void ReportWrittenEventFailureUpdatesReport()
+{
+    using var temp = new TemporaryDirectory();
+    var runDirectory = Path.Combine(temp.Path, "run");
+    Directory.CreateDirectory(runDirectory);
+    var runner = new CountingFakeAgentRunner(FakeScenario.Success);
+    FakeWorkflowResult result;
+    using (var store = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "report-event-fails"))
+    {
+        var writer = new FailingEventWriter("report_written", innerWriter: store);
+        result = new FakeAgentWorkflow().Run(SampleContract(), new string('c', 64), "report-event-fails", runDirectory,
+            runner, writer, codexOneShot: true);
+    }
+
+    Assert.Equal(RunState.NeedsHumanInput, result.State);
+    Assert.False(result.PersistenceSucceeded, "report_written記録失敗を永続化成功として返しました。");
+    Assert.Equal(1, runner.ImplementationCalls, "報告イベント記録失敗後にImplementerを再起動しました。");
+    Assert.Equal(1, runner.ReviewCalls, "報告イベント記録失敗後にReviewerを再起動しました。");
+    var report = File.ReadAllText(Path.Combine(runDirectory, "report.md"));
+    Assert.True(report.Contains("report_written の記録に失敗", StringComparison.Ordinal),
+        "report_written記録失敗後に報告が再保存されませんでした。");
+    var events = File.ReadAllText(Path.Combine(runDirectory, "events.jsonl"));
+    Assert.False(events.Contains("\"eventType\":\"report_written\"", StringComparison.Ordinal),
+        "失敗注入したreport_writtenイベントがJSONLに記録されています。");
+}
+
+static void ReadyReportWrittenEventFailureUpdatesState()
+{
+    using var temp = new TemporaryDirectory();
+    var runDirectory = Path.Combine(temp.Path, "run");
+    Directory.CreateDirectory(runDirectory);
+    var contract = SampleContract();
+    var artifactSha256 = Convert.ToHexStringLower(SHA256.HashData(
+        System.Text.Encoding.UTF8.GetBytes("成果物の初版を作成しました。")));
+    var criteriaSha256 = Convert.ToHexStringLower(SHA256.HashData(
+        System.Text.Encoding.UTF8.GetBytes(string.Join("\n", contract.AcceptanceCriteria))));
+    var reviewPath = Path.Combine(temp.Path, "review.json");
+    var acceptancePath = Path.Combine(temp.Path, "acceptance.json");
+    var pullRequestPath = Path.Combine(temp.Path, "pull-request.json");
+    const string pullRequestUrl = "https://github.com/example/repository/pull/7";
+    const string pullRequestOperationId = "github-op-7";
+    File.WriteAllText(reviewPath, JsonSerializer.Serialize(new
+    {
+        evidenceKind = "independent-review",
+        artifactSha256,
+        reviewInputArtifactSha256 = artifactSha256,
+        implementerId = "Implementer-1",
+        reviewerId = "Reviewer-1",
+        selfAssessmentExcluded = true,
+        verdict = "approve"
+    }));
+    File.WriteAllText(acceptancePath, JsonSerializer.Serialize(new
+    {
+        evidenceKind = "acceptance-verification",
+        criteriaSha256,
+        criteriaCount = contract.AcceptanceCriteria.Count,
+        passedCount = contract.AcceptanceCriteria.Count
+    }));
+    File.WriteAllText(pullRequestPath, JsonSerializer.Serialize(new
+    {
+        evidenceKind = "github-pull-request-created",
+        operationId = pullRequestOperationId,
+        url = pullRequestUrl
+    }));
+    var evidence = new HumanReviewEvidence(artifactSha256, "Implementer-1", "Reviewer-1", reviewPath,
+        criteriaSha256, contract.AcceptanceCriteria.Count, contract.AcceptanceCriteria.Count, acceptancePath,
+        pullRequestUrl, pullRequestOperationId, pullRequestPath);
+    var runner = new CountingFakeAgentRunner(FakeScenario.Success);
+    FakeWorkflowResult result;
+    using (var store = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "ready-report-event-fails"))
+    {
+        var writer = new FailingEventWriter("report_written", innerWriter: store);
+        result = new FakeAgentWorkflow().Run(contract, new string('d', 64), "ready-report-event-fails", runDirectory,
+            runner, writer, evidence);
+    }
+
+    Assert.Equal(RunState.NeedsHumanInput, result.State);
+    Assert.False(result.PersistenceSucceeded, "report_written記録失敗を永続化成功として返しました。");
+    Assert.Equal(1, runner.ImplementationCalls);
+    Assert.Equal(1, runner.ReviewCalls);
+    var report = File.ReadAllText(Path.Combine(runDirectory, result.ReportReference));
+    Assert.True(report.Contains("- 状態: `NeedsHumanInput`", StringComparison.Ordinal),
+        "返却状態NeedsHumanInputが保存済み報告へ反映されていません。");
+    Assert.False(report.Contains("- 状態: `ReadyForHumanReview`", StringComparison.Ordinal),
+        "保存済み報告が古いReadyForHumanReview状態のままです。");
+    Assert.True(report.Contains("report_written の記録に失敗", StringComparison.Ordinal),
+        "報告保存イベント失敗が保存済み報告にありません。");
+    var events = File.ReadAllText(Path.Combine(runDirectory, "events.jsonl"));
+    Assert.False(events.Contains("\"eventType\":\"report_written\"", StringComparison.Ordinal),
+        "失敗注入したreport_writtenイベントがJSONLに記録されています。");
+}
+
 static void FakeArtifactWriteFailureStopsAndReports()
 {
     using var temp = new TemporaryDirectory();
@@ -1232,7 +1384,7 @@ sealed class CountingFakeAgentRunner(FakeScenario scenario) : IAgentRunner
     }
 }
 
-sealed class FailingEventWriter(string failureEventType, bool failReadyTransition = false) : IRunEventWriter
+sealed class FailingEventWriter(string failureEventType, bool failReadyTransition = false, IRunEventWriter? innerWriter = null) : IRunEventWriter
 {
     private long sequence;
     public int ReadyTransitions { get; private set; }
@@ -1246,6 +1398,9 @@ sealed class FailingEventWriter(string failureEventType, bool failReadyTransitio
         if (to == RunState.ReadyForHumanReview) ReadyTransitions++;
         if (eventType == failureEventType || (failReadyTransition && to == RunState.ReadyForHumanReview))
             throw new IOException("テスト用の記録失敗です。");
+        if (innerWriter is not null)
+            return innerWriter.Append(eventType, result, from, to, detail, error, inputReference, outputReference,
+                targetCommitSha, diffSha256, elapsedMilliseconds, unknownInformation, role);
         return new RunEvent
         {
             RunId = "test",
