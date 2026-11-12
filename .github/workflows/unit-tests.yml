@@ -29,3 +29,6 @@ jobs:
 
       - name: Run Fake-only unit tests
         run: dotnet run --project tests/Ateliers.Ai.Orchestrator.Tests/Ateliers.Ai.Orchestrator.Tests.csproj --configuration Release --no-build --no-restore -- --unit
+
+      - name: Run Slack unit tests
+        run: dotnet test tests/Ateliers.Slack.UnitTests/Ateliers.Slack.UnitTests.csproj --configuration Release --no-build --no-restore
