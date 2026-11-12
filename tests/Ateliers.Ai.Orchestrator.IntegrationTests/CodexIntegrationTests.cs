@@ -1,4 +1,7 @@
+using Microsoft.Win32.SafeHandles;
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -26,6 +29,88 @@ public sealed class CodexIntegrationTests
         fixture.Dispose();
 
         Assert.False(Directory.Exists(fixture.RootDirectory), "ReadOnly Git objectを含むfixtureが残っています。");
+    }
+
+    [Fact]
+    public void IsolatedFixture_DisposeRejectsReparsePointAncestor()
+    {
+        var token = Guid.NewGuid().ToString("N");
+        var outsideDirectory = Path.Combine(Path.GetTempPath(), $"ateliers-codex-outside-{token}");
+        var linkedParent = Path.Combine(Path.GetTempPath(), $"ateliers-codex-fixture-link-{token}");
+        var fixture = new IsolatedFixture(linkedParent);
+        Directory.CreateDirectory(outsideDirectory);
+        var sentinelPath = Path.Combine(outsideDirectory, "keep.txt");
+        File.WriteAllText(sentinelPath, "outside fixture");
+
+        try
+        {
+            CreateDirectoryLink(linkedParent, outsideDirectory);
+            fixture.CreateSeedRepository();
+
+            var exception = Assert.Throws<IOException>(() => fixture.Dispose());
+
+            Assert.Contains("reparse", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.True(File.Exists(sentinelPath), "ancestor junctionのリンク先をcleanupが変更しました。");
+            Assert.True(Directory.Exists(fixture.RepositoryDirectory), "リンク先にfixtureデータが残っていません。");
+        }
+        finally
+        {
+            if (Directory.Exists(linkedParent)) Directory.Delete(linkedParent, recursive: false);
+            if (Directory.Exists(outsideDirectory))
+            {
+                var outsideFixture = new IsolatedFixture(outsideDirectory, Path.GetFileName(fixture.RootDirectory));
+                outsideFixture.Dispose();
+                File.Delete(sentinelPath);
+                Directory.Delete(outsideDirectory, recursive: false);
+            }
+        }
+    }
+
+    [Fact]
+    public void IsolatedFixture_DisposeRemovesChildJunctionWithoutFollowingIt()
+    {
+        var token = Guid.NewGuid().ToString("N");
+        var outsideDirectory = Path.Combine(Path.GetTempPath(), $"ateliers-codex-outside-{token}");
+        var fixture = new IsolatedFixture();
+        Directory.CreateDirectory(outsideDirectory);
+        var sentinelPath = Path.Combine(outsideDirectory, "keep.txt");
+        File.WriteAllText(sentinelPath, "outside fixture");
+
+        try
+        {
+            fixture.CreateSeedRepository();
+            CreateDirectoryLink(Path.Combine(fixture.RootDirectory, "outside-link"), outsideDirectory);
+
+            fixture.Dispose();
+
+            Assert.False(Directory.Exists(fixture.RootDirectory), "子junctionを含むfixtureが残っています。");
+            Assert.True(File.Exists(sentinelPath), "子junctionのリンク先をcleanupが変更しました。");
+        }
+        finally
+        {
+            if (Directory.Exists(fixture.RootDirectory)) fixture.Dispose();
+            if (Directory.Exists(outsideDirectory))
+            {
+                File.Delete(sentinelPath);
+                Directory.Delete(outsideDirectory, recursive: false);
+            }
+        }
+    }
+
+    private static void CreateDirectoryLink(string linkPath, string targetPath)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var start = new ProcessStartInfo("cmd.exe") { UseShellExecute = false, CreateNoWindow = true };
+            foreach (var argument in new[] { "/c", "mklink", "/J", linkPath, targetPath }) start.ArgumentList.Add(argument);
+            using var process = Process.Start(start) ?? throw new InvalidOperationException("junction作成プロセスを開始できませんでした。");
+            process.WaitForExit();
+            if (process.ExitCode != 0) throw new InvalidOperationException("テスト用junctionを作成できませんでした。");
+        }
+        else
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+        }
     }
 
     [CodexOptInFact]
@@ -323,13 +408,36 @@ public sealed class CodexIntegrationTests
     private sealed class IsolatedFixture : IDisposable
     {
         private const string FixtureParentName = "ateliers-codex-integration";
+        private const uint FileReadAttributes = 0x00000080;
+        private const uint FileWriteAttributes = 0x00000100;
+        private const uint DeleteAccess = 0x00010000;
+        private const uint ShareRead = 0x00000001;
+        private const uint ShareWrite = 0x00000002;
+        private const uint OpenExisting = 3;
+        private const uint BackupSemantics = 0x02000000;
+        private const uint OpenReparsePoint = 0x00200000;
+        private const int FileBasicInfoClass = 0;
+        private const int FileDispositionInfoClass = 4;
+        private const int FileAttributeTagInfoClass = 9;
 
         public const string TargetFile = "target.txt";
         public const string SentinelFile = "sentinel.txt";
         public const string SeedSentinel = "do not change\n";
         public const string ExpectedMarker = "integration-test-marker-2026";
 
-        public string RootDirectory { get; } = Path.Combine(Path.GetTempPath(), FixtureParentName, Guid.NewGuid().ToString("N"));
+        private readonly string fixtureParentDirectory;
+
+        public IsolatedFixture() : this(Path.Combine(Path.GetTempPath(), FixtureParentName), Guid.NewGuid().ToString("N")) { }
+
+        public IsolatedFixture(string fixtureParentDirectory) : this(fixtureParentDirectory, Guid.NewGuid().ToString("N")) { }
+
+        public IsolatedFixture(string fixtureParentDirectory, string rootDirectoryName)
+        {
+            this.fixtureParentDirectory = Path.GetFullPath(fixtureParentDirectory);
+            RootDirectory = Path.Combine(this.fixtureParentDirectory, rootDirectoryName);
+        }
+
+        public string RootDirectory { get; }
         public string RepositoryDirectory => Path.Combine(RootDirectory, "repository");
         public string RunsDirectory => Path.Combine(RootDirectory, "runs");
         public string ContractPath => Path.Combine(RootDirectory, "task-contract.json");
@@ -383,16 +491,196 @@ public sealed class CodexIntegrationTests
             var fixtureRoot = Path.GetFullPath(RootDirectory);
             if (!Directory.Exists(fixtureRoot)) return;
 
-            var expectedParent = Path.GetFullPath(Path.Combine(Path.GetTempPath(), FixtureParentName));
+            var expectedParent = fixtureParentDirectory;
             if (!string.Equals(Path.GetDirectoryName(fixtureRoot), expectedParent, StringComparison.OrdinalIgnoreCase))
                 throw new IOException($"Fixture cleanup rootが専用一時ディレクトリ直下ではありません: {fixtureRoot}");
 
+            if (OperatingSystem.IsWindows())
+            {
+                DeleteFixtureTreeWindows(expectedParent, fixtureRoot);
+                return;
+            }
+
+            ValidateNoReparseAncestors(fixtureRoot);
             var rootAttributes = File.GetAttributes(fixtureRoot);
             if ((rootAttributes & FileAttributes.Directory) == 0 || (rootAttributes & FileAttributes.ReparsePoint) != 0)
                 throw new IOException($"Fixture cleanup rootが通常のディレクトリではありません: {fixtureRoot}");
-
             DeleteFixtureContents(fixtureRoot, fixtureRoot);
             Directory.Delete(fixtureRoot, recursive: false);
+        }
+
+        private static void DeleteFixtureTreeWindows(string expectedParent, string fixtureRoot)
+        {
+            var ancestorHandles = PinDirectoryAncestors(expectedParent);
+            try
+            {
+                using var rootHandle = OpenEntryHandle(fixtureRoot);
+                var rootInfo = GetAttributeTagInfo(rootHandle, fixtureRoot);
+                if ((rootInfo.FileAttributes & (uint)FileAttributes.Directory) == 0 ||
+                    (rootInfo.FileAttributes & (uint)FileAttributes.ReparsePoint) != 0)
+                    throw new IOException($"Fixture cleanup rootが通常のディレクトリではありません: {fixtureRoot}");
+
+                DeleteFixtureContentsWindows(fixtureRoot, rootHandle);
+                MarkForDeletion(rootHandle, fixtureRoot);
+            }
+            finally
+            {
+                for (var index = ancestorHandles.Count - 1; index >= 0; index--)
+                    ancestorHandles[index].Dispose();
+            }
+        }
+
+        private static List<SafeFileHandle> PinDirectoryAncestors(string directory)
+        {
+            var handles = new List<SafeFileHandle>();
+            var fullPath = Path.GetFullPath(directory);
+            var volumeRoot = Path.GetPathRoot(fullPath) ?? throw new IOException($"Fixture pathにvolume rootがありません: {fullPath}");
+            var relativePath = Path.GetRelativePath(volumeRoot, fullPath);
+            var currentPath = volumeRoot;
+
+            try
+            {
+                foreach (var segment in relativePath.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
+                {
+                    currentPath = Path.Combine(currentPath, segment);
+                    var handle = OpenDirectoryPin(currentPath);
+                    var info = GetAttributeTagInfo(handle, currentPath);
+                    if ((info.FileAttributes & (uint)FileAttributes.Directory) == 0 ||
+                        (info.FileAttributes & (uint)FileAttributes.ReparsePoint) != 0)
+                    {
+                        handle.Dispose();
+                        throw new IOException($"Fixture cleanup ancestorが通常ディレクトリではありません (reparse pointを含む): {currentPath}");
+                    }
+                    handles.Add(handle);
+                }
+                return handles;
+            }
+            catch
+            {
+                for (var index = handles.Count - 1; index >= 0; index--)
+                    handles[index].Dispose();
+                throw;
+            }
+        }
+
+        private static void DeleteFixtureContentsWindows(string directory, SafeFileHandle directoryHandle)
+        {
+            foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+            {
+                var path = Path.GetFullPath(entry);
+                using var entryHandle = OpenEntryHandle(path);
+                var info = GetAttributeTagInfo(entryHandle, path);
+                var isDirectory = (info.FileAttributes & (uint)FileAttributes.Directory) != 0;
+                var isReparsePoint = (info.FileAttributes & (uint)FileAttributes.ReparsePoint) != 0;
+
+                // The directory handle pins this parent; each child is opened without following reparse points.
+                if (isDirectory && !isReparsePoint)
+                    DeleteFixtureContentsWindows(path, entryHandle);
+
+                if ((info.FileAttributes & (uint)FileAttributes.ReadOnly) != 0)
+                    ClearReadOnlyAttribute(entryHandle, path);
+
+                MarkForDeletion(entryHandle, path);
+            }
+            GC.KeepAlive(directoryHandle);
+        }
+
+        private static SafeFileHandle OpenDirectoryPin(string path)
+        {
+            return OpenHandle(path, FileReadAttributes);
+        }
+
+        private static SafeFileHandle OpenEntryHandle(string path)
+        {
+            return OpenHandle(path, DeleteAccess | FileReadAttributes | FileWriteAttributes);
+        }
+
+        private static SafeFileHandle OpenHandle(string path, uint desiredAccess)
+        {
+            var handle = CreateFileW(path, desiredAccess, ShareRead | ShareWrite, IntPtr.Zero, OpenExisting,
+                BackupSemantics | OpenReparsePoint, IntPtr.Zero);
+            if (handle.IsInvalid)
+            {
+                var error = Marshal.GetLastWin32Error();
+                handle.Dispose();
+                throw new IOException($"Fixture cleanupで安全なhandleを開けませんでした: {path}", new Win32Exception(error));
+            }
+            return handle;
+        }
+
+        private static FileAttributeTagInfo GetAttributeTagInfo(SafeFileHandle handle, string path)
+        {
+            if (!GetFileInformationByHandleEx(handle, FileAttributeTagInfoClass, out FileAttributeTagInfo info,
+                    (uint)Marshal.SizeOf<FileAttributeTagInfo>()))
+                throw new IOException($"Fixture cleanupでhandle属性を確認できませんでした: {path}", new Win32Exception(Marshal.GetLastWin32Error()));
+            return info;
+        }
+
+        private static void ClearReadOnlyAttribute(SafeFileHandle handle, string path)
+        {
+            if (!GetFileInformationByHandleEx(handle, FileBasicInfoClass, out FileBasicInfo info,
+                    (uint)Marshal.SizeOf<FileBasicInfo>()))
+                throw new IOException($"Fixture cleanupでhandle属性を読み取れませんでした: {path}", new Win32Exception(Marshal.GetLastWin32Error()));
+
+            info.FileAttributes &= ~(uint)FileAttributes.ReadOnly;
+            if (!SetFileInformationByHandle(handle, FileBasicInfoClass, ref info, (uint)Marshal.SizeOf<FileBasicInfo>()))
+                throw new IOException($"Fixture cleanupでReadOnly属性を解除できませんでした: {path}", new Win32Exception(Marshal.GetLastWin32Error()));
+        }
+
+        private static void MarkForDeletion(SafeFileHandle handle, string path)
+        {
+            var disposition = new FileDispositionInfo { DeleteFile = true };
+            if (!SetFileInformationByHandle(handle, FileDispositionInfoClass, ref disposition, (uint)Marshal.SizeOf<FileDispositionInfo>()))
+                throw new IOException($"Fixture cleanupでhandleを削除対象にできませんでした: {path}", new Win32Exception(Marshal.GetLastWin32Error()));
+        }
+
+        [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern SafeFileHandle CreateFileW(string fileName, uint desiredAccess, uint shareMode,
+            IntPtr securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetFileInformationByHandleEx(SafeFileHandle file, int fileInformationClass,
+            out FileAttributeTagInfo fileInformation, uint bufferSize);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetFileInformationByHandleEx(SafeFileHandle file, int fileInformationClass,
+            out FileBasicInfo fileInformation, uint bufferSize);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetFileInformationByHandle(SafeFileHandle file, int fileInformationClass,
+            ref FileBasicInfo fileInformation, uint bufferSize);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetFileInformationByHandle(SafeFileHandle file, int fileInformationClass,
+            ref FileDispositionInfo fileInformation, uint bufferSize);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct FileAttributeTagInfo
+        {
+            public uint FileAttributes;
+            public uint ReparseTag;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct FileBasicInfo
+        {
+            public long CreationTime;
+            public long LastAccessTime;
+            public long LastWriteTime;
+            public long ChangeTime;
+            public uint FileAttributes;
+            public uint Reserved;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct FileDispositionInfo
+        {
+            [MarshalAs(UnmanagedType.U1)]
+            public bool DeleteFile;
         }
 
         private static void DeleteFixtureContents(string fixtureRoot, string directory)
@@ -429,6 +717,21 @@ public sealed class CodexIntegrationTests
                 relativePath.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ||
                 relativePath.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal))
                 throw new IOException($"Fixture cleanup pathがfixture rootの外です: {path}");
+        }
+
+        private static void ValidateNoReparseAncestors(string fixtureRoot)
+        {
+            var volumeRoot = Path.GetPathRoot(fixtureRoot) ?? throw new IOException($"Fixture pathにvolume rootがありません: {fixtureRoot}");
+            var relativePath = Path.GetRelativePath(volumeRoot, fixtureRoot);
+            var currentPath = volumeRoot;
+            foreach (var segment in relativePath.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
+            {
+                currentPath = Path.Combine(currentPath, segment);
+                if (!Directory.Exists(currentPath)) continue;
+                var attributes = File.GetAttributes(currentPath);
+                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                    throw new IOException($"Fixture cleanup ancestorがreparse pointです: {currentPath}");
+            }
         }
     }
 }
