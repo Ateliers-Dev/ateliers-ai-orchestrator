@@ -9,6 +9,7 @@ using Ateliers.Ai.Orchestrator.Core;
 internal sealed class CodexCliAgentRunner : IAgentRunner
 {
     private const string ScopeBoundaryInstruction = "作業範囲はAgentへの指示であり、OSレベルで範囲外アクセスを完全に防ぐ保証ではありません。";
+    private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
     private readonly CodexCliRunnerOptions options;
     private readonly ConcurrentDictionary<string, string> initialCommits = new(StringComparer.Ordinal);
 
@@ -45,27 +46,27 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
         var timedOut = false;
         var stopRequested = false;
         string? stopReason = null;
-        var start = new ProcessStartInfo(options.ExecutablePath)
-        {
-            WorkingDirectory = role == "implementer" ? request.Contract.WorkingDirectory : artifactDirectory!,
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-            StandardInputEncoding = Encoding.UTF8,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8
-        };
-        foreach (var argument in options.PrefixArguments ?? []) start.ArgumentList.Add(argument);
-        foreach (var argument in new[] { "exec", "--json", "--sandbox", sandbox, "--config", "approval_policy=\"never\"" })
-            start.ArgumentList.Add(argument);
+        var start = CreateProcessStartInfo(options.ExecutablePath, role, request, artifactDirectory);
+        start.UseShellExecute = false;
+        start.RedirectStandardInput = true;
+        start.RedirectStandardOutput = true;
+        start.RedirectStandardError = true;
+        start.CreateNoWindow = true;
+        start.StandardInputEncoding = StrictUtf8;
+        start.StandardOutputEncoding = Encoding.UTF8;
+        start.StandardErrorEncoding = Encoding.UTF8;
+        var codexArguments = new List<string>(options.PrefixArguments ?? []);
+        codexArguments.AddRange(["exec", "--json", "--sandbox", sandbox, "--config", "approval_policy=\"never\""]);
         if (role == "reviewer")
         {
-            start.ArgumentList.Add("--config");
-            start.ArgumentList.Add("sandbox_workspace_write.writable_roots=[]");
+            codexArguments.Add("--config");
+            codexArguments.Add("sandbox_workspace_write.writable_roots=[]");
         }
-        start.ArgumentList.Add("-");
+        codexArguments.Add("-");
+        if (OperatingSystem.IsWindows() && string.Equals(Path.GetExtension(options.ExecutablePath), ".ps1", StringComparison.OrdinalIgnoreCase))
+            AddPowerShellShimCommand(start, options.ExecutablePath, codexArguments);
+        else
+            foreach (var argument in codexArguments) start.ArgumentList.Add(argument);
         PrepareEnvironment(start, profileRoot);
         var redactOutput = CreateProxyOutputRedactor(start.Environment);
         var prompt = BuildPrompt(request);
@@ -106,7 +107,10 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
                 if (usage is not null) usageJson = usage;
             });
             var stderrTask = PumpStderrAsync(process, stderrWriter, redactOutput);
-            process.StandardInput.Write(prompt);
+            // Write bytes directly so neither the console code page nor a StreamWriter preamble can alter the CLI prompt.
+            var promptBytes = StrictUtf8.GetBytes(prompt);
+            await process.StandardInput.BaseStream.WriteAsync(promptBytes);
+            await process.StandardInput.BaseStream.FlushAsync();
             process.StandardInput.Close();
             var timeout = request.RemainingTime is { } remaining && remaining < TimeSpan.FromMinutes(request.Contract.Limits.MaxDurationMinutes)
                 ? remaining : TimeSpan.FromMinutes(request.Contract.Limits.MaxDurationMinutes);
@@ -173,7 +177,9 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
         var succeeded = !stopRequested && !timedOut && error is null && terminalEvent == "turn.completed" && exitCode == 0 &&
             (role == "reviewer" ? hasResponse || hasArtifacts : hasResponse);
         if (!succeeded && error is null)
-            error = role == "reviewer" && !hasResponse && !hasArtifacts ? "Reviewerは本文も任意成果物も返しませんでした。" :
+            error = exitCode is { } failedExitCode && failedExitCode != 0
+                ? BuildCliFailureDiagnostic(failedExitCode, terminalEvent, stderrPath)
+                : role == "reviewer" && !hasResponse && !hasArtifacts ? "Reviewerは本文も任意成果物も返しませんでした。" :
                 stopReason == "caller-cancellation" ? "利用者の停止要求を受け付けました。" : timedOut ? "実行時間上限に到達しました。" :
                 $"完了条件不一致: terminal={terminalEvent ?? "未取得"}, exit={exitCode?.ToString() ?? "未取得"}, response={(string.IsNullOrWhiteSpace(response.ToString()) ? "空" : "取得済み")}";
         var content = response.ToString();
@@ -201,6 +207,47 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
             start.WorkingDirectory, request.ArtifactSha256, error);
         return new AgentResponse(content, succeeded, timedOut, SelfAssessment: selfAssessment,
             ExecutionEvidence: evidence, StopRequested: stopRequested, ArtifactReferences: artifactReferences);
+    }
+
+    private static ProcessStartInfo CreateProcessStartInfo(string executablePath, string role, AgentRequest request, string? artifactDirectory)
+    {
+        var start = new ProcessStartInfo(executablePath)
+        {
+            WorkingDirectory = role == "implementer" ? request.Contract.WorkingDirectory : artifactDirectory!
+        };
+
+        // npm installs a PowerShell shim alongside codex.cmd. A .ps1 file is not a native executable,
+        // so invoke it through Windows PowerShell with the CLI arguments quoted as PowerShell literals.
+        if (OperatingSystem.IsWindows() && string.Equals(Path.GetExtension(executablePath), ".ps1", StringComparison.OrdinalIgnoreCase))
+        {
+            start.FileName = "powershell.exe";
+            start.ArgumentList.Add("-NoLogo");
+            start.ArgumentList.Add("-NoProfile");
+            start.ArgumentList.Add("-NonInteractive");
+            start.ArgumentList.Add("-ExecutionPolicy");
+            start.ArgumentList.Add("Bypass");
+            start.ArgumentList.Add("-Command");
+        }
+        return start;
+    }
+
+    private static void AddPowerShellShimCommand(ProcessStartInfo start, string executablePath, IReadOnlyList<string> arguments)
+    {
+        static string QuotePowerShellLiteral(string value) => $"'{value.Replace("'", "''", StringComparison.Ordinal)}'";
+        var argumentList = string.Join(", ", arguments.Select(QuotePowerShellLiteral));
+        var command = $"$scriptPath = {QuotePowerShellLiteral(Path.GetFullPath(executablePath))}; " +
+            $"$codexArgs = @({argumentList}); & $scriptPath @codexArgs; exit $LASTEXITCODE";
+        start.ArgumentList.Add(command);
+    }
+
+    private static string BuildCliFailureDiagnostic(int exitCode, string? terminalEvent, string stderrPath)
+    {
+        const int maxDiagnosticCharacters = 4_000;
+        var stderr = File.Exists(stderrPath) ? File.ReadAllText(stderrPath, StrictUtf8).Trim() : string.Empty;
+        if (stderr.Length > maxDiagnosticCharacters)
+            stderr = "…(stderr末尾を表示)\n" + stderr[^maxDiagnosticCharacters..];
+        var diagnostic = $"Codex CLIが終了コード {exitCode} で終了しました。terminal={terminalEvent ?? "未取得"}";
+        return string.IsNullOrWhiteSpace(stderr) ? diagnostic : $"{diagnostic}{Environment.NewLine}stderr:{Environment.NewLine}{stderr}";
     }
 
     private static Func<string, string> CreateProxyOutputRedactor(IDictionary<string, string?> environment)

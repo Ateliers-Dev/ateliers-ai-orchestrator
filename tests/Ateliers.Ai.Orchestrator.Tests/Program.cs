@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Security.Cryptography;
 using System.Diagnostics;
@@ -43,6 +44,9 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("NUL文字を含む外部証跡参照を不一致として拒否する", InvalidEvidenceReferenceIsRejected);
     suite.Add("Fake Codex出力の既知プロキシ認証情報を保存前にマスクする", CodexProxyCredentialsAreRedactedFromPersistedOutputs);
     suite.Add("Fake CodexプロセスのJSONL・stderr・usage・未知eventを別々に記録する", CodexProcessCapturesJsonlAndSeparatesStreams);
+    suite.Add("Codex標準入力で日本語プロンプトをUTF-8のまま渡す", CodexPromptIsPassedAsUtf8);
+    if (OperatingSystem.IsWindows())
+        suite.Add("npm codex.cmdとcodex.ps1 shimで日本語プロンプトを渡す", CodexNpmShimsReceiveUtf8Prompt);
     suite.Add("Fake Codex実行でkill処理とCLI版確認が起動しない", CodexVersionProbeKillFailureIsRecorded);
     suite.Add("Fake Codex実行ファイル起動失敗を安全に記録する", CodexVersionProbeStartFailureStopsBeforeExecution);
     suite.Add("terminal eventと終了コードの不一致を成功扱いしない", CodexTerminalAndExitCodeMustAgree);
@@ -234,6 +238,44 @@ static void CodexProcessCapturesJsonlAndSeparatesStreams()
     }
 }
 
+static void CodexPromptIsPassedAsUtf8()
+{
+    var (runner, request, root) = CreateCodexFixture("success");
+    using (root)
+    {
+        var response = runner.Implement(request);
+        Assert.True(response.Succeeded, response.ExecutionEvidence?.Error ?? "Fake Codex runが成功しませんでした。");
+        var output = File.ReadAllText(Path.Combine(request.RunDirectory!, response.ExecutionEvidence!.StandardOutputReference!));
+        Assert.True(output.Contains("\"os_boundary_disclaimed\":true", StringComparison.Ordinal),
+            "Codex子プロセスが日本語を含むプロンプトをUTF-8として受け取れませんでした。");
+    }
+}
+
+static void CodexNpmShimsReceiveUtf8Prompt()
+{
+    foreach (var extension in new[] { ".cmd", ".ps1" })
+    {
+        var (_, request, root) = CreateCodexFixture("success");
+        using (root)
+        {
+            var executable = Environment.ProcessPath!;
+            var implementerHome = Path.Combine(root.Path, "implementer-profile");
+            var reviewerHome = Path.Combine(root.Path, "reviewer-profile");
+            var shimPath = Path.Combine(root.Path, $"codex{extension}");
+            var shim = extension == ".cmd"
+                ? $"@echo off\r\n\"{executable}\" --fake-codex-fixture success %*\r\n"
+                : $"& '{executable.Replace("'", "''", StringComparison.Ordinal)}' --fake-codex-fixture success @args\r\n";
+            File.WriteAllText(shimPath, shim, new UTF8Encoding(false));
+            var options = new CodexCliRunnerOptions(shimPath, implementerHome, reviewerHome);
+            var response = new CodexCliAgentRunner(options).Implement(request);
+            Assert.True(response.Succeeded, $"{extension} shim: {response.ExecutionEvidence?.Error ?? "run failed"}");
+            var output = File.ReadAllText(Path.Combine(request.RunDirectory!, response.ExecutionEvidence!.StandardOutputReference!));
+            Assert.True(output.Contains("\"os_boundary_disclaimed\":true", StringComparison.Ordinal),
+                $"{extension} shimで日本語プロンプトがUTF-8として子プロセスへ届きませんでした。");
+        }
+    }
+}
+
 static void CodexVersionProbeKillFailureIsRecorded()
 {
     var killCalls = 0;
@@ -289,6 +331,10 @@ static void CodexTerminalAndExitCodeMustAgree()
         Assert.False(response.Succeeded);
         Assert.Equal(7, response.ExecutionEvidence!.ExitCode);
         Assert.Equal("turn.completed", response.ExecutionEvidence.TerminalEvent);
+        Assert.True(response.ExecutionEvidence.Error!.Contains("終了コード 7", StringComparison.Ordinal),
+            "非ゼロ終了コードが診断情報にありません。");
+        Assert.True(response.ExecutionEvidence.Error.Contains("fixture warning", StringComparison.Ordinal),
+            "Codex stderrが診断情報にありません。");
     }
 }
 
