@@ -1,5 +1,6 @@
 **/bin/
 **/obj/
+**/.vs/
 .ateliers-orchestrator/
 work-smoke-runs/
 /.test-workspaces/
