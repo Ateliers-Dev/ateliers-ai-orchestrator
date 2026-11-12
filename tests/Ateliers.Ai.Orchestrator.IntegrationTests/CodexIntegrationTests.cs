@@ -12,6 +12,22 @@ public sealed class CodexIntegrationTests
     private const string OptInVariable = "ATELIERS_RUN_CODEX_INTEGRATION_TESTS";
     private const string CodexPathVariable = "ATELIERS_CODEX_CLI_PATH";
 
+    [Fact]
+    public async Task IsolatedFixture_DisposeRemovesReadOnlyGitObject()
+    {
+        var fixture = new IsolatedFixture();
+        fixture.CreateSeedRepository();
+
+        var objectId = (await RunGitAsync(fixture.RepositoryDirectory, "rev-parse", "HEAD")).Trim();
+        var gitObjectPath = Path.Combine(fixture.RepositoryDirectory, ".git", "objects", objectId[..2], objectId[2..]);
+        Assert.True(File.Exists(gitObjectPath), "seed commitのGit objectが見つかりません。");
+        File.SetAttributes(gitObjectPath, File.GetAttributes(gitObjectPath) | FileAttributes.ReadOnly);
+
+        fixture.Dispose();
+
+        Assert.False(Directory.Exists(fixture.RootDirectory), "ReadOnly Git objectを含むfixtureが残っています。");
+    }
+
     [CodexOptInFact]
     [Trait("Category", "ExternalIntegration")]
     public async Task RunAsync_ShouldCompleteImplementerReviewerAndPersistNeedsHumanInput()
@@ -142,7 +158,17 @@ public sealed class CodexIntegrationTests
         {
             if (succeeded)
             {
-                fixture.Dispose();
+                try
+                {
+                    fixture.Dispose();
+                }
+                catch (Exception cleanupException)
+                {
+                    throw new XunitException(
+                        $"IntegrationTestのassertはすべて成功しましたが、fixture cleanupに失敗しました。" +
+                        $"{Environment.NewLine}Fixture: {fixture.RootDirectory}" +
+                        $"{Environment.NewLine}Cleanup exception:{Environment.NewLine}{cleanupException}");
+                }
             }
             else
             {
@@ -296,12 +322,14 @@ public sealed class CodexIntegrationTests
 
     private sealed class IsolatedFixture : IDisposable
     {
+        private const string FixtureParentName = "ateliers-codex-integration";
+
         public const string TargetFile = "target.txt";
         public const string SentinelFile = "sentinel.txt";
         public const string SeedSentinel = "do not change\n";
         public const string ExpectedMarker = "integration-test-marker-2026";
 
-        public string RootDirectory { get; } = Path.Combine(Path.GetTempPath(), "ateliers-codex-integration", Guid.NewGuid().ToString("N"));
+        public string RootDirectory { get; } = Path.Combine(Path.GetTempPath(), FixtureParentName, Guid.NewGuid().ToString("N"));
         public string RepositoryDirectory => Path.Combine(RootDirectory, "repository");
         public string RunsDirectory => Path.Combine(RootDirectory, "runs");
         public string ContractPath => Path.Combine(RootDirectory, "task-contract.json");
@@ -352,7 +380,55 @@ public sealed class CodexIntegrationTests
 
         public void Dispose()
         {
-            if (Directory.Exists(RootDirectory)) Directory.Delete(RootDirectory, recursive: true);
+            var fixtureRoot = Path.GetFullPath(RootDirectory);
+            if (!Directory.Exists(fixtureRoot)) return;
+
+            var expectedParent = Path.GetFullPath(Path.Combine(Path.GetTempPath(), FixtureParentName));
+            if (!string.Equals(Path.GetDirectoryName(fixtureRoot), expectedParent, StringComparison.OrdinalIgnoreCase))
+                throw new IOException($"Fixture cleanup rootが専用一時ディレクトリ直下ではありません: {fixtureRoot}");
+
+            var rootAttributes = File.GetAttributes(fixtureRoot);
+            if ((rootAttributes & FileAttributes.Directory) == 0 || (rootAttributes & FileAttributes.ReparsePoint) != 0)
+                throw new IOException($"Fixture cleanup rootが通常のディレクトリではありません: {fixtureRoot}");
+
+            DeleteFixtureContents(fixtureRoot, fixtureRoot);
+            Directory.Delete(fixtureRoot, recursive: false);
+        }
+
+        private static void DeleteFixtureContents(string fixtureRoot, string directory)
+        {
+            foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+            {
+                var path = Path.GetFullPath(entry);
+                EnsureInsideFixture(fixtureRoot, path);
+
+                var attributes = File.GetAttributes(path);
+                var isDirectory = (attributes & FileAttributes.Directory) != 0;
+                var isReparsePoint = (attributes & FileAttributes.ReparsePoint) != 0;
+
+                // Do not follow links out of the fixture; remove a link as an entry of the fixture.
+                if (isDirectory && !isReparsePoint)
+                {
+                    DeleteFixtureContents(fixtureRoot, path);
+                    Directory.Delete(path, recursive: false);
+                    continue;
+                }
+
+                if (!isReparsePoint && (attributes & FileAttributes.ReadOnly) != 0)
+                    File.SetAttributes(path, attributes & ~FileAttributes.ReadOnly);
+
+                if (isDirectory) Directory.Delete(path, recursive: false);
+                else File.Delete(path);
+            }
+        }
+
+        private static void EnsureInsideFixture(string fixtureRoot, string path)
+        {
+            var relativePath = Path.GetRelativePath(fixtureRoot, path);
+            if (Path.IsPathRooted(relativePath) || relativePath == "." || relativePath == ".." ||
+                relativePath.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ||
+                relativePath.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal))
+                throw new IOException($"Fixture cleanup pathがfixture rootの外です: {path}");
         }
     }
 }
