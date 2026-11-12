@@ -17,7 +17,7 @@ Codex CLIは利用者のローカルディスク上で直接実行する方式�
 1. 契約の `workingDirectory` に、既存の開発checkoutを含むローカルディレクトリの絶対パスを指定する。変更を破棄してよいコピーの利用を推奨するが、必須にしない。
 2. 実行前に作業ツリーがcleanであることを確認する。未コミット差分や未追跡ファイルがある場合は保持して停止する。
 3. 実行契約で目的、対象範囲、除外範囲、許可操作、停止条件、時間上限を明示する。これらはAgentへの指示であり、OS隔離の証明ではない。
-4. Implementerには契約で指定したcheckoutへの `workspace-write` を適用する。Reviewerには固定差分を入力として渡し、checkoutとは分離した `exchanges/reviewer-N/artifacts` を書込先にする。Reviewer起動時は `sandbox_workspace_write.writable_roots=[]` をCLI設定で指定し、既存設定による追加書込ルートを無効にする。Reviewerが生成する任意ファイルは実行記録へ残し、参照先をイベントに記録する。成果物の形式や種類は固定しない。
+4. Implementerには契約で指定したcheckoutへの `workspace-write` を適用する。Reviewerには固定差分を入力として渡し、checkoutとは分離した `exchanges/reviewer-N/workspace` の専用Git作業領域で起動する。任意成果物はその中の `artifacts` に保存する。Reviewer起動時は `sandbox_workspace_write.writable_roots=[]` をCLI設定で指定し、既存設定による追加書込ルートを無効にする。固定成果物をReviewerへ渡す前にSHA-256を再照合する。Reviewerへ元のcheckoutは複製せず、契約に含まれるパスからsandboxの実効権限に応じて参照する場合がある。workspace-writeはOSレベルの完全な隔離を保証しない。Reviewerが生成する任意ファイルは実行記録へ残し、参照先をイベントに記録する。成果物の形式や種類は固定しない。
 5. `CODEX_HOME` 環境変数があればそれを使い、なければ通常の `~/.codex` を使う。専用 `CODEX_HOME` を使う場合は任意で指定でき、ImplementerとReviewerで同じプロファイルを使える。
 6. ImplementerとReviewerはそれぞれ最大1回だけ起動する。失敗時の再試行、自動修正、自動マージはせず、人間判断待ちで停止する。
 7. timeout、停止要求、プロセス終了確認、出力stream切断を区別して記録する。終了状態が不明、証跡が不完全、永続化に失敗した場合は成功とみなさず停止する。

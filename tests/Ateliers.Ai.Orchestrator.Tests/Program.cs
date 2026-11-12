@@ -44,6 +44,7 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("NUL文字を含む外部証跡参照を不一致として拒否する", InvalidEvidenceReferenceIsRejected);
     suite.Add("Fake Codex出力の既知プロキシ認証情報を保存前にマスクする", CodexProxyCredentialsAreRedactedFromPersistedOutputs);
     suite.Add("Fake CodexプロセスのJSONL・stderr・usage・未知eventを別々に記録する", CodexProcessCapturesJsonlAndSeparatesStreams);
+    suite.Add("Reviewerは固定成果物のSHA-256不一致で起動しない", ReviewerRejectsChangedFixedArtifact);
     suite.Add("Codex標準入力で日本語プロンプトをUTF-8のまま渡す", CodexPromptIsPassedAsUtf8);
     if (OperatingSystem.IsWindows())
         suite.Add("npm codex.cmdとcodex.ps1 shimで日本語プロンプトを渡す", CodexNpmShimsReceiveUtf8Prompt);
@@ -115,9 +116,10 @@ static int RunFakeCodexFixture(string[] args)
     if (prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal)) File.WriteAllText("example.txt", "fixture change\n");
     if (prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal) && mode is "workflow" or "artifact-only")
     {
-        File.WriteAllText("review-notes.txt", "fixture supplemental artifact");
-        Directory.CreateDirectory("analysis");
-        File.WriteAllText(Path.Combine("analysis", "proposal.json"), "{\"proposal\":true}");
+        Directory.CreateDirectory("artifacts");
+        File.WriteAllText(Path.Combine("artifacts", "review-notes.txt"), "fixture supplemental artifact");
+        Directory.CreateDirectory(Path.Combine("artifacts", "analysis"));
+        File.WriteAllText(Path.Combine("artifacts", "analysis", "proposal.json"), "{\"proposal\":true}");
     }
     Console.WriteLine($"{{\"type\":\"fixture.arguments\",\"arguments\":{JsonSerializer.Serialize(args)}}}");
     Console.WriteLine($"{{\"type\":\"fixture.environment\",\"openai_key_present\":{(Environment.GetEnvironmentVariable("OPENAI_API_KEY") is null ? "false" : "true")},\"https_proxy_present\":{(Environment.GetEnvironmentVariable("HTTPS_PROXY") is null ? "false" : "true")}}}");
@@ -375,6 +377,31 @@ static void CodexMalformedAndEmptyResponsesFail()
     }
 }
 
+static void ReviewerRejectsChangedFixedArtifact()
+{
+    var (runner, request, root) = CreateCodexFixture("success");
+    using (root)
+    {
+        var artifactPath = Path.Combine(request.RunDirectory!, "fixture-artifact.md");
+        File.WriteAllText(artifactPath, "fixed reviewer input");
+        var expectedHash = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(artifactPath)));
+        File.WriteAllText(artifactPath, "changed after the fixed hash was captured");
+
+        var exception = Assert.Throws<InvalidOperationException>(() => runner.Review(request with
+        {
+            Role = "Reviewer",
+            ArtifactReference = "fixture-artifact.md",
+            ArtifactSha256 = expectedHash
+        }));
+
+        Assert.True(exception.Message.Contains("SHA-256が一致しません", StringComparison.Ordinal));
+        Assert.False(Directory.Exists(Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "workspace")),
+            "固定成果物の検証前にReviewer作業領域を作成しました。");
+        Assert.False(File.Exists(Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "codex.stdout.jsonl")),
+            "固定成果物のSHA-256不一致後にCodexを起動しました。");
+    }
+}
+
 static void CodexTimeoutKillIsReportedSeparately()
 {
     var (runner, request, root) = CreateCodexFixture("timeout", TimeSpan.FromMilliseconds(100));
@@ -530,25 +557,31 @@ static void CodexFakeProcessesCompleteIndependentReviewSlice()
         Assert.True(firstReviewStdout.Contains("\"self_assessment_present\":false", StringComparison.Ordinal),
             "ReviewerプロンプトにImplementerの自己評価が混入しました。");
         AssertCodexFixturePolicy(firstReviewStdout, "workspace-write", "Reviewer");
-        var reviewerArtifact = Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "artifacts", "review-notes.txt");
+        var reviewerArtifact = Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "workspace", "artifacts", "review-notes.txt");
         Assert.True(File.Exists(reviewerArtifact), "Reviewerが生成した任意成果物が保持されていません。");
         Assert.Equal("fixture supplemental artifact", File.ReadAllText(reviewerArtifact));
-        var nestedReviewerArtifact = Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "artifacts", "analysis", "proposal.json");
+        var nestedReviewerArtifact = Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "workspace", "artifacts", "analysis", "proposal.json");
         Assert.Equal("{\"proposal\":true}", File.ReadAllText(nestedReviewerArtifact));
         Assert.False(Path.GetFullPath(reviewerArtifact).StartsWith(
             Path.GetFullPath(request.Contract.WorkingDirectory) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase),
             "Reviewer成果物出力先がレビュー対象の作業領域内にあります。");
         var reviewExecutionEvidence = JsonDocument.Parse(File.ReadAllText(
             Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "execution-evidence.json")));
-        Assert.Equal(Path.GetDirectoryName(reviewerArtifact), reviewExecutionEvidence.RootElement.GetProperty("WorkingDirectory").GetString());
+        var reviewerWorkspace = Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "workspace");
+        var reviewerWorkingDirectory = reviewExecutionEvidence.RootElement.GetProperty("WorkingDirectory").GetString();
+        Assert.True(StringComparer.OrdinalIgnoreCase.Equals(reviewerWorkspace, reviewerWorkingDirectory),
+            "Reviewerの作業ディレクトリが実行記録内の専用workspaceではありません。");
+        Assert.True(StringComparer.OrdinalIgnoreCase.Equals(Path.GetFullPath(reviewerWorkspace),
+            Path.GetFullPath(RunGitFixture(reviewerWorkspace, "rev-parse", "--show-toplevel").Trim())),
+            "Reviewer workspaceがGitリポジトリのルートではありません。");
         var reviewCallEvent = JsonDocument.Parse(File.ReadAllLines(eventPath)
             .First(line => line.Contains("\"role\":\"Reviewer\"", StringComparison.Ordinal) &&
                 line.Contains("\"eventType\":\"agent_call\"", StringComparison.Ordinal)));
         var artifactReferences = reviewCallEvent.RootElement.GetProperty("artifactReferences").EnumerateArray()
             .Select(item => item.GetString()).ToHashSet(StringComparer.Ordinal);
         Assert.True(artifactReferences.SetEquals([
-            "exchanges/reviewer-1/artifacts/review-notes.txt",
-            "exchanges/reviewer-1/artifacts/analysis/proposal.json"]), "任意成果物の参照がすべてイベントに記録されていません。");
+            "exchanges/reviewer-1/workspace/artifacts/review-notes.txt",
+            "exchanges/reviewer-1/workspace/artifacts/analysis/proposal.json"]), "任意成果物の参照がすべてイベントに記録されていません。");
         Assert.False(File.Exists(Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "response.md")),
             "本文を返さないReviewerに固定形式のresponse.mdを要求しました。");
         var implementerPaths = ReadFakeEnvironmentPaths(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "codex.stdout.jsonl"));
@@ -630,7 +663,7 @@ static (CodexCliAgentRunner Runner, AgentRequest Request, TemporaryDirectory Roo
     return (new CodexCliAgentRunner(options), request, root);
 }
 
-static void RunGitFixture(string workingDirectory, params string[] arguments)
+static string RunGitFixture(string workingDirectory, params string[] arguments)
 {
     var start = new ProcessStartInfo("git") { WorkingDirectory = workingDirectory, UseShellExecute = false,
         RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
@@ -638,6 +671,7 @@ static void RunGitFixture(string workingDirectory, params string[] arguments)
     using var process = Process.Start(start) ?? throw new Exception("Git fixture process did not start.");
     process.WaitForExit();
     if (process.ExitCode != 0) throw new Exception($"Git fixture failed: {process.StandardError.ReadToEnd()}");
+    return process.StandardOutput.ReadToEnd();
 }
 
 static void ValidContractIsAccepted()
