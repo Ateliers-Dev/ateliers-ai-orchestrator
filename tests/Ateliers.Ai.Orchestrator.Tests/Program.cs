@@ -796,7 +796,7 @@ static void FakeArtifactWriteFailureStopsAndReports()
     var runner = new CountingFakeAgentRunner(FakeScenario.Success);
     FakeWorkflowResult result;
     using (var store = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "artifact-write-fails"))
-        result = new FakeAgentWorkflow(new FailingFakeWorkflowStorage("artifacts\\artifact-1.md"))
+        result = new FakeAgentWorkflow(new FailingFakeWorkflowStorage(Path.Combine("artifacts", "artifact-1.md")))
             .Run(SampleContract(), new string('f', 64), "artifact-write-fails", runDirectory, runner, store, codexOneShot: true);
 
     Assert.Equal(RunState.NeedsHumanInput, result.State);
@@ -816,7 +816,7 @@ static void FakeMidwayWriteFailureStopsAndReports()
     var runner = new CountingFakeAgentRunner(FakeScenario.Success);
     FakeWorkflowResult result;
     using (var store = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "review-write-fails"))
-        result = new FakeAgentWorkflow(new FailingFakeWorkflowStorage("reviewer-1\\response.md"))
+        result = new FakeAgentWorkflow(new FailingFakeWorkflowStorage(Path.Combine("exchanges", "reviewer-1", "response.md")))
             .Run(SampleContract(), new string('f', 64), "review-write-fails", runDirectory, runner, store, codexOneShot: true);
 
     Assert.Equal(RunState.NeedsHumanInput, result.State);
