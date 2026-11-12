@@ -2,56 +2,57 @@ using System.Text.Json;
 using System.Security.Cryptography;
 using System.Diagnostics;
 using Ateliers.Ai.Orchestrator.Core;
-using Ateliers.Ai.Orchestrator.Docker;
 
 if (args.Length >= 1 && args[0] == "--fake-codex-fixture") return RunFakeCodexFixture(args);
 if (args.Length >= 1 && args[0] == "--external-process-fixture") return RunExternalProcessFixture(args);
+if (args.Length > 1 || (args.Length == 1 && args[0] != "--unit"))
+{
+    Console.Error.WriteLine("使用方法: Ateliers.Ai.Orchestrator.Tests [--unit]");
+    return 2;
+}
 
 var suite = new TestSuite();
-suite.Add("テスト集の件数・ログ・終了コードがPass/Fail/未検証で一致する", TestSuiteOutcomeContractIsConsistent);
-suite.Add("有効な契約を検証できる", ValidContractIsAccepted);
-suite.Add("契約の不足・矛盾・未知項目を拒否する", InvalidContractsAreRejected);
-suite.Add("すべての状態ペアを許可表どおりに判定する", AllTransitionsAreExplicit);
-suite.Add("確認待ちはIssue #3では到達不能", ReviewReadyIsUnavailableUntilEvidenceIntegration);
-suite.Add("JSONLイベントに連番とUTC時刻を記録する", EventLogIsSequencedAndUtc);
-suite.Add("禁止遷移は状態と記録を変えない", RejectedTransitionDoesNotMutate);
-suite.Add("Fake正常系は成果物固定後にレビューし証跡不足で停止する", FakeSuccessKeepsReviewAndReadyEvidenceSeparate);
-suite.Add("Docker Fake runnerは固定成果物を順次handoffし未確認時に停止する", DockerFakeRunnerHandsOffSequentiallyAndFailsClosed);
-suite.Add("Docker Fake Runnerは停止tokenとtimeoutをExecutorへ伝え自動再試行しない", DockerFakeRunnerPropagatesStopAndTimeout);
-suite.Add("Run起動ゲートは停止要求とReviewer起動を直列化しhandoffを抑止する", RunStartGateSerializesReviewerLaunch);
-suite.Add("Docker起動ゲートと有期限cleanupは停止境界を守る", DockerStartGateAndCleanupAreBounded);
-suite.Add("Docker cleanupはinspect失敗・不正状態でもstopを試みfail-closedにする", DockerCleanupStopsOnUnknownStateAndFailsClosed);
-suite.Add("Docker Executorの正常系はImplementer→Reviewer順を維持する", DockerExecutorMockNormalWorkflowIsSequential);
-suite.Add("Docker CLIで合成Fakeを隔離実行しImplementerからReviewerへ順次handoffする", DockerFakeWorkflowRunsInContainersWhenAvailable);
-suite.Add("Docker統合プロセスのtimeout・起動分類・共有診断を安全に扱う", DockerIntegrationProcessFailuresAreBoundedAndRedacted);
-suite.Add("Docker Fake失敗診断は任意出力やローカルパスを共有しない", DockerFakeFailureDiagnosticsExcludeUntrustedText);
-suite.Add("Fake修正系は同一Reviewerで再レビューし上限を守る", FakeRevisionIsBoundedAndReReviewed);
-suite.Add("Fake停止・失敗・空応答・タイムアウトを正しく報告する", FakeStopAndFailureScenariosAreRecorded);
-suite.Add("再試行上限でReviewer失敗を終了する", ReviewerRetriesStopAtLimit);
-suite.Add("修正上限到達時に人間へ停止を報告する", RevisionLimitStopsForHuman);
-suite.Add("イベント保存失敗時に成功状態へ進まず部分成果物を保持する", EventWriteFailureDoesNotClaimSuccess);
-suite.Add("Fake成果物保存失敗はReviewerを起動せず停止理由を記録する", FakeArtifactWriteFailureStopsAndReports);
-suite.Add("Fake Reviewer応答の途中保存失敗は追加Agentなしで停止する", FakeMidwayWriteFailureStopsAndReports);
-suite.Add("既存実行保存先を上書きせずに拒否する", ExistingRunDirectoryIsPreserved);
-suite.Add("人間確認待ちは独立証跡とPR操作記録が揃わなければ拒否する", ReadyRequiresIndependentEvidenceRecords);
-suite.Add("空のrunパス指定を終了コード2の入力エラーとして返す", EmptyRunPathsReturnInputError);
-suite.Add("証跡ファイルの読込・JSON形式エラーを実行前に拒否する", ReviewEvidenceReadErrorsAreInputFailures);
-suite.Add("NUL文字を含む外部証跡参照を不一致として拒否する", InvalidEvidenceReferenceIsRejected);
-suite.Add("Fake Codex出力の既知プロキシ認証情報を保存前にマスクする", CodexProxyCredentialsAreRedactedFromPersistedOutputs);
-suite.Add("Fake CodexプロセスのJSONL・stderr・usage・未知eventを別々に記録する", CodexProcessCapturesJsonlAndSeparatesStreams);
-suite.Add("Fake Codex実行でkill処理とCLI版確認が起動しない", CodexVersionProbeKillFailureIsRecorded);
-suite.Add("Fake Codex実行ファイル起動失敗を安全に記録する", CodexVersionProbeStartFailureStopsBeforeExecution);
-suite.Add("terminal eventと終了コードの不一致を成功扱いしない", CodexTerminalAndExitCodeMustAgree);
-suite.Add("不正JSONL・空応答・異常終了を成功扱いしない", CodexMalformedAndEmptyResponsesFail);
-suite.Add("timeout後にkillを試し終了・stream切断を記録する", CodexTimeoutKillIsReportedSeparately);
-suite.Add("timeout時にFakeプロセスの子プロセス停止も確認する", CodexTimeoutStopsFakeChildProcess);
-suite.Add("kill失敗を記録しプロセス終了未確認を成功扱いしない", CodexKillFailureIsNotReportedAsSuccess);
-suite.Add("Ctrl+C停止要求とtimeoutを区別しkill・終了・stream結果を記録する", CodexCancellationIsDistinctFromTimeout);
-suite.Add("Codex子プロセスへ親のAPI secret環境変数を渡さない", CodexChildEnvironmentFiltersSecrets);
-suite.Add("既存CODEX_HOMEと通常のユーザープロファイルを使える", CodexExistingProfilesAreAccepted);
-suite.Add("Codex Fakeプロセスで独立レビューまで縦断し固定hashを引き継ぐ", CodexFakeProcessesCompleteIndependentReviewSlice);
-suite.Add("Codex一回モードは成功・指摘・失敗を記録し追加起動せず人間判断待ちで止まる", CodexOneShotStopsWithoutRetries);
+AddUnitTests(suite);
 return suite.Run().ExitCode;
+
+static void AddUnitTests(TestSuite suite)
+{
+    // CI invokes this explicit Fake/fixture-only set. External-service and Docker tests do not belong here.
+    suite.Add("テスト集の件数・ログ・終了コードがPass/Fail/未検証で一致する", TestSuiteOutcomeContractIsConsistent);
+    suite.Add("有効な契約を検証できる", ValidContractIsAccepted);
+    suite.Add("契約の不足・矛盾・未知項目を拒否する", InvalidContractsAreRejected);
+    suite.Add("すべての状態ペアを許可表どおりに判定する", AllTransitionsAreExplicit);
+    suite.Add("確認待ちはIssue #3では到達不能", ReviewReadyIsUnavailableUntilEvidenceIntegration);
+    suite.Add("JSONLイベントに連番とUTC時刻を記録する", EventLogIsSequencedAndUtc);
+    suite.Add("禁止遷移は状態と記録を変えない", RejectedTransitionDoesNotMutate);
+    suite.Add("Fake正常系は成果物固定後にレビューし証跡不足で停止する", FakeSuccessKeepsReviewAndReadyEvidenceSeparate);
+    suite.Add("Fake修正系は同一Reviewerで再レビューし上限を守る", FakeRevisionIsBoundedAndReReviewed);
+    suite.Add("Fake停止・失敗・空応答・タイムアウトを正しく報告する", FakeStopAndFailureScenariosAreRecorded);
+    suite.Add("再試行上限でReviewer失敗を終了する", ReviewerRetriesStopAtLimit);
+    suite.Add("修正上限到達時に人間へ停止を報告する", RevisionLimitStopsForHuman);
+    suite.Add("イベント保存失敗時に成功状態へ進まず部分成果物を保持する", EventWriteFailureDoesNotClaimSuccess);
+    suite.Add("Fake成果物保存失敗はReviewerを起動せず停止理由を記録する", FakeArtifactWriteFailureStopsAndReports);
+    suite.Add("Fake Reviewer応答の途中保存失敗は追加Agentなしで停止する", FakeMidwayWriteFailureStopsAndReports);
+    suite.Add("既存実行保存先を上書きせずに拒否する", ExistingRunDirectoryIsPreserved);
+    suite.Add("人間確認待ちは独立証跡とPR操作記録が揃わなければ拒否する", ReadyRequiresIndependentEvidenceRecords);
+    suite.Add("空のrunパス指定を終了コード2の入力エラーとして返す", EmptyRunPathsReturnInputError);
+    suite.Add("証跡ファイルの読込・JSON形式エラーを実行前に拒否する", ReviewEvidenceReadErrorsAreInputFailures);
+    suite.Add("NUL文字を含む外部証跡参照を不一致として拒否する", InvalidEvidenceReferenceIsRejected);
+    suite.Add("Fake Codex出力の既知プロキシ認証情報を保存前にマスクする", CodexProxyCredentialsAreRedactedFromPersistedOutputs);
+    suite.Add("Fake CodexプロセスのJSONL・stderr・usage・未知eventを別々に記録する", CodexProcessCapturesJsonlAndSeparatesStreams);
+    suite.Add("Fake Codex実行でkill処理とCLI版確認が起動しない", CodexVersionProbeKillFailureIsRecorded);
+    suite.Add("Fake Codex実行ファイル起動失敗を安全に記録する", CodexVersionProbeStartFailureStopsBeforeExecution);
+    suite.Add("terminal eventと終了コードの不一致を成功扱いしない", CodexTerminalAndExitCodeMustAgree);
+    suite.Add("不正JSONL・空応答・異常終了を成功扱いしない", CodexMalformedAndEmptyResponsesFail);
+    suite.Add("timeout後にkillを試し終了・stream切断を記録する", CodexTimeoutKillIsReportedSeparately);
+    suite.Add("timeout時にFakeプロセスの子プロセス停止も確認する", CodexTimeoutStopsFakeChildProcess);
+    suite.Add("kill失敗を記録しプロセス終了未確認を成功扱いしない", CodexKillFailureIsNotReportedAsSuccess);
+    suite.Add("Ctrl+C停止要求とtimeoutを区別しkill・終了・stream結果を記録する", CodexCancellationIsDistinctFromTimeout);
+    suite.Add("Codex子プロセスへ親のAPI secret環境変数を渡さない", CodexChildEnvironmentFiltersSecrets);
+    suite.Add("既存CODEX_HOMEと通常のユーザープロファイルを使える", CodexExistingProfilesAreAccepted);
+    suite.Add("Codex Fakeプロセスで独立レビューまで縦断し固定hashを引き継ぐ", CodexFakeProcessesCompleteIndependentReviewSlice);
+    suite.Add("Codex一回モードは成功・指摘・失敗を記録し追加起動せず人間判断待ちで止まる", CodexOneShotStopsWithoutRetries);
+}
 
 static int RunFakeCodexFixture(string[] args)
 {
@@ -654,431 +655,6 @@ static void FakeSuccessKeepsReviewAndReadyEvidenceSeparate()
     Assert.Equal(result.ArtifactSha256, events.RootElement.GetProperty("diffSha256").GetString());
 }
 
-static void DockerFakeRunnerHandsOffSequentiallyAndFailsClosed()
-{
-    using var temp = new TemporaryDirectory();
-    var contract = SampleContract() with { WorkingDirectory = temp.Path };
-    var executor = new ScriptedIsolationExecutor();
-    var runner = new DockerFakeAgentRunner(executor);
-    FakeWorkflowResult result;
-    using (var events = JsonlRunEventStore.CreateNew(Path.Combine(temp.Path, "events.jsonl"), "docker-fake-contract"))
-        result = new FakeAgentWorkflow().Run(contract, new string('a', 64), "docker-fake-contract", temp.Path, runner, events);
-    Assert.Equal(RunState.NeedsHumanInput, result.State, "Docker Fake結果だけで人間確認の安全ゲートを越えました。");
-    Assert.Equal(1, result.ImplementationCalls);
-    Assert.Equal(1, result.ReviewCalls);
-    Assert.Equal(2, executor.Requests.Count);
-    Assert.Equal("implementer", executor.Requests[0].Role);
-    Assert.Equal("reviewer", executor.Requests[1].Role);
-    Assert.True(executor.Requests[1].ArtifactContent!.Contains("fake_result=pass", StringComparison.Ordinal));
-    Assert.Equal(executor.Requests[1].ArtifactSha256,
-        Convert.ToHexStringLower(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(executor.Requests[1].ArtifactContent!))));
-
-    var failedDirectory = Path.Combine(temp.Path, "unconfirmed");
-    Directory.CreateDirectory(failedDirectory);
-    var failedExecutor = new ScriptedIsolationExecutor(implementerStatus: IsolationExecutionStatus.RemovalUnconfirmed);
-    using (var events = JsonlRunEventStore.CreateNew(Path.Combine(failedDirectory, "events.jsonl"), "docker-fake-unconfirmed"))
-        result = new FakeAgentWorkflow().Run(contract, new string('b', 64), "docker-fake-unconfirmed", failedDirectory,
-            new DockerFakeAgentRunner(failedExecutor), events);
-    Assert.Equal(RunState.NeedsHumanInput, result.State, "コンテナー削除未確認を人間確認待ちにしませんでした。");
-    Assert.Equal(1, failedExecutor.Requests.Count, "削除未確認後にReviewerを起動しました。");
-    Assert.Equal(0, result.ReviewCalls);
-    Assert.True(result.ArtifactReference is null, "削除未確認後に成果物をhandoffしました。");
-
-    var terminationDirectory = Path.Combine(temp.Path, "container-exit-unconfirmed");
-    Directory.CreateDirectory(terminationDirectory);
-    var terminationExecutor = new ScriptedIsolationExecutor(implementerStatus: IsolationExecutionStatus.TerminationUnconfirmed);
-    using (var events = JsonlRunEventStore.CreateNew(Path.Combine(terminationDirectory, "events.jsonl"), "docker-fake-container-exit-unconfirmed"))
-        result = new FakeAgentWorkflow().Run(contract, new string('h', 64), "docker-fake-container-exit-unconfirmed", terminationDirectory,
-            new DockerFakeAgentRunner(terminationExecutor), events);
-    Assert.Equal(RunState.NeedsHumanInput, result.State, "コンテナー終了未確認後に停止しませんでした。");
-    Assert.Equal(1, terminationExecutor.Requests.Count);
-    Assert.Equal(0, result.ReviewCalls);
-    Assert.True(result.ArtifactReference is null, "コンテナー終了未確認後に成果物をhandoffしました。");
-
-    var dockerExitDirectory = Path.Combine(temp.Path, "docker-cli-exit-unconfirmed");
-    Directory.CreateDirectory(dockerExitDirectory);
-    var dockerExitExecutor = new ScriptedIsolationExecutor(dockerProcessesExitConfirmed: false);
-    using (var events = JsonlRunEventStore.CreateNew(Path.Combine(dockerExitDirectory, "events.jsonl"), "docker-fake-cli-exit-unconfirmed"))
-        result = new FakeAgentWorkflow().Run(contract, new string('g', 64), "docker-fake-cli-exit-unconfirmed", dockerExitDirectory,
-            new DockerFakeAgentRunner(dockerExitExecutor), events);
-    Assert.Equal(RunState.NeedsHumanInput, result.State, "Docker CLI終了未確認後に停止しませんでした。");
-    Assert.Equal(1, dockerExitExecutor.Requests.Count);
-    Assert.Equal(0, result.ReviewCalls);
-    Assert.True(result.ArtifactReference is null, "Docker CLI終了未確認後に成果物をhandoffしました。");
-}
-
-static void DockerFakeRunnerPropagatesStopAndTimeout()
-{
-    using (var temp = new TemporaryDirectory())
-    using (var stop = new CancellationTokenSource())
-    using (var events = JsonlRunEventStore.CreateNew(Path.Combine(temp.Path, "events.jsonl"), "docker-fake-stop"))
-    {
-        var executor = new CancellationObservingExecutor();
-        var contract = SampleContract() with { WorkingDirectory = temp.Path };
-        var run = Task.Run(() => new FakeAgentWorkflow().Run(contract, new string('d', 64), "docker-fake-stop", temp.Path,
-            new DockerFakeAgentRunner(executor), events, stopToken: stop.Token));
-        Assert.True(executor.Started.Wait(TimeSpan.FromSeconds(5)), "Implementer Executorが起動しませんでした。");
-        stop.Cancel();
-        var result = run.GetAwaiter().GetResult();
-        Assert.True(executor.ReceivedCancelableToken, "停止tokenをExecutorへ渡しませんでした。");
-        Assert.Equal(IsolationExecutionStatus.StopRequested, executor.ObservedResultStatus);
-        Assert.Equal(RunState.NeedsHumanInput, result.State);
-        Assert.Equal(1, result.ImplementationCalls);
-        Assert.Equal(0, result.ReviewCalls, "停止後にReviewerを起動しました。");
-        Assert.Equal(0, result.RetryAttempts, "停止後にImplementerを再試行しました。");
-        Assert.True(result.ArtifactReference is null, "停止後に成果物をhandoffしました。");
-    }
-
-    using (var temp = new TemporaryDirectory())
-    using (var events = JsonlRunEventStore.CreateNew(Path.Combine(temp.Path, "events.jsonl"), "docker-fake-timeout"))
-    {
-        var executor = new ScriptedIsolationExecutor(implementerStatus: IsolationExecutionStatus.TimedOut);
-        var contract = SampleContract() with { WorkingDirectory = temp.Path };
-        var result = new FakeAgentWorkflow().Run(contract, new string('e', 64), "docker-fake-timeout", temp.Path,
-            new DockerFakeAgentRunner(executor), events);
-        Assert.Equal(RunState.NeedsHumanInput, result.State);
-        Assert.Equal(1, executor.Requests.Count, "timeout後に再試行しました。");
-        Assert.Equal(1, result.ImplementationCalls);
-        Assert.Equal(0, result.ReviewCalls, "timeout後にReviewerを起動しました。");
-        Assert.Equal(0, result.RetryAttempts);
-        var passedTimeout = executor.Requests[0].Timeout.GetValueOrDefault();
-        Assert.True(passedTimeout > TimeSpan.Zero && passedTimeout <= TimeSpan.FromMinutes(2), "Fake Agent timeoutを上限付きで伝えませんでした。");
-        Assert.True(result.ArtifactReference is null, "timeout後に成果物をhandoffしました。");
-    }
-
-    using (var temp = new TemporaryDirectory())
-    using (var events = JsonlRunEventStore.CreateNew(Path.Combine(temp.Path, "events.jsonl"), "docker-fake-start-unknown"))
-    {
-        var executor = new ScriptedIsolationExecutor(implementerStatus: IsolationExecutionStatus.StartUnconfirmed);
-        var contract = SampleContract() with { WorkingDirectory = temp.Path };
-        var result = new FakeAgentWorkflow().Run(contract, new string('f', 64), "docker-fake-start-unknown", temp.Path,
-            new DockerFakeAgentRunner(executor), events);
-        Assert.Equal(RunState.NeedsHumanInput, result.State);
-        Assert.Equal(1, executor.Requests.Count, "起動結果不明後に自動再試行しました。");
-        Assert.Equal(0, result.ReviewCalls);
-        Assert.Equal(0, result.RetryAttempts);
-        Assert.True(result.ArtifactReference is null, "起動結果不明後に成果物をhandoffしました。");
-    }
-}
-
-static void RunStartGateSerializesReviewerLaunch()
-{
-    using var temp = new TemporaryDirectory();
-    using var events = JsonlRunEventStore.CreateNew(Path.Combine(temp.Path, "events.jsonl"), "stop-before-reviewer");
-    var executor = new StopAfterImplementerExecutor();
-    var contract = SampleContract() with { WorkingDirectory = temp.Path };
-    var result = new FakeAgentWorkflow().Run(contract, new string('z', 64), "stop-before-reviewer", temp.Path,
-        new DockerFakeAgentRunner(executor), events);
-    Assert.Equal(RunState.NeedsHumanInput, result.State);
-    Assert.Equal(1, executor.Requests.Count);
-    Assert.Equal("implementer", executor.Requests[0].Role);
-    Assert.Equal(0, result.ReviewCalls, "停止確定後にReviewerを起動しました。");
-    Assert.True(result.ArtifactReference is null, "停止確定後に成果物をhandoffしました。");
-    Assert.Equal(0, result.RetryAttempts);
-}
-
-static void DockerStartGateAndCleanupAreBounded()
-{
-    var gate = new RunStartGate();
-    gate.RequestStop();
-    var untouched = new FakeDockerCommandRunner((_, _) => throw new InvalidOperationException("Stopped run spawned Docker."));
-    var refused = new DockerIsolationExecutor(commandRunner: untouched).ExecuteAsync(
-        new("run-stop-first", "implementer", 1, StartGate: gate)).GetAwaiter().GetResult();
-    Assert.Equal(IsolationExecutionStatus.StopRequested, refused.Status);
-    Assert.Equal(0, untouched.Commands.Count, "停止確定前にDocker CLIを起動しました。");
-
-    RunStartGate? committedGate = null;
-    var afterStartCommands = new FakeDockerCommandRunner((args, call) =>
-    {
-        if (args[0] == "create") return DockerOk("container-123\n");
-        if (args[0] == "start")
-        {
-            committedGate!.RequestStop(); // Start commit already won; cleanup must now run.
-            return new(1, true, false, true, "", "stopped");
-        }
-        if (args[0] == "inspect" && call == 3) return DockerNotFound();
-        if (args[0] == "inspect") return DockerOk("container-123 exited\n");
-        if (args[0] == "stop") return DockerOk("container-123\n");
-        if (args[0] == "rm") return DockerOk("container-123\n");
-        throw new InvalidOperationException("Unexpected Docker command: " + string.Join(' ', args));
-    });
-    committedGate = new RunStartGate();
-    var stopped = new DockerIsolationExecutor(commandRunner: afterStartCommands).ExecuteAsync(
-        new("run-start-wins", "implementer", 1, StartGate: committedGate)).GetAwaiter().GetResult();
-    Assert.Equal(IsolationExecutionStatus.StopRequested, stopped.Status);
-    Assert.True(afterStartCommands.Commands.Any(c => c[0] == "start"), "起動開始確定後のstartを観測しませんでした。");
-    Assert.True(afterStartCommands.Commands.Any(c => c[0] == "stop"), "起動開始後の停止でcleanup stopを試みませんでした。");
-    Assert.True(afterStartCommands.Commands.Any(c => c[0] == "rm"), "起動開始後の停止でcleanup rmを試みませんでした。");
-    Assert.True(stopped.TerminationConfirmed && stopped.ContainerRemovalConfirmed,
-        "cleanupの終了・削除確認を結果に反映しませんでした。");
-}
-
-static void DockerCleanupStopsOnUnknownStateAndFailsClosed()
-{
-    foreach (var initialInspect in new[] { new DockerCommandResult(null, false, false, false, "", "timeout"), DockerOk("malformed state\n") })
-    {
-        var inspectCall = 0;
-        var runner = new FakeDockerCommandRunner((args, _) =>
-        {
-            if (args[0] == "create") return DockerOk("container-123\n");
-            if (args[0] == "start") return new(null, false, true, false, "", "start timeout");
-            if (args[0] == "inspect")
-            {
-                inspectCall++;
-                return inspectCall == 1 ? initialInspect : inspectCall == 2 ? DockerOk("container-123 exited\n") : DockerNotFound();
-            }
-            if (args[0] == "stop") return DockerOk("container-123\n");
-            if (args[0] == "rm") return DockerOk("container-123\n");
-            throw new InvalidOperationException("Unexpected Docker command: " + string.Join(' ', args));
-        });
-        var result = new DockerIsolationExecutor(commandRunner: runner).ExecuteAsync(new("cleanup-unknown", "implementer", 1)).GetAwaiter().GetResult();
-        Assert.True(runner.Commands.Any(c => c[0] == "stop"), "初回inspect失敗・形式不正でもstopを試みませんでした。");
-        Assert.True(runner.Commands.Any(c => c[0] == "rm"), "状態不明時にrmを試みませんでした。");
-        Assert.True(result.TerminationConfirmed && result.ContainerRemovalConfirmed,
-            "有期限cleanup後の明確な終了・不存在確認を反映しませんでした。");
-        Assert.True(runner.Commands.All(c => c[0] != "start" || c.Length > 1), "予期しないDocker起動記録です。");
-    }
-
-    foreach (var failureMode in new[] { "stop", "rm", "post-inspect" })
-    {
-        var inspectCall = 0;
-        var runner = new FakeDockerCommandRunner((args, _) =>
-        {
-            if (args[0] == "create") return DockerOk("container-456\n");
-            if (args[0] == "start") return new(null, false, true, false, "", "start timeout");
-            if (args[0] == "inspect")
-            {
-                inspectCall++;
-                if (inspectCall == 1) return DockerOk("container-456 running\n");
-                if (inspectCall == 2) return failureMode == "stop" ? DockerOk("container-456 running\n") : DockerOk("container-456 exited\n");
-                return failureMode == "post-inspect" ? new(null, false, false, false, "", "inspect unavailable") : DockerOk("container-456 running\n");
-            }
-            if (args[0] == "stop") return failureMode == "stop" ? DockerCommandResult.StartFailed("stop failed") : DockerOk("container-456\n");
-            if (args[0] == "rm") return failureMode == "rm" ? DockerCommandResult.StartFailed("rm failed") : DockerCommandResult.StartFailed("container still running");
-            throw new InvalidOperationException("Unexpected Docker command: " + string.Join(' ', args));
-        });
-
-        using var temp = new TemporaryDirectory();
-        using var events = JsonlRunEventStore.CreateNew(Path.Combine(temp.Path, "events.jsonl"), "cleanup-" + failureMode);
-        var contract = SampleContract() with { WorkingDirectory = temp.Path };
-        var result = new FakeAgentWorkflow().Run(contract, new string('y', 64), "cleanup-" + failureMode, temp.Path,
-            new DockerFakeAgentRunner(new DockerIsolationExecutor(commandRunner: runner)), events);
-        Assert.Equal(RunState.NeedsHumanInput, result.State, "cleanup結果不明でfail-closedになりませんでした。");
-        Assert.Equal(1, result.ImplementationCalls);
-        Assert.Equal(0, result.ReviewCalls, "cleanup確認不能後にReviewerを起動しました。");
-        Assert.Equal(0, result.RetryAttempts, "cleanup確認不能後に再試行しました。");
-        Assert.True(result.ArtifactReference is null, "cleanup確認不能後に成果物をhandoffしました。");
-        Assert.True(runner.Commands.Any(c => c[0] == "stop"), "停止失敗シナリオでstopを試みませんでした。");
-        Assert.True(runner.Commands.Any(c => c[0] == "rm"), "削除失敗シナリオでrmを試みませんでした。");
-    }
-}
-
-static void DockerExecutorMockNormalWorkflowIsSequential()
-{
-    using var temp = new TemporaryDirectory();
-    var roleAndHash = new Dictionary<string, (string Role, string? Hash)>(StringComparer.Ordinal);
-    var removed = new HashSet<string>(StringComparer.Ordinal);
-    var creates = 0;
-    var runner = new FakeDockerCommandRunner((args, _) =>
-    {
-        if (args[0] == "create")
-        {
-            var id = "normal-" + ++creates;
-            var role = args.First(a => a.StartsWith("ateliers.role=", StringComparison.Ordinal))["ateliers.role=".Length..];
-            roleAndHash[id] = (role, role == "reviewer" ? args[^1] : null);
-            return DockerOk(id + Environment.NewLine);
-        }
-        var target = args[^1];
-        if (args[0] == "start")
-        {
-            var (role, hash) = roleAndHash[target];
-            var output = role == "implementer" ? "role=implementer\nfake_result=pass\n" :
-                "review_artifact_sha256=" + hash + "\nreview_artifact_hash=verified\nrole_a_canary_visible=no\nfake_result=pass\n";
-            return DockerOk(output);
-        }
-        if (args[0] == "inspect" && args.Any(a => a == "{{.Id}}"))
-            return removed.Contains(target) ? DockerNotFound() : DockerOk(target + Environment.NewLine);
-        if (args[0] == "inspect") return DockerOk("exited 0" + Environment.NewLine);
-        if (args[0] == "rm") { removed.Add(target); return DockerOk(target + Environment.NewLine); }
-        throw new InvalidOperationException("Unexpected Docker command: " + string.Join(' ', args));
-    });
-
-    var contract = SampleContract() with { WorkingDirectory = temp.Path };
-    FakeWorkflowResult result;
-    using (var events = JsonlRunEventStore.CreateNew(Path.Combine(temp.Path, "events.jsonl"), "docker-mock-normal"))
-        result = new FakeAgentWorkflow().Run(contract, new string('w', 64), "docker-mock-normal", temp.Path,
-            new DockerFakeAgentRunner(new DockerIsolationExecutor(commandRunner: runner)), events);
-    Assert.Equal(RunState.NeedsHumanInput, result.State);
-    Assert.Equal(1, result.ImplementationCalls);
-    Assert.Equal(1, result.ReviewCalls);
-    Assert.Equal(2, runner.Commands.Count(c => c[0] == "create"));
-    Assert.Equal(2, runner.Commands.Count(c => c[0] == "start"));
-    Assert.True(runner.Commands.FindIndex(c => c[0] == "start" && c[^1] == "normal-1") <
-        runner.Commands.FindIndex(c => c[0] == "start" && c[^1] == "normal-2"), "ReviewerがImplementerより先に起動しました。");
-}
-
-static void DockerFakeWorkflowRunsInContainersWhenAvailable()
-{
-    using var temp = new TemporaryDirectory();
-    var root = new DirectoryInfo(AppContext.BaseDirectory);
-    while (root is not null && !File.Exists(Path.Combine(root.FullName, "Ateliers.Ai.Orchestrator.sln"))) root = root.Parent;
-    Assert.True(root is not null, "テスト実行時にリポジトリルートを特定できません。");
-    var imageDirectory = Path.Combine(root!.FullName, "work", "docker-fake-isolation");
-    var image = DockerIsolationExecutor.DefaultImage;
-    var build = RunExternal("docker", "build", "--pull=false", "--network=none", "-t", image, imageDirectory);
-    if (build.ExecutableNotFound) Assert.Skip("Docker CLIが見つかりません。コンテナー実測は未検証です。");
-    Assert.False(build.TimedOut, "Docker Fake image buildがtimeoutしました。" + FormatExternalDiagnostics("docker build", build));
-    Assert.True(build.ProcessExitObserved, "Docker Fake image buildのプロセス終了を確認できません。" + FormatExternalDiagnostics("docker build", build));
-    Assert.True(build.ExitCode == 0,
-        "Docker Fake image build failed. " + FormatExternalDiagnostics("docker build", build));
-
-    var runDirectory = Path.Combine(temp.Path, "run");
-    Directory.CreateDirectory(runDirectory);
-    var contract = SampleContract() with { WorkingDirectory = temp.Path };
-    FakeWorkflowResult result;
-    using (var events = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "docker-fake-integration"))
-    {
-        try
-        {
-            result = new FakeAgentWorkflow().Run(contract, new string('c', 64), "docker-fake-integration", runDirectory,
-                new DockerFakeAgentRunner(new DockerIsolationExecutor()), events);
-        }
-        catch (Exception exception)
-        {
-            throw new DiagnosticTestFailure($"Workflow execution threw ({exception.GetType().Name}).");
-        }
-    }
-
-    var reviewPath = Path.Combine(runDirectory, "exchanges", "reviewer-1", "response.md");
-    var review = File.Exists(reviewPath) ? File.ReadAllText(reviewPath) : "";
-    var failures = new List<string>();
-    if (result.State != RunState.NeedsHumanInput) failures.Add($"Workflow state: expected NeedsHumanInput, actual {result.State}");
-    if (result.ImplementationCalls != 1) failures.Add($"ImplementationCalls: expected 1, actual {result.ImplementationCalls}");
-    if (result.ReviewCalls != 1) failures.Add($"ReviewCalls: expected 1, actual {result.ReviewCalls}");
-    if (!review.Contains("role_a_canary_visible=no", StringComparison.Ordinal))
-        failures.Add("Reviewer response did not confirm the Implementer tmpfs canary was hidden.");
-    if (failures.Count > 0)
-    {
-        var implementerResponsePath = Path.Combine(runDirectory, "exchanges", "implementer-1", "response.md");
-        var implementerResponseLength = File.Exists(implementerResponsePath) ? new FileInfo(implementerResponsePath).Length : 0;
-        throw new DiagnosticTestFailure(
-            string.Join("\n", failures) +
-            $"\nRetryAttempts: {result.RetryAttempts}" +
-            $"\nImplementer response present: {implementerResponseLength > 0}; bytes: {implementerResponseLength}");
-    }
-}
-
-static ExternalProcessResult RunExternal(string fileName, params string[] arguments) =>
-    RunExternalBounded(fileName, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(5), null, arguments);
-
-static ExternalProcessResult RunExternalBounded(string fileName, TimeSpan timeout, TimeSpan killWait,
-    Action<Process>? killOverride, params string[] arguments)
-{
-    Process? process = null;
-    try
-    {
-        var start = new ProcessStartInfo(fileName) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (var argument in arguments) start.ArgumentList.Add(argument);
-        process = Process.Start(start);
-        if (process is null) return ExternalProcessResult.StartFailure("Unknown", null, executableNotFound: false);
-        var output = process.StandardOutput.ReadToEndAsync();
-        var error = process.StandardError.ReadToEndAsync();
-        if (!process.WaitForExit((int)Math.Clamp(timeout.TotalMilliseconds, 1, int.MaxValue)))
-        {
-            var killAttempted = true;
-            var killSucceeded = false;
-            try { (killOverride ?? (static child => child.Kill(entireProcessTree: true)))(process); killSucceeded = true; }
-            catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { }
-            var processExitObserved = false;
-            try { processExitObserved = process.WaitForExit((int)Math.Clamp(killWait.TotalMilliseconds, 1, int.MaxValue)); }
-            catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or SystemException) { }
-            return ExternalProcessResult.Completed(processExitObserved && process.HasExited ? process.ExitCode : null,
-                timedOut: true, processExitObserved: processExitObserved && process.HasExited, killAttempted, killSucceeded,
-                SafeCharacterCount(output, TimeSpan.FromMilliseconds(100)), SafeCharacterCount(error, TimeSpan.FromMilliseconds(100)));
-        }
-        return ExternalProcessResult.Completed(process.ExitCode, timedOut: false, processExitObserved: true,
-            killAttempted: false, killSucceeded: false,
-            SafeCharacterCount(output, TimeSpan.FromSeconds(1)),
-            SafeCharacterCount(error, TimeSpan.FromSeconds(1)));
-    }
-    catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
-    {
-        return ExternalProcessResult.StartFailure(exception.GetType().Name,
-            exception is System.ComponentModel.Win32Exception win32 ? win32.NativeErrorCode : null, IsExecutableNotFound(exception));
-    }
-    finally { process?.Dispose(); }
-}
-
-static string FormatExternalDiagnostics(string stage,
-    ExternalProcessResult result) =>
-    $"{stage}; exitCode={result.ExitCode?.ToString() ?? "unobserved"}; timedOut={result.TimedOut}; " +
-    $"processExitObserved={result.ProcessExitObserved}; killAttempted={result.KillAttempted}; killRequestSucceeded={result.KillRequestSucceeded}; " +
-    $"startFailure={result.StartFailureType ?? "none"}; nativeError={result.NativeErrorCode?.ToString() ?? "none"}; " +
-    $"stdoutChars={FormatCount(result.StandardOutputCharacters)}; stderrChars={FormatCount(result.StandardErrorCharacters)}";
-
-static string FormatCount(int count) => count < 0 ? "unavailable" : count.ToString(System.Globalization.CultureInfo.InvariantCulture);
-
-static int SafeCharacterCount(Task<string> stream, TimeSpan wait)
-{
-    try { return stream.Wait(wait) ? stream.GetAwaiter().GetResult().Length : -1; }
-    catch { return -1; }
-}
-
-static void DockerIntegrationProcessFailuresAreBoundedAndRedacted()
-{
-    var missing = RunExternalBounded("ateliers-definitely-missing-docker-cli", TimeSpan.FromSeconds(2), TimeSpan.FromMilliseconds(100), null, "version");
-    Assert.True(missing.ExecutableNotFound, "実際に見つからないCLIだけを未検証分類にできません。");
-    Assert.False(IsExecutableNotFound(new System.ComponentModel.Win32Exception(5)),
-        "アクセス拒否をCLI未検出扱いしました。");
-    Assert.False(IsExecutableNotFound(new System.ComponentModel.Win32Exception(1260)),
-        "起動ポリシー拒否をCLI未検出扱いしました。");
-
-    var (fixturePath, fixtureArgs) = ExternalFixtureCommand("sleep");
-    var started = System.Diagnostics.Stopwatch.StartNew();
-    var timeout = RunExternalBounded(fixturePath, TimeSpan.FromMilliseconds(100), TimeSpan.FromSeconds(2), null, fixtureArgs);
-    Assert.True(timeout.TimedOut, "プロセスtimeoutを明示的に記録しませんでした。");
-    Assert.True(timeout.ProcessExitObserved && timeout.ExitCode is not null, "timeout後の終了未確認を記録しませんでした。");
-    Assert.True(started.Elapsed < TimeSpan.FromSeconds(5), "timeoutの後始末が有限時間で終わりませんでした。");
-
-    var (unconfirmedPath, unconfirmedArgs) = ExternalFixtureCommand("sleep");
-    var unconfirmed = RunExternalBounded(unconfirmedPath, TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(50),
-        static _ => throw new System.ComponentModel.Win32Exception(5), unconfirmedArgs);
-    Assert.True(unconfirmed.TimedOut && !unconfirmed.ProcessExitObserved && !unconfirmed.KillRequestSucceeded,
-        "Kill後も終了未確認の経路を失敗として報告できません。");
-    var diagnostics = FormatExternalDiagnostics("fixture", unconfirmed);
-    Assert.True(diagnostics.Contains("processExitObserved=False", StringComparison.Ordinal), "終了未確認が診断にありません。");
-
-    var (outputPath, outputArgs) = ExternalFixtureCommand("fail");
-    var outputFailure = RunExternalBounded(outputPath, TimeSpan.FromSeconds(2), TimeSpan.FromMilliseconds(100), null, outputArgs);
-    var shared = FormatExternalDiagnostics("fixture", outputFailure);
-    Assert.False(shared.Contains("Local User", StringComparison.Ordinal) || shared.Contains("/home/local-user", StringComparison.Ordinal),
-        "共有診断に空白を含むWindowsまたはUnixパスが残っています。");
-}
-
-static void DockerFakeFailureDiagnosticsExcludeUntrustedText()
-{
-    using var temp = new TemporaryDirectory();
-    var secret = "C:\\Users\\Local User\\private.txt /home/local-user/private.txt";
-    var executor = new ScriptedIsolationExecutor(IsolationExecutionStatus.Failed, standardOutput: secret, standardError: secret, error: secret);
-    var contract = SampleContract() with { WorkingDirectory = temp.Path };
-    var response = new DockerFakeAgentRunner(executor).Implement(new AgentRequest("diagnostic-test", "Implementer", contract, 1,
-        RunDirectory: temp.Path, RemainingTime: TimeSpan.FromSeconds(5)));
-    Assert.False(response.Succeeded, "Fake失敗を成功扱いしました。");
-    Assert.True(response.Content.Contains("status=Failed", StringComparison.Ordinal), "安全な構造化診断を失敗応答に残しませんでした。");
-    Assert.True(response.Content.Contains("stdoutChars=", StringComparison.Ordinal) && response.Content.Contains("stderrChars=", StringComparison.Ordinal),
-        "標準出力と標準エラーのサイズ情報を残しませんでした。");
-    Assert.False(response.Content.Contains("Local User", StringComparison.Ordinal) || response.Content.Contains("/home/local-user", StringComparison.Ordinal),
-        "Fake共有診断にローカルパスを含めました。");
-}
-
-static bool IsExecutableNotFound(Exception exception) =>
-    exception is System.ComponentModel.Win32Exception native && native.NativeErrorCode == 2 ||
-    exception is FileNotFoundException or DirectoryNotFoundException;
-
-static (string Path, string[] Arguments) ExternalFixtureCommand(string mode) =>
-    (Environment.ProcessPath!, ["--external-process-fixture", mode]);
-
-
 static void FakeRevisionIsBoundedAndReReviewed()
 {
     using var temp = new TemporaryDirectory();
@@ -1220,7 +796,7 @@ static void FakeArtifactWriteFailureStopsAndReports()
     var runner = new CountingFakeAgentRunner(FakeScenario.Success);
     FakeWorkflowResult result;
     using (var store = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "artifact-write-fails"))
-        result = new FakeAgentWorkflow(new FailingFakeWorkflowStorage("artifacts\\artifact-1.md"))
+        result = new FakeAgentWorkflow(new FailingFakeWorkflowStorage(Path.Combine("artifacts", "artifact-1.md")))
             .Run(SampleContract(), new string('f', 64), "artifact-write-fails", runDirectory, runner, store, codexOneShot: true);
 
     Assert.Equal(RunState.NeedsHumanInput, result.State);
@@ -1240,7 +816,7 @@ static void FakeMidwayWriteFailureStopsAndReports()
     var runner = new CountingFakeAgentRunner(FakeScenario.Success);
     FakeWorkflowResult result;
     using (var store = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "review-write-fails"))
-        result = new FakeAgentWorkflow(new FailingFakeWorkflowStorage("reviewer-1\\response.md"))
+        result = new FakeAgentWorkflow(new FailingFakeWorkflowStorage(Path.Combine("exchanges", "reviewer-1", "response.md")))
             .Run(SampleContract(), new string('f', 64), "review-write-fails", runDirectory, runner, store, codexOneShot: true);
 
     Assert.Equal(RunState.NeedsHumanInput, result.State);
@@ -1516,9 +1092,6 @@ static TaskContract SampleContract() => new()
 };
 
 /// <summary>依存パッケージを使わずに検証項目を実行するテスト集です。</summary>
-static DockerCommandResult DockerOk(string output = "") => new(0, true, false, false, output, "");
-static DockerCommandResult DockerNotFound() => new(1, true, false, false, "", "Error: No such object: missing");
-
 sealed class TestSuite
 {
     private readonly List<(string Name, Action Test)> tests = [];
@@ -1692,76 +1265,6 @@ sealed class FailingEventWriter(string failureEventType, bool failReadyTransitio
             ElapsedMilliseconds = elapsedMilliseconds,
             UnknownInformation = unknownInformation ?? []
         };
-    }
-}
-
-sealed class FakeDockerCommandRunner(Func<string[], int, DockerCommandResult> response) : IDockerCommandRunner
-{
-    private readonly Dictionary<string, int> commandCalls = new(StringComparer.Ordinal);
-    public List<string[]> Commands { get; } = [];
-
-    public Task<DockerCommandResult> RunAsync(IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
-    {
-        var args = arguments.ToArray();
-        Commands.Add(args);
-        var call = commandCalls.TryGetValue(args[0], out var prior) ? prior + 1 : 1;
-        commandCalls[args[0]] = call;
-        Assert.True(timeout > TimeSpan.Zero && timeout <= TimeSpan.FromMinutes(2), "Dockerコマンドに適切なtimeoutが渡されませんでした。");
-        return Task.FromResult(response(args, call));
-    }
-}
-
-sealed class StopAfterImplementerExecutor : IIsolationExecutor
-{
-    public List<IsolationExecutionRequest> Requests { get; } = [];
-
-    public Task<IsolationExecutionResult> ExecuteAsync(IsolationExecutionRequest request, CancellationToken cancellationToken = default)
-    {
-        Requests.Add(request);
-        if (request.Role == "implementer") request.StartGate!.RequestStop();
-        var output = request.Role == "implementer" ? "role=implementer\nfake_result=pass\n" : "";
-        return Task.FromResult(new IsolationExecutionResult(IsolationExecutionStatus.Succeeded, 0, true, true, true,
-            output, ""));
-    }
-}
-
-sealed class ScriptedIsolationExecutor(IsolationExecutionStatus implementerStatus = IsolationExecutionStatus.Succeeded,
-    bool dockerProcessesExitConfirmed = true, string? standardOutput = null, string? standardError = null, string? error = null) : IIsolationExecutor
-{
-    public List<IsolationExecutionRequest> Requests { get; } = [];
-
-    public Task<IsolationExecutionResult> ExecuteAsync(IsolationExecutionRequest request, CancellationToken cancellationToken = default)
-    {
-        Requests.Add(request);
-        var status = request.Role == "implementer" ? implementerStatus : IsolationExecutionStatus.Succeeded;
-        var output = standardOutput ?? (request.Role == "implementer"
-            ? "role=implementer\nfake_result=pass\n"
-            : $"review_artifact_sha256={request.ArtifactSha256}\nreview_artifact_hash=verified\nrole_a_canary_visible=no\nfake_result=pass\n");
-        var terminationConfirmed = status is IsolationExecutionStatus.Succeeded or IsolationExecutionStatus.Failed or IsolationExecutionStatus.RemovalUnconfirmed;
-        var removalConfirmed = status != IsolationExecutionStatus.RemovalUnconfirmed;
-        int? exitCode = status == IsolationExecutionStatus.Succeeded ? 0 : status == IsolationExecutionStatus.Failed ? 7 : null;
-        return Task.FromResult(new IsolationExecutionResult(status, exitCode, terminationConfirmed, removalConfirmed, dockerProcessesExitConfirmed,
-            output, standardError ?? string.Empty, error ?? (status == IsolationExecutionStatus.Succeeded ? null : status.ToString())));
-    }
-}
-
-sealed class CancellationObservingExecutor : IIsolationExecutor
-{
-    public ManualResetEventSlim Started { get; } = new(false);
-    public bool ReceivedCancelableToken { get; private set; }
-    public IsolationExecutionStatus? ObservedResultStatus { get; private set; }
-
-    public Task<IsolationExecutionResult> ExecuteAsync(IsolationExecutionRequest request, CancellationToken cancellationToken = default)
-    {
-        ReceivedCancelableToken = cancellationToken.CanBeCanceled;
-        Started.Set();
-        var completion = new TaskCompletionSource<IsolationExecutionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        cancellationToken.Register(() =>
-        {
-            ObservedResultStatus = IsolationExecutionStatus.StopRequested;
-            completion.TrySetResult(new(IsolationExecutionStatus.StopRequested, null, true, true, true, "", "", "stop requested"));
-        });
-        return completion.Task;
     }
 }
 

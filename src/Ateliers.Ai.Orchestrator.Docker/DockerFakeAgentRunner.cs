@@ -53,7 +53,7 @@ public sealed class DockerFakeAgentRunner(IIsolationExecutor executor) : IAgentR
 
     private IsolationExecutionResult Execute(AgentRequest request, string role, string? artifactContent, string? artifactHash)
     {
-        var startGate = request.StartGate ?? new RunStartGate();
+        var startGate = new RunStartGate();
         if (request.StopToken.IsCancellationRequested) startGate.RequestStop();
         if (startGate.IsStopRequested)
             return new(IsolationExecutionStatus.StopRequested, null, false, false, true, "", "", "起動前に停止要求を受け付けました。");

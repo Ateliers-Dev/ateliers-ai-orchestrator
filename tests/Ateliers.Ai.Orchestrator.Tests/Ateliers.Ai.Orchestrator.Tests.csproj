@@ -3,7 +3,6 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Ateliers.Ai.Orchestrator.Core\Ateliers.Ai.Orchestrator.Core.csproj" />
     <ProjectReference Include="..\..\src\Ateliers.Ai.Orchestrator.Cli\Ateliers.Ai.Orchestrator.Cli.csproj" />
-    <ProjectReference Include="..\..\src\Ateliers.Ai.Orchestrator.Docker\Ateliers.Ai.Orchestrator.Docker.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
