@@ -1,0 +1,11 @@
+{
+  "bots": [
+    {
+      "id": "test-bot",
+      "name": "Ateliers Test Bot",
+      "botUserId": "U_REPLACE_WITH_SLACK_BOT_USER_ID",
+      "channelId": "C_REPLACE_WITH_ATELIERS_TEST_NOTIFICATIONS_CHANNEL_ID",
+      "enabled": true
+    }
+  ]
+}

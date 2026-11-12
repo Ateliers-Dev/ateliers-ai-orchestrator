@@ -112,3 +112,28 @@ opt-in時はImplementerとReviewerを各1回呼び出すため、モデル利用
 ```powershell
 dotnet build Ateliers.Ai.Orchestrator.sln
 ```
+
+### Slack Bot IntegrationTests（外部送信・明示opt-in）
+
+`Ateliers.Slack` は既存のIncoming Webhookと並行して、Slack Web API `chat.postMessage` を使うBot送信を提供します。Bot定義は `config/slack.json.example`、Token例は `config/slack.secrets.example.json` を参照してください。ローカルで使う場合は例を `config/slack.json` と `config/slack.secrets.json` にコピーし、実際のBot情報を設定します。Tokenファイルは `.gitignore` 対象です。設定ロードAPIには両方の絶対パスを明示します。
+
+Slack側の準備:
+
+1. Slack APIの[アプリ作成画面](https://api.slack.com/apps)で、例えば `Ateliers Test Bot` という専用アプリを作成します。
+2. **OAuth & Permissions** のBot Token Scopesに `chat:write` を追加し、アプリをワークスペースへインストール（権限を変更した後は再インストール）します。
+3. Bot User OAuth Token（`xoxb-...`）をローカルの `config/slack.secrets.json` の `tokens.test-bot` に保存します。TokenをチャットやPRへ貼り付けたり、Gitへ追加したりしないでください。
+4. `Ateliers Test Bot` を `#ateliers-test-notifications` に招待します（チャンネル内で `/invite @Ateliers Test Bot`）。招待されていない場合は `not_in_channel` 等で失敗します。
+5. `config/slack.json` の `botUserId` にSlackのBotユーザーID（`U...`）、`channelId` にチャンネルID（`C...`）を設定します。内部の `id` は `test-bot` で、Slack側の `botUserId` とは別の識別子です。
+
+Slack Bot IntegrationTestsは既定でSkipされます。実行するPowerShellプロセスでopt-inと絶対パスを明示してからテストを実行してください。これらの値は秘密Tokenではなく、Tokenはsecretsファイルから読み込みます。CIにはSlack送信資格情報を設定しません。
+
+```powershell
+$env:ATELIERS_SLACK_BOT_INTEGRATION_TESTS = "1"
+$env:ATELIERS_SLACK_CONFIG_PATH = (Resolve-Path "config/slack.json").Path
+$env:ATELIERS_SLACK_SECRETS_PATH = (Resolve-Path "config/slack.secrets.json").Path
+dotnet test tests/Ateliers.Slack.IntegrationTests/Ateliers.Slack.IntegrationTests.csproj --configuration Release --filter FullyQualifiedName~SlackBotClientIntegrationTests
+```
+
+設定ファイル、Bot定義、Tokenが不足・不正な場合は外部通信せずSkipします。成功時は `#ateliers-test-notifications` にRun ID付きメッセージを投稿し、Slack Web APIの成功応答と投稿先を検証します。これはSlack上で送信者検索ができることの自動検証ではありません。投稿後、Slackの検索欄で `from:<@U...> in:#ateliers-test-notifications "Slack Web API integration test"`（`U...` は設定したBot User ID）を検索し、投稿者がAteliers Test Botであり、Bot固有の送信者として検索できることを人手で確認してください。Slackは `from:<@UserID>` 形式をサポートしています。[検索方法](https://api.slack.com/methods/search.messages)
+
+このBotテストは送信・識別の疎通確認だけを対象とし、AIオーケストレーション連携は行いません。既存のIncoming Webhook、`ATELIERS_SLACK_WEBHOOK_URL` と `ATELIERS_SLACK_TEST_WEBHOOK_URL`、およびWebhook IntegrationTestsは維持します。

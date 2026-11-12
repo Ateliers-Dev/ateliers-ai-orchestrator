@@ -4,3 +4,4 @@
 .ateliers-orchestrator/
 work-smoke-runs/
 /.test-workspaces/
+/config/slack.secrets.json
