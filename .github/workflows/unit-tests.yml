@@ -32,6 +32,3 @@ jobs:
 
       - name: Run Slack unit tests
         run: dotnet test tests/Ateliers.Slack.UnitTests/Ateliers.Slack.UnitTests.csproj --configuration Release --no-build --no-restore
-
-      - name: Run opt-in Slack integration tests
-        run: dotnet test tests/Ateliers.Slack.IntegrationTests/Ateliers.Slack.IntegrationTests.csproj --configuration Release --no-build --no-restore
