@@ -9,7 +9,7 @@
 
 Codex経路はImplementerを最大1回、独立Reviewerを最大1回だけ起動し、成果物SHA-256、応答、停止理由を記録して `NeedsHumanInput` で停止します。Implementer/Reviewerの失敗、レビュー指摘、レビュー合格のいずれの場合も、自動修正・再レビュー・再試行やPR作成へ進みません。Fake経路の既存反復シナリオは維持します。
 
-実Codex CLIによる受入は未実施であり、実証済み・運用可能とはみなしません。この承認はFake実装とテストに限られ、実Codex CLI（`--help` / `--version` を含む）の起動は別途具体的な安全条件を提示し、追加承認を得るまで禁止です。
+実Codex CLIによる受入は未実施であり、実証済み・運用可能とはみなしません。通常のビルドとUnit/Fakeテストは実Codex CLIやモデル通信を起動しません。実Codex IntegrationTestsは、明示的な実行引数とCodex CLIの絶対パスを指定した場合だけ起動します。
 
 オーケストレーターは、Agentの実行条件と制御を保証する。Agentの判断結果および実行環境に残るリスクは、利用者の責任範囲とする。
 
@@ -91,11 +91,19 @@ JSONLには実行ID、連番、UTC時刻、役割、イベント種別、状態�
 
 ## テスト
 
-依存パッケージを使わない自動テストハーネスを実行します。通常テストはCoreの状態・保存処理とCLI/Codex実行境界をFakeで検証し、実モデルや外部実行基盤を起動しません。実Codex受入は通常テストとは別の opt-in 手順が整うまで未実施です。
+依存パッケージを使わないUnit/Fakeテストを実行します。Coreの状態・保存処理とCLI/Codex実行境界をFakeで検証し、実モデルや外部実行基盤を起動しません。
 
 ```powershell
 dotnet run --project tests/Ateliers.Ai.Orchestrator.Tests
 ```
+
+実Codex連携を一時Gitリポジトリで確認するIntegrationTestsは、別プロジェクトです。通常のbuild、Unit/Fakeテスト、GitHub Actionsからは実行されません。明示的に実行する場合は、.NET 10、Git、認証済みCodex CLI、モデル通信が可能な環境が必要です。最大2回のモデル呼び出しがあり、利用枠や費用が発生する場合があります。実行前に作業用アカウントの利用条件を確認してください。
+
+```powershell
+dotnet run --project tests/Ateliers.Ai.Orchestrator.IntegrationTests --configuration Release -- --run-codex "C:/path/to/codex.exe"
+```
+
+テストは一時ディレクトリにGit seed、task contract、実行記録先を作り、成功した場合に削除します。失敗した場合は診断に使えるよう一時ディレクトリを残し、場所を表示します。検証するのはImplementer/Reviewerの各1回、終了証跡とJSONLイベント・reportの整合性、`NeedsHumanInput`到達、契約対象ファイルだけの変更、Reviewerへ渡した固定差分と最終Git差分の一致、成果物参照先です。OSレベルの完全隔離を証明するテストではありません。
 
 ソリューション全体のビルドは次の通りです。
 
