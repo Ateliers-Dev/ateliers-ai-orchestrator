@@ -32,7 +32,7 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
     }
 
     internal LifecycleNotificationEventWriter(string lifecycleLogPath, bool notificationsDisabled,
-        Func<LifecycleEvent, CancellationToken, Task<bool>> notificationSender)
+        Func<LifecycleEvent, CancellationToken, Task<SlackNotificationSendResult>> notificationSender)
     {
         ArgumentNullException.ThrowIfNull(notificationSender);
         jsonlWriter = new JsonlLifecycleEventWriter(lifecycleLogPath);
@@ -115,7 +115,7 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
         slackCancellation?.Dispose();
     }
 
-    private void StartNotificationWorker(Func<LifecycleEvent, CancellationToken, Task<bool>> notificationSender)
+    private void StartNotificationWorker(Func<LifecycleEvent, CancellationToken, Task<SlackNotificationSendResult>> notificationSender)
     {
         slackQueue = Channel.CreateBounded<LifecycleEvent>(new BoundedChannelOptions(256)
         {
@@ -131,16 +131,16 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
             {
                 await foreach (var item in slackQueue.Reader.ReadAllAsync(slackCancellation.Token).ConfigureAwait(false))
                 {
-                    bool sent;
+                    SlackNotificationSendResult result;
                     try
                     {
-                        sent = await notificationSender(item, slackCancellation.Token).ConfigureAwait(false);
+                        result = await notificationSender(item, slackCancellation.Token).ConfigureAwait(false);
                     }
                     catch (Exception)
                     {
-                        sent = false;
+                        result = SlackNotificationSendResult.Failed;
                     }
-                    CompleteNotification(sent);
+                    CompleteNotification(result);
                     if (slackCancellation.IsCancellationRequested) return;
                 }
             }
@@ -156,12 +156,12 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
         });
     }
 
-    private void CompleteNotification(bool sent)
+    private void CompleteNotification(SlackNotificationSendResult result)
     {
         lock (notificationStateLock)
         {
             Interlocked.Decrement(ref pendingNotifications);
-            if (!notificationAccountingFinalized && !sent)
+            if (!notificationAccountingFinalized && result == SlackNotificationSendResult.Failed)
                 Interlocked.Increment(ref failedNotifications);
         }
     }

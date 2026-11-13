@@ -2,6 +2,13 @@ using System.Globalization;
 
 namespace Ateliers.Slack;
 
+public enum SlackNotificationSendResult
+{
+    Sent,
+    Skipped,
+    Failed
+}
+
 /// <summary>ライフサイクルイベントを役割別Botから短い固定形式で通知します。</summary>
 public sealed class SlackLifecycleNotificationDispatcher : IDisposable
 {
@@ -93,29 +100,32 @@ public sealed class SlackLifecycleNotificationDispatcher : IDisposable
 
     public int FailedSends => Volatile.Read(ref failedSends);
 
-    /// <summary>成功時はtrueを返します。Slack障害は例外として呼出し元へ伝えません。</summary>
-    public async Task<bool> TrySendAsync(string runId, string role, string eventType, string status, string state,
+    /// <summary>送信結果を返し、Slack障害は例外として呼出し元へ伝えません。</summary>
+    public async Task<SlackNotificationSendResult> TrySendAsync(string runId, string role, string eventType, string status, string state,
         DateTimeOffset timestampUtc, CancellationToken cancellationToken = default)
     {
         if (!clients.TryGetValue(role, out var client) ||
             !Guid.TryParseExact(runId, "N", out _) ||
             !EventTypes.Contains(eventType) || !Statuses.Contains(status) || !States.Contains(state))
-            return false;
+        {
+            Interlocked.Increment(ref failedSends);
+            return SlackNotificationSendResult.Failed;
+        }
 
         // NeedsHumanInput専用イベントの直後に同じ状態の終端イベントも出るため、重複を抑止します。
-        if (eventType == "completed" && status == "needs_human_input") return false;
+        if (eventType == "completed" && status == "needs_human_input") return SlackNotificationSendResult.Skipped;
 
         var message = string.Create(CultureInfo.InvariantCulture,
             $"[Ateliers AI] run={runId} role={role} event={eventType} status={status} state={state} at={timestampUtc.ToUniversalTime():O}");
         try
         {
             await client.SendMessageAsync(message, cancellationToken).ConfigureAwait(false);
-            return true;
+            return SlackNotificationSendResult.Sent;
         }
         catch (Exception)
         {
             Interlocked.Increment(ref failedSends);
-            return false;
+            return SlackNotificationSendResult.Failed;
         }
     }
 

@@ -24,7 +24,7 @@ public sealed class SlackLifecycleNotificationDispatcherTests
             ("Orchestrator", "orchestrator"), ("Implementer", "implementer"), ("Reviewer", "reviewer")
         })
         {
-            Assert.True(await dispatcher!.TrySendAsync(RunId, role, "started", "running", "Implementing",
+            Assert.Equal(SlackNotificationSendResult.Sent, await dispatcher!.TrySendAsync(RunId, role, "started", "running", "Implementing",
                 new DateTimeOffset(2026, 11, 13, 2, 3, 4, TimeSpan.Zero)));
             var handler = handlers[botId];
             Assert.Single(handler.Requests);
@@ -37,7 +37,9 @@ public sealed class SlackLifecycleNotificationDispatcherTests
             Assert.DoesNotContain("prompt", message, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("response", message, StringComparison.OrdinalIgnoreCase);
         }
-        Assert.False(await dispatcher!.TrySendAsync(RunId, "Orchestrator", "completed", "needs_human_input", "NeedsHumanInput", DateTimeOffset.UtcNow));
+        Assert.Equal(SlackNotificationSendResult.Skipped,
+            await dispatcher!.TrySendAsync(RunId, "Orchestrator", "completed", "needs_human_input", "NeedsHumanInput", DateTimeOffset.UtcNow));
+        Assert.Equal(0, dispatcher.FailedSends);
         Assert.Single(handlers["orchestrator"].Requests);
     }
 
@@ -119,9 +121,9 @@ public sealed class SlackLifecycleNotificationDispatcherTests
             }));
 
         Assert.NotNull(dispatcher);
-        var succeeded = await dispatcher!.TrySendAsync(RunId, "Reviewer", "failed", "failed", "NeedsHumanInput", DateTimeOffset.UtcNow);
+        var result = await dispatcher!.TrySendAsync(RunId, "Reviewer", "failed", "failed", "NeedsHumanInput", DateTimeOffset.UtcNow);
 
-        Assert.False(succeeded);
+        Assert.Equal(SlackNotificationSendResult.Failed, result);
         Assert.Equal(1, dispatcher.FailedSends);
         Assert.Single(handlers["reviewer"].Requests);
         Assert.DoesNotContain(TokenPrefix, handlers["reviewer"].RequestBodies[0]!, StringComparison.Ordinal);
@@ -142,9 +144,9 @@ public sealed class SlackLifecycleNotificationDispatcherTests
             TimeSpan.FromMilliseconds(50));
 
         Assert.NotNull(dispatcher);
-        var succeeded = await dispatcher!.TrySendAsync(RunId, "Implementer", "started", "running", "Implementing", DateTimeOffset.UtcNow);
+        var result = await dispatcher!.TrySendAsync(RunId, "Implementer", "started", "running", "Implementing", DateTimeOffset.UtcNow);
 
-        Assert.False(succeeded);
+        Assert.Equal(SlackNotificationSendResult.Failed, result);
         Assert.Equal(1, dispatcher.FailedSends);
         Assert.Single(handlers["implementer"].Requests);
     }
@@ -158,9 +160,13 @@ public sealed class SlackLifecycleNotificationDispatcherTests
             botId => handlers[botId] = new SuccessRecordingHandler(_ => SuccessResponse(botId)));
 
         Assert.NotNull(dispatcher);
-        Assert.False(await dispatcher!.TrySendAsync(RunId, "Unknown", "started", "running", "Implementing", DateTimeOffset.UtcNow));
-        Assert.False(await dispatcher.TrySendAsync("run-with-secret", "Orchestrator", "started", "running", "Implementing", DateTimeOffset.UtcNow));
-        Assert.False(await dispatcher.TrySendAsync(RunId, "Orchestrator", "started", "running", "prompt-secret", DateTimeOffset.UtcNow));
+        Assert.Equal(SlackNotificationSendResult.Failed,
+            await dispatcher!.TrySendAsync(RunId, "Unknown", "started", "running", "Implementing", DateTimeOffset.UtcNow));
+        Assert.Equal(SlackNotificationSendResult.Failed,
+            await dispatcher.TrySendAsync("run-with-secret", "Orchestrator", "started", "running", "Implementing", DateTimeOffset.UtcNow));
+        Assert.Equal(SlackNotificationSendResult.Failed,
+            await dispatcher.TrySendAsync(RunId, "Orchestrator", "started", "running", "prompt-secret", DateTimeOffset.UtcNow));
+        Assert.Equal(3, dispatcher.FailedSends);
         Assert.All(handlers.Values, handler => Assert.Empty(handler.Requests));
     }
 
