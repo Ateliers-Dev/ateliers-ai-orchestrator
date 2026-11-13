@@ -137,6 +137,8 @@ dotnet build Ateliers.Ai.Orchestrator.sln
 3. 3つのBotを `#ateliers-ai-notifications` に招待し、各BotのBot User ID（`U...`）とチャンネルID（`C...`）をローカルの `config/slack.json` へ設定します。
 4. `config/slack.secrets.example.json` を `config/slack.secrets.json` にコピーし、`tokens.orchestrator`、`tokens.implementer`、`tokens.reviewer` に対応するBot User OAuth Tokenを保存します。TokenをチャットやPRへ貼り付けたり、Gitへ追加したりしないでください。
 
+投稿者ごとの確認には、Slack検索欄で `from:<@U...> in:#ateliers-ai-notifications` を使います。`U...` を `slack.json` に登録した各Bot User IDへ置き換えると、Orchestrator、Implementer、Reviewerの投稿を個別に検索できます。
+
 ワークフローの開始・完了・失敗・人間判断待ちと、Implementer/Reviewerの開始・完了・失敗を対応するBotから通知します。本文はrun ID、役割、イベント、状態、UTC時刻だけです。prompt、応答、任意のsummary、Token、設定値は含めません。Slack送信は各イベントにつき1回で、再試行しません。失敗や10秒タイムアウトは固定の警告件数だけを標準エラーへ出し、実行結果とJSONL記録を変えません。JSONL追記もSlack送信もそれぞれ独立して失敗を処理します。
 
 この連携は既存の `Ateliers.Slack` Incoming Webhook APIと `ATELIERS_SLACK_WEBHOOK_URL` 設定を変更しません。Bot Tokenはソース・PR・ビルド成果物へ含めません。
