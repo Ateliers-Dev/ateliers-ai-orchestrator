@@ -11,7 +11,7 @@ public sealed class SlackLifecycleNotificationDispatcherTests
     private const string TokenPrefix = "xoxb-lifecycle-test-";
 
     [Fact]
-    public void TrySend_RoutesByRoleAndSendsOnlyFixedStructuredFields()
+    public async Task TrySend_RoutesByRoleAndSendsOnlyFixedStructuredFields()
     {
         using var files = new LifecycleSettingsFiles();
         var handlers = new Dictionary<string, RecordingHandlerBase>(StringComparer.Ordinal);
@@ -24,7 +24,7 @@ public sealed class SlackLifecycleNotificationDispatcherTests
             ("Orchestrator", "orchestrator"), ("Implementer", "implementer"), ("Reviewer", "reviewer")
         })
         {
-            Assert.True(dispatcher!.TrySend(RunId, role, "started", "running", "Implementing",
+            Assert.True(await dispatcher!.TrySendAsync(RunId, role, "started", "running", "Implementing",
                 new DateTimeOffset(2026, 11, 13, 2, 3, 4, TimeSpan.Zero)));
             var handler = handlers[botId];
             Assert.Single(handler.Requests);
@@ -37,7 +37,7 @@ public sealed class SlackLifecycleNotificationDispatcherTests
             Assert.DoesNotContain("prompt", message, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("response", message, StringComparison.OrdinalIgnoreCase);
         }
-        Assert.False(dispatcher!.TrySend(RunId, "Orchestrator", "completed", "needs_human_input", "NeedsHumanInput", DateTimeOffset.UtcNow));
+        Assert.False(await dispatcher!.TrySendAsync(RunId, "Orchestrator", "completed", "needs_human_input", "NeedsHumanInput", DateTimeOffset.UtcNow));
         Assert.Single(handlers["orchestrator"].Requests);
     }
 
@@ -108,7 +108,7 @@ public sealed class SlackLifecycleNotificationDispatcherTests
     }
 
     [Fact]
-    public void TrySend_FailureIsContainedAndDoesNotLeakTokenOrSlackResponse()
+    public async Task TrySend_FailureIsContainedAndDoesNotLeakTokenOrSlackResponse()
     {
         using var files = new LifecycleSettingsFiles();
         var handlers = new Dictionary<string, RecordingHandlerBase>(StringComparer.Ordinal);
@@ -119,7 +119,7 @@ public sealed class SlackLifecycleNotificationDispatcherTests
             }));
 
         Assert.NotNull(dispatcher);
-        var succeeded = dispatcher!.TrySend(RunId, "Reviewer", "failed", "failed", "NeedsHumanInput", DateTimeOffset.UtcNow);
+        var succeeded = await dispatcher!.TrySendAsync(RunId, "Reviewer", "failed", "failed", "NeedsHumanInput", DateTimeOffset.UtcNow);
 
         Assert.False(succeeded);
         Assert.Equal(1, dispatcher.FailedSends);
@@ -129,7 +129,7 @@ public sealed class SlackLifecycleNotificationDispatcherTests
     }
 
     [Fact]
-    public void TrySend_TimeoutIsContainedAndCountedWithoutRetry()
+    public async Task TrySend_TimeoutIsContainedAndCountedWithoutRetry()
     {
         using var files = new LifecycleSettingsFiles();
         var handlers = new Dictionary<string, RecordingHandlerBase>(StringComparer.Ordinal);
@@ -142,7 +142,7 @@ public sealed class SlackLifecycleNotificationDispatcherTests
             TimeSpan.FromMilliseconds(50));
 
         Assert.NotNull(dispatcher);
-        var succeeded = dispatcher!.TrySend(RunId, "Implementer", "started", "running", "Implementing", DateTimeOffset.UtcNow);
+        var succeeded = await dispatcher!.TrySendAsync(RunId, "Implementer", "started", "running", "Implementing", DateTimeOffset.UtcNow);
 
         Assert.False(succeeded);
         Assert.Equal(1, dispatcher.FailedSends);
@@ -150,7 +150,7 @@ public sealed class SlackLifecycleNotificationDispatcherTests
     }
 
     [Fact]
-    public void TrySend_DoesNotSendForUnknownRoleOrUnstructuredValues()
+    public async Task TrySend_DoesNotSendForUnknownRoleOrUnstructuredValues()
     {
         using var files = new LifecycleSettingsFiles();
         var handlers = new Dictionary<string, RecordingHandlerBase>(StringComparer.Ordinal);
@@ -158,9 +158,9 @@ public sealed class SlackLifecycleNotificationDispatcherTests
             botId => handlers[botId] = new SuccessRecordingHandler(_ => SuccessResponse(botId)));
 
         Assert.NotNull(dispatcher);
-        Assert.False(dispatcher!.TrySend(RunId, "Unknown", "started", "running", "Implementing", DateTimeOffset.UtcNow));
-        Assert.False(dispatcher.TrySend("run-with-secret", "Orchestrator", "started", "running", "Implementing", DateTimeOffset.UtcNow));
-        Assert.False(dispatcher.TrySend(RunId, "Orchestrator", "started", "running", "prompt-secret", DateTimeOffset.UtcNow));
+        Assert.False(await dispatcher!.TrySendAsync(RunId, "Unknown", "started", "running", "Implementing", DateTimeOffset.UtcNow));
+        Assert.False(await dispatcher.TrySendAsync("run-with-secret", "Orchestrator", "started", "running", "Implementing", DateTimeOffset.UtcNow));
+        Assert.False(await dispatcher.TrySendAsync(RunId, "Orchestrator", "started", "running", "prompt-secret", DateTimeOffset.UtcNow));
         Assert.All(handlers.Values, handler => Assert.Empty(handler.Requests));
     }
 

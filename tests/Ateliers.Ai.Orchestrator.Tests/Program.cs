@@ -32,6 +32,7 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("Reviewer失敗・停止要求・再レビューをライフサイクルへ正しい順序で記録する", LifecycleEventsCoverFailureStopAndRevision);
     suite.Add("ライフサイクル記録失敗は実行結果を隠さない", LifecycleWriteFailureDoesNotHideWorkflowResult);
     suite.Add("Slack設定不備を警告して通知をスキップしFake実行とJSONLを維持する", InvalidSlackSettingsDoNotAffectFakeRunOrJsonl);
+    suite.Add("遅いSlack通知は実行時間と停止応答を遅らせない", SlowSlackNotificationsDoNotBlockWorkflowCancellation);
     suite.Add("禁止遷移は状態と記録を変えない", RejectedTransitionDoesNotMutate);
     suite.Add("Fake正常系は成果物固定後にレビューし証跡不足で停止する", FakeSuccessKeepsReviewAndReadyEvidenceSeparate);
     suite.Add("Fake修正系は同一Reviewerで再レビューし上限を守る", FakeRevisionIsBoundedAndReReviewed);
@@ -946,6 +947,77 @@ static void InvalidSlackSettingsDoNotAffectFakeRunOrJsonl()
     Assert.True(capturedError.ToString().Contains("警告", StringComparison.Ordinal), "不完全なSlack設定の警告がありません。");
     Assert.False(capturedError.ToString().Contains(slackSettingsPath, StringComparison.Ordinal), "Slack設定パスが警告へ含まれました。");
     Assert.False(capturedError.ToString().Contains(slackSecretsPath, StringComparison.Ordinal), "Slack secretsパスが警告へ含まれました。");
+}
+
+static void SlowSlackNotificationsDoNotBlockWorkflowCancellation()
+{
+    using var temp = new TemporaryDirectory();
+    var runDirectory = Path.Combine(temp.Path, "run");
+    Directory.CreateDirectory(runDirectory);
+    using var stopSource = new CancellationTokenSource();
+    var sendStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var sendCanceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    async Task SlowSender(LifecycleEvent _, CancellationToken cancellationToken)
+    {
+        sendStarted.TrySetResult();
+        try
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            sendCanceled.TrySetResult();
+            throw;
+        }
+    }
+
+    FakeWorkflowResult result;
+    var elapsed = Stopwatch.StartNew();
+    using (var lifecycleWriter = new LifecycleNotificationEventWriter(
+        Path.Combine(temp.Path, "lifecycle.jsonl"), notificationsDisabled: false, notificationSender: SlowSender))
+    using (var eventStore = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "slack-slow-cancel"))
+    {
+        result = new FakeAgentWorkflow().Run(SampleContract(), new string('a', 64), "slack-slow-cancel", runDirectory,
+            new CancellingAgentRunner(stopSource), eventStore, stopToken: stopSource.Token, lifecycleEvents: lifecycleWriter);
+        elapsed.Stop();
+        Assert.True(sendStarted.Task.Wait(TimeSpan.FromSeconds(2)), "Fake実行中に通知workerが開始しませんでした。");
+        lifecycleWriter.FlushSlackNotificationsAsync(stopSource.Token).GetAwaiter().GetResult();
+    }
+
+    Assert.Equal(RunState.NeedsHumanInput, result.State);
+    Assert.True(result.PersistenceSucceeded, "Slack送信待ちで停止要求時の実行記録に影響しました。");
+    Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(2), $"Slack送信待ちが停止応答に加算されました: {elapsed.Elapsed}");
+    Assert.True(sendCanceled.Task.Wait(TimeSpan.FromSeconds(1)), "ワークフロー終了後も通知workerを停止できませんでした。");
+
+    var timedRunDirectory = Path.Combine(temp.Path, "timed-run");
+    Directory.CreateDirectory(timedRunDirectory);
+    var timedSendStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    async Task TimedSlowSender(LifecycleEvent _, CancellationToken cancellationToken)
+    {
+        timedSendStarted.TrySetResult();
+        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+    }
+
+    FakeWorkflowResult timedResult;
+    elapsed.Restart();
+    using (var lifecycleWriter = new LifecycleNotificationEventWriter(
+        Path.Combine(temp.Path, "timed-lifecycle.jsonl"), notificationsDisabled: false, notificationSender: TimedSlowSender))
+    using (var eventStore = JsonlRunEventStore.CreateNew(Path.Combine(timedRunDirectory, "events.jsonl"), "slack-slow-time"))
+    {
+        timedResult = new FakeAgentWorkflow().Run(SampleContract() with
+        {
+            Limits = SampleContract().Limits with { MaxDurationMinutes = 1 }
+        }, new string('b', 64), "slack-slow-time", timedRunDirectory,
+            new FakeAgentRunner(FakeScenario.Success), eventStore, lifecycleEvents: lifecycleWriter);
+        elapsed.Stop();
+        Assert.True(timedSendStarted.Task.Wait(TimeSpan.FromSeconds(2)), "Fake実行中に遅延通知workerが開始しませんでした。");
+        lifecycleWriter.FlushSlackNotificationsAsync().GetAwaiter().GetResult();
+    }
+
+    Assert.Equal(RunState.NeedsHumanInput, timedResult.State);
+    Assert.False(timedResult.Detail?.Contains("実行時間上限", StringComparison.Ordinal) ?? false,
+        "Slack送信待ちによりワークフローの時間上限へ到達しました。");
+    Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(2), $"Slack送信待ちがワークフロー実行時間へ加算されました: {elapsed.Elapsed}");
 }
 
 static void LifecycleJsonlSerializesConcurrentProcesses()

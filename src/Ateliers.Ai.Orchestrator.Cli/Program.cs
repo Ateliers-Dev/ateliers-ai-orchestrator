@@ -82,6 +82,7 @@ internal static class OrchestratorCli
                 IAgentRunner runner = agentKind == "codex" ? new CodexCliAgentRunner(codexOptions!) : new FakeAgentRunner(scenario);
                 var result = new FakeAgentWorkflow().Run(contract, contractHash, fakeRunId, fakeRunDirectory,
                     runner, eventStore, evidence, codexOneShot: agentKind == "codex", lifecycleEvents: lifecycleWriter);
+                await lifecycleWriter.FlushSlackNotificationsAsync(stopSource.Token);
                 if (lifecycleWriter.FailedWrites > 0)
                     Console.Error.WriteLine($"警告: ライフサイクルJSONLへの書き込みに{lifecycleWriter.FailedWrites}件失敗しました。実行結果は継続しています。");
                 if (lifecycleWriter.FailedSlackSends > 0)

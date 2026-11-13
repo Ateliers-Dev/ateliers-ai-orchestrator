@@ -94,7 +94,8 @@ public sealed class SlackLifecycleNotificationDispatcher : IDisposable
     public int FailedSends => Volatile.Read(ref failedSends);
 
     /// <summary>成功時はtrueを返します。Slack障害は例外として呼出し元へ伝えません。</summary>
-    public bool TrySend(string runId, string role, string eventType, string status, string state, DateTimeOffset timestampUtc)
+    public async Task<bool> TrySendAsync(string runId, string role, string eventType, string status, string state,
+        DateTimeOffset timestampUtc, CancellationToken cancellationToken = default)
     {
         if (!clients.TryGetValue(role, out var client) ||
             !Guid.TryParseExact(runId, "N", out _) ||
@@ -108,7 +109,7 @@ public sealed class SlackLifecycleNotificationDispatcher : IDisposable
             $"[Ateliers AI] run={runId} role={role} event={eventType} status={status} state={state} at={timestampUtc.ToUniversalTime():O}");
         try
         {
-            client.SendMessageAsync(message).GetAwaiter().GetResult();
+            await client.SendMessageAsync(message, cancellationToken).ConfigureAwait(false);
             return true;
         }
         catch (Exception)
