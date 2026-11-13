@@ -156,7 +156,7 @@ Slack側の準備:
 
 Slack Bot IntegrationTestsは、テストアセンブリの場所からリポジトリルートを特定し、`config/slack.json` と `config/slack.secrets.json` を読み込みます。`ATELIERS_RUN_SLACK_INTEGRATION_TESTS=1` がなければSkipします。Botテストは `test-bot` のTokenで `testChannelId` に1件投稿します。Webhookテストも同じopt-inに加え、`ATELIERS_SLACK_TEST_CHANNEL_NAME=#ateliers-test-notifications` の明示確認がなければSkipします。Webhook URLはこのテストチャンネル専用にしてください。
 
-実Codexと3役のBot通知をまとめて検証する場合は、両方のopt-inを指定します。CodexテストがImplementer→Reviewerを1回ずつ呼び出し、開始・終了・判断待ちイベントを実行記録に保存します。3役すべての設定・Tokenが読め、testChannelIdが通常送信先と異なる場合だけ、Slack通知を `#ateliers-test-notifications` へ送ります。通常の `ATELIERS_RUN_CODEX_INTEGRATION_TESTS=1` だけならSlack通知は無効です。
+実Codexと3役のBot通知をまとめて検証する場合は、両方のopt-inを指定します。Codexテストは投稿前に各役割のTokenでSlack `auth.test` を呼び、応答の `user_id` が設定されたBot User IDと一致することを確認します。いずれかが不一致または認証確認に失敗すれば投稿せず、E2Eを失敗として止めます。その後、CodexテストがImplementer→Reviewerを1回ずつ呼び出し、開始・終了・判断待ちイベントを実行記録へ保存し、3役別の通知送信成功数も検証します。通常の `ATELIERS_RUN_CODEX_INTEGRATION_TESTS=1` だけならSlack通知は無効です。
 
 ```text
 dotnet test tests/Ateliers.Slack.IntegrationTests/Ateliers.Slack.IntegrationTests.csproj --configuration Release --filter FullyQualifiedName~SlackBotClientIntegrationTests
@@ -171,8 +171,8 @@ $env:ATELIERS_RUN_SLACK_INTEGRATION_TESTS = '1'
 dotnet test tests/Ateliers.Ai.Orchestrator.IntegrationTests/Ateliers.Ai.Orchestrator.IntegrationTests.csproj --configuration Release --filter FullyQualifiedName~RunAsync_ShouldCompleteImplementerReviewerAndPersistNeedsHumanInput
 ```
 
-Codex opt-inだけの場合はSlack送信を無効にします。Slack opt-inがあっても、設定ファイル不足、testChannelId不足、3役のテスト送信先の不一致、通常チャンネルとの一致、Bot User ID重複があればSlack部分をSkipし、通常チャンネルへフォールバックしません。成功時のCLI出力に送信成功件数が表示され、3役の投稿はSlack検索で個別に確認できます。
+Codex opt-inだけの場合はSlack送信を無効にします。Slack opt-inがあっても、設定ファイル不足、testChannelId不足、3役のテスト送信先の不一致、通常チャンネルとの一致、Bot User ID重複があればSlack部分をSkipし、通常チャンネルへフォールバックしません。各Tokenの `auth.test` 照合が通らない場合はSlackへ投稿せずE2Eを失敗させます。成功時のCLI出力に送信成功件数が表示され、3役の投稿はSlack検索でも個別に確認できます。
 
-ファイルや設定値が不足・不正な場合は外部通信せずSkipします。空でない誤TokenはSlack APIへ送信を試みた後に認証エラーで失敗します。成功時はテストチャンネルにRun ID付きメッセージを投稿し、Slack Web APIの成功応答と投稿先IDを検証します。API応答からTokenに対応するBot User IDは検証しません。投稿後、Slackの検索欄で `from:<@U...> in:#ateliers-test-notifications "Slack Web API integration test"`（`U...` は設定したBot User ID）を検索し、実際の投稿者を手動で確認してください。ライフサイクルE2Eでも、Orchestrator/Implementer/Reviewerそれぞれの `botUserId` を使って `from:<@U...> in:#ateliers-test-notifications "[Ateliers AI]"` を確認します。Slackは `from:<@UserID>` 形式をサポートしています。[検索方法](https://api.slack.com/methods/search.messages)
+ファイルや設定値が不足・不正な場合は外部通信せずSkipします。Slack Bot疎通テストは投稿前に `auth.test` の `user_id` を `test-bot` の設定IDと照合し、一致しないTokenでは投稿しません。成功時はテストチャンネルにRun ID付きメッセージを投稿し、Slack Web APIの成功応答と投稿先IDを検証します。投稿後、Slackの検索欄で `from:<@U...> in:#ateliers-test-notifications "Slack Web API integration test"`（`U...` は設定したBot User ID）を検索して確認できます。ライフサイクルE2Eも投稿前に3役それぞれのTokenとBot User IDを照合し、投稿は `from:<@U...> in:#ateliers-test-notifications "[Ateliers AI]"` で個別に確認できます。Slackは `from:<@UserID>` 形式をサポートしています。[検索方法](https://api.slack.com/methods/search.messages)
 
 このBotテストは送信・識別の疎通確認だけを対象とし、AIオーケストレーション連携は行いません。既存のIncoming Webhook、`ATELIERS_SLACK_WEBHOOK_URL` と `ATELIERS_SLACK_TEST_WEBHOOK_URL` も維持します。

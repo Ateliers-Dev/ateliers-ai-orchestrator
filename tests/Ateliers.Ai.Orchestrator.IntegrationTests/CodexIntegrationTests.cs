@@ -146,6 +146,18 @@ public sealed class CodexIntegrationTests
                 Console.WriteLine($"Slack通知部分をSkip: {SlackOptInVariable}=1 が指定されていません。");
             }
 
+            if (slackMode == "test")
+            {
+                var repositoryRoot = FindRepositoryRoot()!;
+                var configurationPath = Path.Combine(repositoryRoot, "config", "slack.json");
+                var secretsPath = Path.Combine(repositoryRoot, "config", "slack.secrets.json");
+                using var dispatcher = SlackLifecycleNotificationDispatcher.TryCreate(
+                    configurationPath, secretsPath, useTestChannel: true);
+                Assert.NotNull(dispatcher);
+                Assert.True(await dispatcher!.VerifyBotIdentitiesAsync(),
+                    "Slack Tokenと設定した3役のBot User IDが一致しません。通知投稿前に停止しました。");
+            }
+
             fixture.CreateSeedRepository();
             fixture.WriteTaskContract();
             var cliAssembly = FindCliAssembly();

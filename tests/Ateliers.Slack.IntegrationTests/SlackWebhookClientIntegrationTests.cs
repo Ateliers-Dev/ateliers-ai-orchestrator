@@ -57,6 +57,9 @@ public sealed class SlackBotClientIntegrationTests
         var message = $"[TEST] {configuration.Bot.Name} Slack Web API integration test\nBot ID: {configuration.Bot.BotUserId}\nRun ID: {runId}";
         using var client = new SlackBotClient(configuration);
 
+        Assert.True(await client.VerifyBotIdentityAsync(),
+            "Slack Tokenとtest-botのBot User IDが一致しません。投稿前に停止しました。");
+
         var result = await client.SendMessageAsync(message);
 
         Assert.Equal(configuration.ChannelId, result.ChannelId);

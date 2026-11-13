@@ -122,6 +122,24 @@ public sealed class SlackLifecycleNotificationDispatcher : IDisposable
 
     public int FailedSends => Volatile.Read(ref failedSends);
 
+    /// <summary>全役割のTokenをSlack auth.testで照合し、設定Bot User IDとの一致だけを返します。</summary>
+    public async Task<bool> VerifyBotIdentitiesAsync(CancellationToken cancellationToken = default)
+    {
+        var allMatched = true;
+        foreach (var (role, _) in BotRoutes)
+        {
+            try
+            {
+                if (!await clients[role].VerifyBotIdentityAsync(cancellationToken).ConfigureAwait(false)) allMatched = false;
+            }
+            catch (SlackNotificationException)
+            {
+                allMatched = false;
+            }
+        }
+        return allMatched;
+    }
+
     /// <summary>送信結果を返し、Slack障害は例外として呼出し元へ伝えません。</summary>
     public async Task<SlackNotificationSendResult> TrySendAsync(string runId, string role, string eventType, string status, string state,
         DateTimeOffset timestampUtc, CancellationToken cancellationToken = default)

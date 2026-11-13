@@ -8,7 +8,7 @@ namespace Ateliers.Slack.UnitTests;
 public sealed class SlackLifecycleNotificationDispatcherTests
 {
     private static readonly string RunId = Guid.Parse("4e8f9f1f-028d-4a29-9227-8634b56a79bd").ToString("N");
-    private const string TokenPrefix = "xoxb-lifecycle-test-";
+    private const string TokenPrefix = "lifecycle-test-token-";
 
     [Fact]
     public async Task TrySend_RoutesByRoleAndSendsOnlyFixedStructuredFields()
@@ -65,6 +65,37 @@ public sealed class SlackLifecycleNotificationDispatcherTests
             Assert.Equal("C_TEST", payload.RootElement.GetProperty("channel").GetString());
             Assert.Equal($"Bearer {TokenPrefix}{botId}", handlers[botId].Requests.Single().Headers.Authorization!.ToString());
         }
+    }
+
+    [Fact]
+    public async Task VerifyBotIdentitiesAsync_RejectsOneTokenReusedForAllConfiguredRoles()
+    {
+        using var files = new LifecycleSettingsFiles();
+        File.WriteAllText(files.SecretsPath, JsonSerializer.Serialize(new
+        {
+            tokens = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["orchestrator"] = $"{TokenPrefix}orchestrator",
+                ["implementer"] = $"{TokenPrefix}orchestrator",
+                ["reviewer"] = $"{TokenPrefix}orchestrator"
+            }
+        }));
+        var handlers = new Dictionary<string, RecordingHandlerBase>(StringComparer.Ordinal);
+        using var dispatcher = SlackLifecycleNotificationDispatcher.TryCreate(files.ConfigurationPath, files.SecretsPath,
+            botId => handlers[botId] = new SuccessRecordingHandler(request =>
+            {
+                if (request.RequestUri?.AbsolutePath.EndsWith("/auth.test", StringComparison.Ordinal) == true)
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"ok\":true,\"user_id\":\"U_orchestrator\",\"bot_id\":\"B_orchestrator\"}")
+                    };
+                return SuccessResponse(botId);
+            }));
+
+        Assert.NotNull(dispatcher);
+        Assert.False(await dispatcher!.VerifyBotIdentitiesAsync());
+        Assert.All(handlers.Values, handler => Assert.Single(handler.Requests));
+        Assert.All(handlers.Values, handler => Assert.EndsWith("/auth.test", handler.Requests.Single().RequestUri!.AbsolutePath, StringComparison.Ordinal));
     }
 
     [Fact]
