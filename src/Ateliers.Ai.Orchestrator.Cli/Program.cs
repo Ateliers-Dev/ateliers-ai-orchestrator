@@ -82,7 +82,7 @@ internal static class OrchestratorCli
                 var result = new FakeAgentWorkflow().Run(contract, contractHash, fakeRunId, fakeRunDirectory,
                     runner, eventStore, evidence, codexOneShot: agentKind == "codex", lifecycleEvents: lifecycleWriter);
                 if (lifecycleWriter.FailedWrites > 0)
-                    Console.Error.WriteLine($"警告: ライフサイクルJSONLへの書き込みに{lifecycleWriter.FailedWrites}件失敗しました。実行結果は継続しています: {lifecycleLogPath}");
+                    Console.Error.WriteLine($"警告: ライフサイクルJSONLへの書き込みに{lifecycleWriter.FailedWrites}件失敗しました。実行結果は継続しています。");
                 if (!result.PersistenceSucceeded)
                 {
                     Console.Error.WriteLine($"実行は人間判断待ちで停止しましたが、成果物または実行記録の保存に失敗しました: {fakeRunDirectory}");

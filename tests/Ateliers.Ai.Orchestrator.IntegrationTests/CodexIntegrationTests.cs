@@ -192,6 +192,11 @@ public sealed class CodexIntegrationTests
                     Assert.Contains(lifecycleItems, item => item.GetProperty("role").GetString() == "Implementer" && item.GetProperty("eventType").GetString() == "completed");
                     Assert.Contains(lifecycleItems, item => item.GetProperty("role").GetString() == "Reviewer" && item.GetProperty("eventType").GetString() == "completed");
                     Assert.Contains(lifecycleItems, item => item.GetProperty("eventType").GetString() == "needs_human_input");
+                    Assert.Equal(new[] { "Orchestrator:started", "Implementer:started", "Implementer:completed",
+                        "Reviewer:started", "Reviewer:completed", "Orchestrator:needs_human_input", "Orchestrator:completed" },
+                        lifecycleItems.Select(item => $"{item.GetProperty("role").GetString()}:{item.GetProperty("eventType").GetString()}").ToArray());
+                    Assert.Equal("needs_human_input", lifecycleItems[^1].GetProperty("status").GetString());
+                    Assert.Equal("NeedsHumanInput", lifecycleItems[^1].GetProperty("state").GetString());
                     Assert.DoesNotContain(await File.ReadAllTextAsync(lifecycleLogPath), codexExecutable, StringComparison.OrdinalIgnoreCase);
                 }
                 finally

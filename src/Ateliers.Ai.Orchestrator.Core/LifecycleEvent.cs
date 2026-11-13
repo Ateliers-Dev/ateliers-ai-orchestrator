@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Security.Cryptography;
 
 namespace Ateliers.Ai.Orchestrator.Core;
 
@@ -34,6 +35,7 @@ public sealed class JsonlLifecycleEventWriter(string path) : ILifecycleEventWrit
     };
 
     private readonly string fullPath = Path.GetFullPath(path);
+    private readonly string mutexName = CreateMutexName(Path.GetFullPath(path));
     private int failedWrites;
     public int FailedWrites => Volatile.Read(ref failedWrites);
 
@@ -41,19 +43,46 @@ public sealed class JsonlLifecycleEventWriter(string path) : ILifecycleEventWrit
     {
         try
         {
-            var directory = Path.GetDirectoryName(fullPath);
-            if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-            var line = JsonSerializer.Serialize(item, JsonOptions) + "\n";
-            using var stream = new FileStream(fullPath, FileMode.Append, FileAccess.Write, FileShare.Read);
-            var bytes = Encoding.UTF8.GetBytes(line);
-            stream.Write(bytes);
-            stream.Flush(flushToDisk: true);
-            return true;
+            using var mutex = new Mutex(initiallyOwned: false, mutexName);
+            var lockTaken = false;
+            try
+            {
+                try
+                {
+                    mutex.WaitOne();
+                    lockTaken = true;
+                }
+                catch (AbandonedMutexException)
+                {
+                    // 前のプロセス終了後に所有権も取得済みです。JSONLへ追記して続行します。
+                    lockTaken = true;
+                }
+
+                var directory = Path.GetDirectoryName(fullPath);
+                if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+                var line = JsonSerializer.Serialize(item, JsonOptions) + "\n";
+                using var stream = new FileStream(fullPath, FileMode.Append, FileAccess.Write, FileShare.Read);
+                var bytes = Encoding.UTF8.GetBytes(line);
+                stream.Write(bytes);
+                stream.Flush(flushToDisk: true);
+                return true;
+            }
+            finally
+            {
+                if (lockTaken) mutex.ReleaseMutex();
+            }
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
+        catch (Exception)
         {
             Interlocked.Increment(ref failedWrites);
             return false;
         }
+    }
+
+    private static string CreateMutexName(string path)
+    {
+        var normalizedPath = OperatingSystem.IsWindows() ? path.ToUpperInvariant() : path;
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedPath)));
+        return $"Ateliers.Ai.Orchestrator.Lifecycle.{hash}";
     }
 }
