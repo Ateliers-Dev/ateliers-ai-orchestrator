@@ -115,7 +115,7 @@ dotnet build Ateliers.Ai.Orchestrator.sln
 
 ### Slack Bot IntegrationTests（外部送信・明示opt-in）
 
-`Ateliers.Slack` は既存のIncoming Webhookと並行して、Slack Web API `chat.postMessage` を使うBot送信を提供します。Bot定義は `config/slack.json.example`、Token例は `config/slack.secrets.example.json` を参照してください。ローカルで使う場合は例を `config/slack.json` と `config/slack.secrets.json` にコピーし、実際のBot情報を設定します。Tokenファイルは `.gitignore` 対象です。設定ロードAPIには両方の絶対パスを明示します。
+`Ateliers.Slack` は既存のIncoming Webhookと並行して、Slack Web API `chat.postMessage` を使うBot送信を提供します。Bot定義は `config/slack.json.example`、Token例は `config/slack.secrets.example.json` を参照してください。ローカルで使う場合は例を `config/slack.json` と `config/slack.secrets.json` にコピーし、実際のBot情報を設定します。両方の実ファイルは `.gitignore` 対象です。秘密Tokenはテスト出力へコピーせず、配布用NuGetにも含めません。設定ロードAPIは引き続き絶対パスを受け取ります。
 
 Slack側の準備:
 
@@ -125,12 +125,9 @@ Slack側の準備:
 4. `Ateliers Test Bot` を `#ateliers-test-notifications` に招待します（チャンネル内で `/invite @Ateliers Test Bot`）。招待されていない場合は `not_in_channel` 等で失敗します。
 5. `config/slack.json` の `botUserId` にSlackのBotユーザーID（`U...`）、`channelId` にチャンネルID（`C...`）を設定します。内部の `id` は `test-bot` で、Slack側の `botUserId` とは別の識別子です。
 
-Slack Bot IntegrationTestsは既定でSkipされます。実行するPowerShellプロセスでopt-inと絶対パスを明示してからテストを実行してください。これらの値は秘密Tokenではなく、Tokenはsecretsファイルから読み込みます。CIにはSlack送信資格情報を設定しません。
+Slack Bot IntegrationTestsは、テストアセンブリの場所からリポジトリルートを特定し、`config/slack.json` と `config/slack.secrets.json` を読み込みます。作業ディレクトリや環境変数の設定は不要なので、Visual Studioのテストエクスプローラーから直接実行できます。両方のファイルが存在し、有効な設定とTokenを含む場合だけSlackへ送信します。CIにはこれらのローカルファイルを置かないため、テストは安全にSkipされます。Webhook IntegrationTestのopt-in方式は従来どおりです。
 
-```powershell
-$env:ATELIERS_SLACK_BOT_INTEGRATION_TESTS = "1"
-$env:ATELIERS_SLACK_CONFIG_PATH = (Resolve-Path "config/slack.json").Path
-$env:ATELIERS_SLACK_SECRETS_PATH = (Resolve-Path "config/slack.secrets.json").Path
+```text
 dotnet test tests/Ateliers.Slack.IntegrationTests/Ateliers.Slack.IntegrationTests.csproj --configuration Release --filter FullyQualifiedName~SlackBotClientIntegrationTests
 ```
 

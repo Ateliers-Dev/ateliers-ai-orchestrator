@@ -43,8 +43,9 @@ public sealed class SlackBotClientIntegrationTests
     [Trait("Category", "ExternalIntegration")]
     public async Task SendMessageAsync_PostsFromConfiguredBotToConfiguredChannel()
     {
-        var configurationPath = Environment.GetEnvironmentVariable(SlackBotFactAttribute.ConfigurationPathVariable)!;
-        var secretsPath = Environment.GetEnvironmentVariable(SlackBotFactAttribute.SecretsPathVariable)!;
+        if (!SlackBotSettingsLocator.TryFindSettingsPaths(typeof(SlackBotClientIntegrationTests).Assembly.Location, out var configurationPath, out var secretsPath))
+            throw new InvalidOperationException("Slack Bot settings disappeared after test discovery.");
+
         var configuration = SlackBotConfiguration.Load(configurationPath, secretsPath, BotId);
         var runId = Guid.NewGuid().ToString("N");
         var message = $"[TEST] {configuration.Bot.Name} Slack Web API integration test\nBot ID: {configuration.Bot.BotUserId}\nRun ID: {runId}";
@@ -59,24 +60,11 @@ public sealed class SlackBotClientIntegrationTests
 
 public sealed class SlackBotFactAttribute : FactAttribute
 {
-    public const string OptInVariable = "ATELIERS_SLACK_BOT_INTEGRATION_TESTS";
-    public const string ConfigurationPathVariable = "ATELIERS_SLACK_CONFIG_PATH";
-    public const string SecretsPathVariable = "ATELIERS_SLACK_SECRETS_PATH";
-
     public SlackBotFactAttribute()
     {
-        if (!string.Equals(Environment.GetEnvironmentVariable(OptInVariable), "1", StringComparison.Ordinal))
+        if (!SlackBotSettingsLocator.TryFindSettingsPaths(typeof(SlackBotClientIntegrationTests).Assembly.Location, out var configurationPath, out var secretsPath))
         {
-            Skip = $"Set {OptInVariable}=1 to enable live Slack Bot delivery.";
-            return;
-        }
-
-        var configurationPath = Environment.GetEnvironmentVariable(ConfigurationPathVariable);
-        var secretsPath = Environment.GetEnvironmentVariable(SecretsPathVariable);
-        if (string.IsNullOrWhiteSpace(configurationPath) || string.IsNullOrWhiteSpace(secretsPath) ||
-            !Path.IsPathFullyQualified(configurationPath) || !Path.IsPathFullyQualified(secretsPath))
-        {
-            Skip = $"Set absolute {ConfigurationPathVariable} and {SecretsPathVariable} paths to enable live Slack Bot delivery.";
+            Skip = "Slack Bot settings are not present under the repository config directory; live Slack delivery is skipped.";
             return;
         }
 
@@ -88,5 +76,39 @@ public sealed class SlackBotFactAttribute : FactAttribute
         {
             Skip = "Slack Bot configuration, channel settings, or credentials are missing or invalid.";
         }
+    }
+}
+
+internal static class SlackBotSettingsLocator
+{
+    private const string SolutionFileName = "Ateliers.Ai.Orchestrator.sln";
+    private const string IntegrationTestProjectPath = "tests/Ateliers.Slack.IntegrationTests/Ateliers.Slack.IntegrationTests.csproj";
+
+    internal static bool TryFindSettingsPaths(string testAssemblyPath, out string configurationPath, out string secretsPath)
+    {
+        configurationPath = string.Empty;
+        secretsPath = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(testAssemblyPath))
+            return false;
+
+        var directory = new DirectoryInfo(Path.GetDirectoryName(Path.GetFullPath(testAssemblyPath))!);
+        while (directory is not null)
+        {
+            var isRepositoryRoot = File.Exists(Path.Combine(directory.FullName, SolutionFileName)) &&
+                File.Exists(Path.Combine(directory.FullName, IntegrationTestProjectPath.Replace('/', Path.DirectorySeparatorChar)));
+
+            if (isRepositoryRoot)
+            {
+                var configDirectory = Path.Combine(directory.FullName, "config");
+                configurationPath = Path.Combine(configDirectory, "slack.json");
+                secretsPath = Path.Combine(configDirectory, "slack.secrets.json");
+                return File.Exists(configurationPath) && File.Exists(secretsPath);
+            }
+
+            directory = directory.Parent;
+        }
+
+        return false;
     }
 }
