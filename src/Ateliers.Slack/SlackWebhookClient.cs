@@ -92,9 +92,23 @@ public sealed class SlackNotificationException : Exception
     internal static SlackNotificationException InvalidResponse(HttpStatusCode statusCode) =>
         new("Slack webhook returned an unexpected success response.", statusCode);
 
+    internal static SlackNotificationException ApiFailure(HttpStatusCode statusCode) =>
+        new("Slack Web API rejected the request.", statusCode);
+
+    internal static SlackNotificationException RateLimited(int? retryAfterSeconds) =>
+        new("Slack Web API rate limit reached (HTTP 429).", HttpStatusCode.TooManyRequests, retryAfterSeconds);
+
     internal static SlackNotificationException TimedOut() =>
         new("Slack webhook request timed out.", null);
 
     internal static SlackNotificationException TransportFailure() =>
         new("Slack webhook request failed before receiving a response.", null);
+
+    public int? RetryAfterSeconds { get; }
+
+    private SlackNotificationException(string message, HttpStatusCode? statusCode, int? retryAfterSeconds) : this(message, statusCode)
+    {
+        RetryAfterSeconds = retryAfterSeconds;
+    }
+
 }
