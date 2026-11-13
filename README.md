@@ -56,6 +56,17 @@ Fake Agentの縦断フローを実行します。シナリオは `Success`、`Re
 dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- run examples/task-contract.json --scenario RevisionThenSuccess --runs ./.ateliers-orchestrator/runs
 ```
 
+ライフサイクルJSONLの保存先は `--lifecycle-log` で指定できます。未指定時は実行時のカレントディレクトリに `.ateliers-orchestrator/lifecycle.jsonl` を使います。実行フォルダや一時fixtureの外に置くパスを指定すると、fixture削除後も履歴を保持できます。
+
+```powershell
+dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- run examples/task-contract.json `
+  --scenario RevisionThenSuccess `
+  --runs ./.ateliers-orchestrator/runs `
+  --lifecycle-log C:/ateliers-data/lifecycle.jsonl
+```
+
+このファイルは複数runのイベントをUTF-8 JSONL（1行1JSON）で追記します。各行に `runId`、UTCの`timestampUtc`、`role`、`eventType`、`status`、ワークフロー`state`、必要な試行IDと固定の短い要約を記録します。Orchestrator・Implementer・Reviewerの開始、完了、失敗と、人間判断待ちを記録します。プロンプト、応答本文、環境変数、Token、API応答本文は含めず、要約もコード内の固定文だけを使います。書込みに失敗した場合は警告を出し、元のワークフロー結果を変更しません。
+
 **安全ゲート完了と実Codex CLI起動の追加承認までは、実Codex CLIを起動しないでください。--help と --version も起動に含みます。** 下記コマンドは仕様例であり、現時点での実行手順ではありません。
 
 実行対象は、契約の `workingDirectory` に指定した既存の開発checkoutを含むローカルディレクトリです。開始前に作業ツリーがcleanであることを確認します。変更を破棄してよいコピーの利用は推奨しますが必須ではありません。Implementerには `workspace-write` を適用します。Reviewerには固定差分を入力として渡し、書込可能な作業ディレクトリをレビュー対象のcheckoutから分離します。レビュー対象のソースコード・設計書は変更せず、必要な任意成果物は実行記録配下へ保存します。契約の `scope` と操作範囲はAgentへの指示です。ローカル実行では、その範囲を超えるアクセスをOSが完全に封じるものではありません。
@@ -88,6 +99,8 @@ Fake Agentは実行ごとに同じ入力へ同じ応答を返します。成果�
 `--review-evidence` を使う場合は、`HumanReviewEvidence` のJSONと、それが参照する3記録を指定します。レビュー記録は `evidenceKind=independent-review`、対象成果物・レビュー入力のハッシュ、異なる実装・レビュー担当ID、`selfAssessmentExcluded=true`、`verdict=approve` を含めます。受け入れ記録は `evidenceKind=acceptance-verification`、契約の受け入れ条件一覧ハッシュ、全条件数と合格数を含めます。PR操作記録は `evidenceKind=github-pull-request-created`、実PR URL、操作IDを含めます。CLIは記録内容と相互参照を検査して、参照先と記録ファイルのSHA-256を実行イベントへ残します。タイムアウトシナリオはFake応答による再現です。記録の発行元を暗号学的に認証する仕組みはなく、実GitHub操作を行う機能でもありません。
 
 JSONLには実行ID、連番、UTC時刻、役割、イベント種別、状態、入出力参照、対象コミット／成果物ハッシュ、経過時間、結果、エラー、未取得情報の欄を持たせます。Fake呼び出しの要求・応答は実行ごとの参照ファイルへ保存します。取得していない値は推測せず未取得として明示します。ローカルJSONLは耐改ざん・完全監査の台帳ではありません。
+
+`events.jsonl` は実行ごとの詳細な実行記録、`--lifecycle-log` のJSONLは複数実行にまたがる開始・終了・人間判断待ちの記録です。後者の保存先は実行ディレクトリとは独立して指定でき、同じファイルに追記されます。どちらもローカルファイルであり、耐改ざん・完全監査の台帳ではありません。
 
 ## テスト
 

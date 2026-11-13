@@ -25,6 +25,8 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("すべての状態ペアを許可表どおりに判定する", AllTransitionsAreExplicit);
     suite.Add("確認待ちはIssue #3では到達不能", ReviewReadyIsUnavailableUntilEvidenceIntegration);
     suite.Add("JSONLイベントに連番とUTC時刻を記録する", EventLogIsSequencedAndUtc);
+    suite.Add("ライフサイクルJSONLは順序・再読込・秘匿・fixture削除後の保存を満たす", LifecycleEventsArePersistedSafely);
+    suite.Add("ライフサイクル記録失敗は実行結果を隠さない", LifecycleWriteFailureDoesNotHideWorkflowResult);
     suite.Add("禁止遷移は状態と記録を変えない", RejectedTransitionDoesNotMutate);
     suite.Add("Fake正常系は成果物固定後にレビューし証跡不足で停止する", FakeSuccessKeepsReviewAndReadyEvidenceSeparate);
     suite.Add("Fake修正系は同一Reviewerで再レビューし上限を守る", FakeRevisionIsBoundedAndReReviewed);
@@ -797,6 +799,78 @@ static void FakeSuccessKeepsReviewAndReadyEvidenceSeparate()
     Assert.Equal(result.ArtifactSha256, events.RootElement.GetProperty("diffSha256").GetString());
 }
 
+static void LifecycleEventsArePersistedSafely()
+{
+    using var temp = new TemporaryDirectory();
+    var runDirectory = Path.Combine(temp.Path, "fixture", "run");
+    var lifecyclePath = Path.Combine(temp.Path, "persistent", "lifecycle.jsonl");
+    Directory.CreateDirectory(runDirectory);
+    FakeWorkflowResult result;
+    using (var store = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "lifecycle-success"))
+        result = new FakeAgentWorkflow().Run(SampleContract(), new string('a', 64), "lifecycle-success", runDirectory,
+            new SecretAgentRunner(), store, lifecycleEvents: new JsonlLifecycleEventWriter(lifecyclePath));
+
+    Assert.Equal(RunState.NeedsHumanInput, result.State);
+    var lines = File.ReadAllLines(lifecyclePath);
+    Assert.True(lines.Length >= 7, "ライフサイクルイベントが不足しています。");
+    var events = lines.Select(line => JsonDocument.Parse(line)).ToArray();
+    try
+    {
+        var items = events.Select(document => document.RootElement).ToArray();
+        Assert.Equal("Orchestrator", items[0].GetProperty("role").GetString());
+        Assert.Equal("started", items[0].GetProperty("eventType").GetString());
+        Assert.True(items.Any(item => item.GetProperty("role").GetString() == "Implementer" && item.GetProperty("eventType").GetString() == "started"));
+        Assert.True(items.Any(item => item.GetProperty("role").GetString() == "Implementer" && item.GetProperty("eventType").GetString() == "completed"));
+        Assert.True(items.Any(item => item.GetProperty("role").GetString() == "Reviewer" && item.GetProperty("eventType").GetString() == "started"));
+        Assert.True(items.Any(item => item.GetProperty("role").GetString() == "Reviewer" && item.GetProperty("eventType").GetString() == "completed"));
+        Assert.True(items.Any(item => item.GetProperty("eventType").GetString() == "needs_human_input"));
+        Assert.Equal("completed", items[^1].GetProperty("eventType").GetString());
+        foreach (var item in items)
+        {
+            Assert.Equal("lifecycle-success", item.GetProperty("runId").GetString());
+            Assert.Equal(JsonValueKind.String, item.GetProperty("timestampUtc").ValueKind);
+            Assert.Equal(TimeSpan.Zero, DateTimeOffset.Parse(item.GetProperty("timestampUtc").GetString()!).Offset);
+            Assert.Equal(JsonValueKind.String, item.GetProperty("state").ValueKind);
+        }
+        var implementerStarted = Array.FindIndex(items, item => item.GetProperty("role").GetString() == "Implementer" && item.GetProperty("eventType").GetString() == "started");
+        var implementerCompleted = Array.FindIndex(items, item => item.GetProperty("role").GetString() == "Implementer" && item.GetProperty("eventType").GetString() == "completed");
+        var reviewerStarted = Array.FindIndex(items, item => item.GetProperty("role").GetString() == "Reviewer" && item.GetProperty("eventType").GetString() == "started");
+        Assert.True(implementerStarted < implementerCompleted && implementerCompleted < reviewerStarted, "役割イベントの順序が不正です。");
+        Assert.False(File.ReadAllText(lifecyclePath).Contains("PROMPT-AND-RESPONSE-SECRET", StringComparison.Ordinal));
+    }
+    finally
+    {
+        foreach (var document in events) document.Dispose();
+    }
+
+    Directory.Delete(Path.Combine(temp.Path, "fixture"), recursive: true);
+    Assert.True(File.Exists(lifecyclePath), "実行fixture削除後にライフサイクルログが残っていません。");
+    Assert.True(lines.SequenceEqual(File.ReadAllLines(lifecyclePath)), "再読込したライフサイクルJSONLの内容が一致しません。");
+
+    var failedRunDirectory = Path.Combine(temp.Path, "failed-run");
+    Directory.CreateDirectory(failedRunDirectory);
+    using (var store = JsonlRunEventStore.CreateNew(Path.Combine(failedRunDirectory, "events.jsonl"), "lifecycle-failed"))
+        new FakeAgentWorkflow().Run(SampleContract(), new string('b', 64), "lifecycle-failed", failedRunDirectory,
+            new FakeAgentRunner(FakeScenario.ImplementerFailure), store, lifecycleEvents: new JsonlLifecycleEventWriter(lifecyclePath));
+    var allLines = File.ReadAllLines(lifecyclePath);
+    Assert.True(allLines.Any(line => line.Contains("\"runId\":\"lifecycle-failed\"", StringComparison.Ordinal) &&
+        line.Contains("\"role\":\"Implementer\"", StringComparison.Ordinal) && line.Contains("\"eventType\":\"failed\"", StringComparison.Ordinal)),
+        "失敗したImplementerのライフサイクルイベントがありません。");
+}
+
+static void LifecycleWriteFailureDoesNotHideWorkflowResult()
+{
+    using var temp = new TemporaryDirectory();
+    var runDirectory = Path.Combine(temp.Path, "run");
+    Directory.CreateDirectory(runDirectory);
+    FakeWorkflowResult result;
+    using (var store = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "lifecycle-write-fails"))
+        result = new FakeAgentWorkflow().Run(SampleContract(), new string('a', 64), "lifecycle-write-fails", runDirectory,
+            new FakeAgentRunner(FakeScenario.Success), store, lifecycleEvents: new FailingLifecycleEventWriter());
+    Assert.Equal(RunState.NeedsHumanInput, result.State);
+    Assert.True(result.PersistenceSucceeded, "別系統のライフサイクルログ失敗が既存実行記録の成否に伝播しました。");
+}
+
 static void FakeRevisionIsBoundedAndReReviewed()
 {
     using var temp = new TemporaryDirectory();
@@ -1533,6 +1607,17 @@ sealed class CountingFakeAgentRunner(FakeScenario scenario) : IAgentRunner
         ReviewCalls++;
         return inner.Review(request);
     }
+}
+
+sealed class SecretAgentRunner : IAgentRunner
+{
+    public AgentResponse Implement(AgentRequest request) => new("PROMPT-AND-RESPONSE-SECRET");
+    public AgentResponse Review(AgentRequest request) => new("レビュー合格: PROMPT-AND-RESPONSE-SECRET");
+}
+
+sealed class FailingLifecycleEventWriter : ILifecycleEventWriter
+{
+    public bool TryAppend(LifecycleEvent item) => throw new IOException("テスト用ライフサイクル記録失敗です。");
 }
 
 sealed class FailingEventWriter(string failureEventType, bool failReadyTransition = false, IRunEventWriter? innerWriter = null) : IRunEventWriter

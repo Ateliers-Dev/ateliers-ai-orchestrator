@@ -145,7 +145,7 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
     /// <exception cref="IOException">実行開始前に保存先を準備できない場合に発生します。</exception>
     public FakeWorkflowResult Run(TaskContract contract, string contractSha256, string runId, string runDirectory,
         IAgentRunner agentRunner, IRunEventWriter eventWriter, HumanReviewEvidence? reviewEvidence = null,
-        CancellationToken stopToken = default, bool codexOneShot = false)
+        CancellationToken stopToken = default, bool codexOneShot = false, ILifecycleEventWriter? lifecycleEvents = null)
     {
         Directory.CreateDirectory(runDirectory);
         var existingEntries = Directory.EnumerateFileSystemEntries(runDirectory).ToArray();
@@ -171,8 +171,31 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
         var persistenceFailed = false;
 
         var isFake = agentRunner is FakeAgentRunner;
+        void EmitLifecycle(string role, string eventType, string status, string state, string? relatedId = null, string? summary = null)
+        {
+            if (lifecycleEvents is null) return;
+            try
+            {
+                lifecycleEvents.TryAppend(new LifecycleEvent
+                {
+                    RunId = runId,
+                    TimestampUtc = DateTimeOffset.UtcNow,
+                    Role = role,
+                    EventType = eventType,
+                    Status = status,
+                    State = state,
+                    RelatedId = relatedId,
+                    Summary = summary
+                });
+            }
+            catch (Exception)
+            {
+                // ライフサイクル記録は実行制御と独立させ、書込み例外で実行結果を覆しません。
+            }
+        }
         try
         {
+            EmitLifecycle("Orchestrator", "started", "running", run.State.ToString(), summary: "Workflow started.");
             eventWriter.Append("run_started", "accepted", to: RunState.Prepared,
                 detail: isFake ? "Fake Agentシナリオを開始しました。実Agent・GitHub操作は行いません。" :
                     "実Agent実行を開始しました。GitHub操作は行いません。",
@@ -199,9 +222,15 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                     run.Transition(RunState.NeedsHumanInput);
                     break;
                 }
+                EmitLifecycle("Implementer", "started", "running", run.State.ToString(), $"attempt:{implementationAttempt}", "Implementer started.");
                 var implementResponse = InvokeAgent(() => agentRunner.Implement(implementRequest));
                 if (StopWasRequested(stopToken))
                     implementResponse = implementResponse with { Succeeded = false, StopRequested = true };
+                var implementSucceeded = implementResponse.Succeeded && !implementResponse.StopRequested && !implementResponse.TimedOut &&
+                    !string.IsNullOrWhiteSpace(implementResponse.Content);
+                EmitLifecycle("Implementer", implementSucceeded ? "completed" : "failed",
+                    implementSucceeded ? "succeeded" : "failed", run.State.ToString(), $"attempt:{implementationAttempt}",
+                    implementSucceeded ? "Implementer completed." : "Implementer did not complete successfully.");
                 if (implementResponse.ExecutionEvidence is { } implementEvidence)
                     executionEvidence.Add(("Implementer", implementationAttempt, implementEvidence));
                 var implementRef = SaveExchange(runDirectory, "implementer", implementationAttempt, "request.json",
@@ -261,6 +290,7 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                         run.Transition(RunState.NeedsHumanInput);
                         break;
                     }
+                    EmitLifecycle("Reviewer", "started", "running", run.State.ToString(), $"attempt:{reviewAttempt}", "Reviewer started.");
                     var reviewResponse = InvokeAgent(() => agentRunner.Review(reviewRequest));
                     if (StopWasRequested(stopToken))
                         reviewResponse = reviewResponse with { Succeeded = false, StopRequested = true };
@@ -268,6 +298,10 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                         string.IsNullOrWhiteSpace(reviewResponse.Content) && reviewResponse.ArtifactReferences is not { Count: > 0 };
                     if (missingReviewerOutput && reviewResponse.Succeeded)
                         reviewResponse = reviewResponse with { Succeeded = false };
+                    var reviewSucceeded = reviewResponse.Succeeded && !reviewResponse.StopRequested && !reviewResponse.TimedOut && !missingReviewerOutput;
+                    EmitLifecycle("Reviewer", reviewSucceeded ? "completed" : "failed",
+                        reviewSucceeded ? "succeeded" : "failed", run.State.ToString(), $"attempt:{reviewAttempt}",
+                        reviewSucceeded ? "Reviewer completed." : "Reviewer did not complete successfully.");
                     oneShotReviewOutcome = !reviewResponse.Succeeded || reviewResponse.StopRequested || reviewResponse.TimedOut
                         ? Outcome(reviewResponse)
                         : codexOneShot && reviewResponse.ArtifactReferences is { Count: > 0 } ? "任意成果物あり"
@@ -459,6 +493,13 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
             failure = AppendFailure(failure, "状態は人間判断待ちですが、実行記録が不完全です。");
             run.StopInMemoryAfterPersistenceFailure();
         }
+        if (run.State is RunState.NeedsHumanInput or RunState.ReadyForHumanReview)
+            EmitLifecycle("Orchestrator", "needs_human_input", "needs_human_input", run.State.ToString(),
+                summary: "Workflow is waiting for human input.");
+        EmitLifecycle("Orchestrator", run.State == RunState.Failed ? "failed" : "completed",
+            run.State == RunState.Failed ? "failed" : run.State is RunState.NeedsHumanInput or RunState.ReadyForHumanReview ? "needs_human_input" : "succeeded",
+            run.State.ToString(),
+            summary: run.State == RunState.Failed ? "Workflow failed." : run.State is RunState.NeedsHumanInput or RunState.ReadyForHumanReview ? "Workflow stopped for human input." : "Workflow completed.");
         return new FakeWorkflowResult(run.State, currentArtifact, currentHash, implementationAttempt,
             reviewAttempt, revisionAttempts, retryAttempts, "report.md", failure, persistenceSucceeded);
     }
