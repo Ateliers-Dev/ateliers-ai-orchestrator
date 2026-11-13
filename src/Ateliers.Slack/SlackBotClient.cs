@@ -45,7 +45,7 @@ public sealed class SlackBotClient : IDisposable
         {
             using var response = await httpClient.PostAsJsonAsync(
                 PostMessageUri,
-                new SlackPostMessageRequest(configuration.Bot.ChannelId, message),
+                new SlackPostMessageRequest(configuration.ChannelId, message),
                 JsonOptions,
                 timeoutSource.Token).ConfigureAwait(false);
 

@@ -16,18 +16,24 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
     private Task? slackWorker;
     private int droppedNotifications;
     private int failedNotifications;
+    private int sentNotifications;
     private int pendingNotifications;
     private int abandonedNotifications;
     private bool notificationAccountingFinalized;
 
     public LifecycleNotificationEventWriter(string lifecycleLogPath, bool notificationsDisabled)
-        : this(lifecycleLogPath, notificationsDisabled, configurationPath: null, secretsPath: null, discoverSettings: true)
+        : this(lifecycleLogPath, notificationsDisabled, useTestChannel: false, configurationPath: null, secretsPath: null, discoverSettings: true)
+    {
+    }
+
+    public LifecycleNotificationEventWriter(string lifecycleLogPath, bool notificationsDisabled, bool useTestChannel)
+        : this(lifecycleLogPath, notificationsDisabled, useTestChannel, configurationPath: null, secretsPath: null, discoverSettings: true)
     {
     }
 
     internal LifecycleNotificationEventWriter(string lifecycleLogPath, bool notificationsDisabled,
         string configurationPath, string? secretsPath)
-        : this(lifecycleLogPath, notificationsDisabled, configurationPath, secretsPath, discoverSettings: false)
+        : this(lifecycleLogPath, notificationsDisabled, useTestChannel: false, configurationPath, secretsPath, discoverSettings: false)
     {
     }
 
@@ -40,7 +46,7 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
     }
 
     private LifecycleNotificationEventWriter(string lifecycleLogPath, bool notificationsDisabled,
-        string? configurationPath, string? secretsPath, bool discoverSettings)
+        bool useTestChannel, string? configurationPath, string? secretsPath, bool discoverSettings)
     {
         jsonlWriter = new JsonlLifecycleEventWriter(lifecycleLogPath);
         if (notificationsDisabled) return;
@@ -48,7 +54,7 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
         try
         {
             if (discoverSettings && !TryFindSlackSettings(out configurationPath, out secretsPath)) return;
-            slackDispatcher = SlackLifecycleNotificationDispatcher.TryCreate(configurationPath ?? string.Empty, secretsPath ?? string.Empty, out var warning);
+            slackDispatcher = SlackLifecycleNotificationDispatcher.TryCreate(configurationPath ?? string.Empty, secretsPath ?? string.Empty, useTestChannel, out var warning);
             if (warning is not null)
                 WriteWarning($"警告: {warning}通知をスキップします。実行とJSONL記録は継続します。");
             if (slackDispatcher is not null)
@@ -67,6 +73,7 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
     public int FailedWrites => jsonlWriter.FailedWrites;
     public int FailedSlackSends => Volatile.Read(ref droppedNotifications) + Volatile.Read(ref failedNotifications) +
         Volatile.Read(ref abandonedNotifications);
+    public int SentSlackSends => Volatile.Read(ref sentNotifications);
 
     public bool TryAppend(LifecycleEvent item)
     {
@@ -163,6 +170,8 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
             Interlocked.Decrement(ref pendingNotifications);
             if (!notificationAccountingFinalized && result == SlackNotificationSendResult.Failed)
                 Interlocked.Increment(ref failedNotifications);
+            else if (!notificationAccountingFinalized && result == SlackNotificationSendResult.Sent)
+                Interlocked.Increment(ref sentNotifications);
         }
     }
 

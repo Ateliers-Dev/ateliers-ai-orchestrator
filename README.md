@@ -9,7 +9,7 @@
 
 Codex経路はImplementerを最大1回、独立Reviewerを最大1回だけ起動し、成果物SHA-256、応答、停止理由を記録して `NeedsHumanInput` で停止します。Implementer/Reviewerの失敗、レビュー指摘、レビュー合格のいずれの場合も、自動修正・再レビュー・再試行やPR作成へ進みません。Fake経路の既存反復シナリオは維持します。
 
-実Codex CLIによる受入は未実施であり、実証済み・運用可能とはみなしません。通常のビルドとUnit/Fakeテストは実Codex CLIやモデル通信を起動しません。実Codex IntegrationTestsは、明示的な実行引数とCodex CLIの絶対パスを指定した場合だけ起動します。
+実Codex CLIによる受入は未実施であり、実証済み・運用可能とはみなしません。通常のビルドとUnit/Fakeテストは実Codex CLIやモデル通信を起動しません。実Codex IntegrationTestsは、`ATELIERS_RUN_CODEX_INTEGRATION_TESTS=1` とCodex CLIの絶対パスが指定された場合だけ起動します。
 
 オーケストレーターは、Agentの実行条件と制御を保証する。Agentの判断結果および実行環境に残るリスクは、利用者の責任範囲とする。
 
@@ -67,7 +67,7 @@ dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- run examples/task-contr
 
 このファイルは複数runのイベントをUTF-8 JSONL（1行1JSON）で追記します。各行に `runId`、UTCの`timestampUtc`、`role`、`eventType`、`status`、ワークフロー`state`、必要な試行IDと固定の短い要約を記録します。Orchestrator・Implementer・Reviewerの開始、完了、失敗と、人間判断待ちを記録します。プロンプト、応答本文、環境変数、Token、API応答本文は含めず、要約もコード内の固定文だけを使います。書込みに失敗した場合は警告を出し、元のワークフロー結果を変更しません。
 
-**安全ゲート完了と実Codex CLI起動の追加承認までは、実Codex CLIを起動しないでください。--help と --version も起動に含みます。** 下記コマンドは仕様例であり、現時点での実行手順ではありません。
+実Codex CLIは明示opt-inされたIntegrationTestsだけが起動します。テストを実行するとImplementerとReviewerを各1回起動し、モデル利用枠や費用が発生する場合があります。Slack送信は別のopt-inと専用テストチャンネル設定を両方必要とします。
 
 実行対象は、契約の `workingDirectory` に指定した既存の開発checkoutを含むローカルディレクトリです。開始前に作業ツリーがcleanであることを確認します。変更を破棄してよいコピーの利用は推奨しますが必須ではありません。Implementerには `workspace-write` を適用します。Reviewerには固定差分を入力として渡し、書込可能な作業ディレクトリをレビュー対象のcheckoutから分離します。レビュー対象のソースコード・設計書は変更せず、必要な任意成果物は実行記録配下へ保存します。契約の `scope` と操作範囲はAgentへの指示です。ローカル実行では、その範囲を超えるアクセスをOSが完全に封じるものではありません。
 
@@ -128,9 +128,9 @@ dotnet build Ateliers.Ai.Orchestrator.sln
 
 ### 実行ライフサイクルのSlack通知
 
-`run` コマンドは、`config/slack.json` と `config/slack.secrets.json` がリポジトリ内にあり、3役すべてのBot定義とTokenが有効な場合に限り、ライフサイクルイベントを `#ateliers-ai-notifications` へ送信します。`slack.json` がない環境は通知無効として正常に実行します。設定ファイルがあるのにsecretsまたはBot設定が不足・不正な場合は、秘密やパスを含めない警告を出して全通知をスキップします。設定探索は実行ディレクトリとCLI出力ディレクトリの親をたどるため、Visual Studioからも環境変数なしで利用できます。明示的に止める場合は `--slack-notifications disabled` を指定します。
+通常の `run` は、`config/slack.json` と `config/slack.secrets.json` がリポジトリ内にあり、3役すべてのBot定義とTokenが有効な場合に限り、ライフサイクルイベントを各Bot定義の `channelId` へ送信します。雛形の通常送信先は `#ateliers-ai-notifications` です。`slack.json` がない環境は通知無効として正常に実行します。設定ファイルがあるのにsecretsまたはBot設定が不足・不正な場合は、秘密やパスを含めない警告を出して全通知をスキップします。設定探索は実行ディレクトリとCLI出力ディレクトリの親をたどるため、Visual Studioからも環境変数なしで利用できます。明示的に止める場合は `--slack-notifications disabled` を指定します。
 
-送信者をSlackの `from:<@U...>` で検索できるよう、Orchestrator、Implementer、Reviewerに1体ずつ独立したSlackアプリとBotを使います。3体とも `chat:write` のみを付与し、`#ateliers-ai-notifications` に招待してください。各BotのUser IDとチャンネルIDは `config/slack.json`、各Bot TokenはGit除外対象の `config/slack.secrets.json` に記録します。雛形は `config/slack.json.example` と `config/slack.secrets.example.json` にあります。
+送信者をSlackの `from:<@U...>` で検索できるよう、Orchestrator、Implementer、Reviewerに1体ずつ独立したSlackアプリとBotを使います。3体とも `chat:write` のみを付与し、通常は `#ateliers-ai-notifications` に招待してください。各BotのUser IDと通常チャンネルIDは `config/slack.json`、各Bot TokenはGit除外対象の `config/slack.secrets.json` に記録します。雛形は `config/slack.json.example` と `config/slack.secrets.example.json` にあります。
 
 1. Slack APIの[アプリ作成画面](https://api.slack.com/apps)から Orchestrator、Implementer、Reviewer用のアプリを3つ作り、それぞれBot Userを追加します。
 2. 各アプリの **OAuth & Permissions** でBot Token Scope `chat:write` を設定し、ワークスペースへインストールします。
@@ -143,24 +143,36 @@ dotnet build Ateliers.Ai.Orchestrator.sln
 
 この連携は既存の `Ateliers.Slack` Incoming Webhook APIと `ATELIERS_SLACK_WEBHOOK_URL` 設定を変更しません。Bot Tokenはソース・PR・ビルド成果物へ含めません。
 
-### Slack Bot IntegrationTests（外部送信・明示opt-in）
+### Slack IntegrationTests（テストチャンネル・明示opt-in）
 
 `Ateliers.Slack` は既存のIncoming Webhookと並行して、Slack Web API `chat.postMessage` を使うBot送信を提供します。Bot定義は `config/slack.json.example`、Token例は `config/slack.secrets.example.json` を参照してください。ローカルで使う場合は例を `config/slack.json` と `config/slack.secrets.json` にコピーし、実際のBot情報を設定します。両方の実ファイルは `.gitignore` 対象です。秘密Tokenはテスト出力へコピーせず、配布用NuGetにも含めません。設定ロードAPIは引き続き絶対パスを受け取ります。
 
 Slack側の準備:
 
-1. Slack APIの[アプリ作成画面](https://api.slack.com/apps)で、例えば `Ateliers Test Bot` という専用アプリを作成します。
-2. **OAuth & Permissions** のBot Token Scopesに `chat:write` を追加し、アプリをワークスペースへインストール（権限を変更した後は再インストール）します。
-3. Bot User OAuth Token（`xoxb-...`）をローカルの `config/slack.secrets.json` の `tokens.test-bot` に保存します。TokenをチャットやPRへ貼り付けたり、Gitへ追加したりしないでください。
-4. `Ateliers Test Bot` を `#ateliers-test-notifications` に招待します（チャンネル内で `/invite @Ateliers Test Bot`）。招待されていない場合は `not_in_channel` 等で失敗します。
-5. `config/slack.json` の `botUserId` にSlackのBotユーザーID（`U...`）、`channelId` にチャンネルID（`C...`）を設定します。内部の `id` は `test-bot` で、Slack側の `botUserId` とは別の識別子です。`botUserId` は手動で送信者を照合するための値で、IntegrationTestのAPI応答ではTokenが認証したBotとの一致を検証しません。
+1. `#ateliers-test-notifications` のチャンネルID（`C...`）を取得し、`config/slack.json` のルートにある `testChannelId` へ設定します。この値が実Slackテストの唯一の送信先です。3役それぞれの通常 `channelId` と違う値にしてください。
+2. Orchestrator、Implementer、Reviewerの3つのBotを `#ateliers-test-notifications` に招待してください。各Botの `botUserId` は別々の値を維持し、TokenはGit除外対象の `config/slack.secrets.json` に置きます。テストは通常の `channelId` を使いません。
+3. 単体のSlack Bot疎通テスト用には、`Ateliers Test Bot` を作成し、Bot Token Scope `chat:write` を付けてワークスペースへインストールします。Botを同じテストチャンネルへ招待し、`tokens.test-bot` と `bots` 内の `test-bot` 設定もローカルに用意します。
+4. TokenをチャットやPRへ貼り付けたり、Gitへ追加したりしないでください。テスト結果ではToken、設定内容、Slack応答本文を表示しません。
 
-Slack Bot IntegrationTestsは、テストアセンブリの場所からリポジトリルートを特定し、`config/slack.json` と `config/slack.secrets.json` を読み込みます。作業ディレクトリや環境変数の設定は不要なので、Visual Studioのテストエクスプローラーから直接実行できます。両方のファイルがあり、Bot設定と空でないToken値をロードできる場合にSlackへの送信を試みます。Tokenの有効性は事前確認しません。Slack APIが認証を拒否した場合はSkipではなくテスト失敗になります。CIにはこれらのローカルファイルを置かないため、テストは安全にSkipされます。Webhook IntegrationTestのopt-in方式は従来どおりです。
+Slack Bot IntegrationTestsは、テストアセンブリの場所からリポジトリルートを特定し、`config/slack.json` と `config/slack.secrets.json` を読み込みます。`ATELIERS_RUN_SLACK_INTEGRATION_TESTS=1` がなければSkipします。Botテストは `test-bot` のTokenで `testChannelId` に1件投稿します。Webhookテストも同じopt-inに加え、`ATELIERS_SLACK_TEST_CHANNEL_NAME=#ateliers-test-notifications` の明示確認がなければSkipします。Webhook URLはこのテストチャンネル専用にしてください。
+
+実Codexと3役のBot通知をまとめて検証する場合は、両方のopt-inを指定します。CodexテストがImplementer→Reviewerを1回ずつ呼び出し、開始・終了・判断待ちイベントを実行記録に保存します。3役すべての設定・Tokenが読め、testChannelIdが通常送信先と異なる場合だけ、Slack通知を `#ateliers-test-notifications` へ送ります。通常の `ATELIERS_RUN_CODEX_INTEGRATION_TESTS=1` だけならSlack通知は無効です。
 
 ```text
 dotnet test tests/Ateliers.Slack.IntegrationTests/Ateliers.Slack.IntegrationTests.csproj --configuration Release --filter FullyQualifiedName~SlackBotClientIntegrationTests
 ```
 
-ファイルや設定値が不足・不正な場合は外部通信せずSkipします。空でない誤Tokenは設定ロードを通過し、Slack APIへ送信を試みた後に認証エラーで失敗します。成功時は `#ateliers-test-notifications` にRun ID付きメッセージを投稿し、Slack Web APIの成功応答と投稿先を検証します。API応答からTokenに対応するBot User IDは検証しません。投稿後、Slackの検索欄で `from:<@U...> in:#ateliers-test-notifications "Slack Web API integration test"`（`U...` は設定したBot User ID）を検索し、実際の投稿者がAteliers Test Botであり、そのBot固有の送信者として検索できることを手動で確認してください。Slackは `from:<@UserID>` 形式をサポートしています。[検索方法](https://api.slack.com/methods/search.messages)
+実Codex＋ライフサイクルSlack E2Eは、認証済みCodex CLIを使って一つのImplementer→Reviewerワークフローを実行し、Slackへ最大6件を送ります。PowerShellでは、準備済みの `codex.ps1` の絶対パスを使い、プロセス限定でopt-inして起動できます。
 
-このBotテストは送信・識別の疎通確認だけを対象とし、AIオーケストレーション連携は行いません。既存のIncoming Webhook、`ATELIERS_SLACK_WEBHOOK_URL` と `ATELIERS_SLACK_TEST_WEBHOOK_URL`、およびWebhook IntegrationTestsは維持します。
+```powershell
+$env:ATELIERS_RUN_CODEX_INTEGRATION_TESTS = '1'
+$env:ATELIERS_CODEX_CLI_PATH = 'C:\Users\<user>\AppData\Roaming\npm\codex.ps1'
+$env:ATELIERS_RUN_SLACK_INTEGRATION_TESTS = '1'
+dotnet test tests/Ateliers.Ai.Orchestrator.IntegrationTests/Ateliers.Ai.Orchestrator.IntegrationTests.csproj --configuration Release --filter FullyQualifiedName~RunAsync_ShouldCompleteImplementerReviewerAndPersistNeedsHumanInput
+```
+
+Codex opt-inだけの場合はSlack送信を無効にします。Slack opt-inがあっても、設定ファイル不足、testChannelId不足、3役のテスト送信先の不一致、通常チャンネルとの一致、Bot User ID重複があればSlack部分をSkipし、通常チャンネルへフォールバックしません。成功時のCLI出力に送信成功件数が表示され、3役の投稿はSlack検索で個別に確認できます。
+
+ファイルや設定値が不足・不正な場合は外部通信せずSkipします。空でない誤TokenはSlack APIへ送信を試みた後に認証エラーで失敗します。成功時はテストチャンネルにRun ID付きメッセージを投稿し、Slack Web APIの成功応答と投稿先IDを検証します。API応答からTokenに対応するBot User IDは検証しません。投稿後、Slackの検索欄で `from:<@U...> in:#ateliers-test-notifications "Slack Web API integration test"`（`U...` は設定したBot User ID）を検索し、実際の投稿者を手動で確認してください。ライフサイクルE2Eでも、Orchestrator/Implementer/Reviewerそれぞれの `botUserId` を使って `from:<@U...> in:#ateliers-test-notifications "[Ateliers AI]"` を確認します。Slackは `from:<@UserID>` 形式をサポートしています。[検索方法](https://api.slack.com/methods/search.messages)
+
+このBotテストは送信・識別の疎通確認だけを対象とし、AIオーケストレーション連携は行いません。既存のIncoming Webhook、`ATELIERS_SLACK_WEBHOOK_URL` と `ATELIERS_SLACK_TEST_WEBHOOK_URL` も維持します。

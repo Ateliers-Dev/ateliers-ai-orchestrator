@@ -44,6 +44,54 @@ public sealed class SlackLifecycleNotificationDispatcherTests
     }
 
     [Fact]
+    public async Task TryCreate_TestModeRoutesEveryRoleToDedicatedTestChannel()
+    {
+        using var files = new LifecycleSettingsFiles();
+        var handlers = new Dictionary<string, RecordingHandlerBase>(StringComparer.Ordinal);
+        using var dispatcher = SlackLifecycleNotificationDispatcher.TryCreate(files.ConfigurationPath, files.SecretsPath, useTestChannel: true,
+            botId => handlers[botId] = new SuccessRecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent($"{{\"ok\":true,\"channel\":\"C_TEST\",\"ts\":\"1700000000.000001\"}}")
+            }));
+
+        Assert.NotNull(dispatcher);
+        foreach (var (role, botId) in new[]
+        {
+            ("Orchestrator", "orchestrator"), ("Implementer", "implementer"), ("Reviewer", "reviewer")
+        })
+        {
+            Assert.Equal(SlackNotificationSendResult.Sent, await dispatcher!.TrySendAsync(RunId, role, "started", "running", "Implementing", DateTimeOffset.UtcNow));
+            using var payload = JsonDocument.Parse(handlers[botId].RequestBodies.Single()!);
+            Assert.Equal("C_TEST", payload.RootElement.GetProperty("channel").GetString());
+            Assert.Equal($"Bearer {TokenPrefix}{botId}", handlers[botId].Requests.Single().Headers.Authorization!.ToString());
+        }
+    }
+
+    [Fact]
+    public void TryCreate_TestModeRejectsATestChannelThatMatchesAProductionChannel()
+    {
+        using var files = new LifecycleSettingsFiles();
+        File.WriteAllText(files.ConfigurationPath, """{"testChannelId":"C_orchestrator","bots":[{"id":"orchestrator","name":"orchestrator bot","botUserId":"U_orchestrator","channelId":"C_orchestrator","enabled":true},{"id":"implementer","name":"implementer bot","botUserId":"U_implementer","channelId":"C_implementer","enabled":true},{"id":"reviewer","name":"reviewer bot","botUserId":"U_reviewer","channelId":"C_reviewer","enabled":true}]}""");
+
+        var dispatcher = SlackLifecycleNotificationDispatcher.TryCreate(files.ConfigurationPath, files.SecretsPath, useTestChannel: true, out var warning);
+
+        Assert.Null(dispatcher);
+        Assert.Contains("Bot", warning, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TryCreate_TestModeRejectsDuplicateBotIdentity()
+    {
+        using var files = new LifecycleSettingsFiles();
+        File.WriteAllText(files.ConfigurationPath, """{"testChannelId":"C_TEST","bots":[{"id":"orchestrator","name":"orchestrator bot","botUserId":"U_shared","channelId":"C_orchestrator","enabled":true},{"id":"implementer","name":"implementer bot","botUserId":"U_shared","channelId":"C_implementer","enabled":true},{"id":"reviewer","name":"reviewer bot","botUserId":"U_reviewer","channelId":"C_reviewer","enabled":true}]}""");
+
+        var dispatcher = SlackLifecycleNotificationDispatcher.TryCreate(files.ConfigurationPath, files.SecretsPath, useTestChannel: true, out var warning);
+
+        Assert.Null(dispatcher);
+        Assert.Contains("Bot", warning, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TryCreate_ReturnsNullWhenLocalConfigurationIsNotPresent()
     {
         using var temp = new TemporaryDirectory();
@@ -195,7 +243,7 @@ public sealed class SlackLifecycleNotificationDispatcherTests
                 channelId = $"C_{botId}",
                 enabled = true
             });
-            File.WriteAllText(ConfigurationPath, JsonSerializer.Serialize(new { bots }));
+            File.WriteAllText(ConfigurationPath, JsonSerializer.Serialize(new { testChannelId = "C_TEST", bots }));
             File.WriteAllText(SecretsPath, JsonSerializer.Serialize(new
             {
                 tokens = BotIds.ToDictionary(botId => botId, botId => $"{TokenPrefix}{botId}", StringComparer.Ordinal)

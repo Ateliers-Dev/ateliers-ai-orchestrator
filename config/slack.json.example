@@ -1,4 +1,5 @@
 {
+  "testChannelId": "C_REPLACE_WITH_ATELIERS_TEST_NOTIFICATIONS_CHANNEL_ID",
   "bots": [
     {
       "id": "orchestrator",
