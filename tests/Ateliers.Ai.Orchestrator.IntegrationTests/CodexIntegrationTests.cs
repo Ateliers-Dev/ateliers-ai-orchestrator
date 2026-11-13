@@ -121,6 +121,7 @@ public sealed class CodexIntegrationTests
         var succeeded = false;
         ProcessResult? run = null;
         string? runDirectory = null;
+        var lifecycleLogPath = Path.Combine(Path.GetTempPath(), $"ateliers-lifecycle-{Guid.NewGuid():N}.jsonl");
 
         try
         {
@@ -133,7 +134,7 @@ public sealed class CodexIntegrationTests
             fixture.CreateSeedRepository();
             fixture.WriteTaskContract();
             var cliAssembly = FindCliAssembly();
-            run = await InvokeOrchestratorAsync(cliAssembly, Path.GetFullPath(codexExecutable!), fixture);
+            run = await InvokeOrchestratorAsync(cliAssembly, Path.GetFullPath(codexExecutable!), fixture, lifecycleLogPath);
             Assert.True(run.ExitCode == 0,
                 $"Orchestrator終了コードが0ではありません: {run.ExitCode}");
 
@@ -182,6 +183,26 @@ public sealed class CodexIntegrationTests
                     item.GetProperty("toState").GetString() == "needsHumanInput");
                 Assert.Contains(all, item => item.GetProperty("eventType").GetString() == "report_written" &&
                     item.GetProperty("result").GetString() == "accepted" && item.GetProperty("outputReference").GetString() == "report.md");
+
+                var lifecycle = (await File.ReadAllLinesAsync(lifecycleLogPath)).Select(line => JsonDocument.Parse(line)).ToArray();
+                try
+                {
+                    var lifecycleItems = lifecycle.Select(item => item.RootElement).ToArray();
+                    Assert.Contains(lifecycleItems, item => item.GetProperty("role").GetString() == "Orchestrator" && item.GetProperty("eventType").GetString() == "started");
+                    Assert.Contains(lifecycleItems, item => item.GetProperty("role").GetString() == "Implementer" && item.GetProperty("eventType").GetString() == "completed");
+                    Assert.Contains(lifecycleItems, item => item.GetProperty("role").GetString() == "Reviewer" && item.GetProperty("eventType").GetString() == "completed");
+                    Assert.Contains(lifecycleItems, item => item.GetProperty("eventType").GetString() == "needs_human_input");
+                    Assert.Equal(new[] { "Orchestrator:started", "Implementer:started", "Implementer:completed",
+                        "Reviewer:started", "Reviewer:completed", "Orchestrator:needs_human_input", "Orchestrator:completed" },
+                        lifecycleItems.Select(item => $"{item.GetProperty("role").GetString()}:{item.GetProperty("eventType").GetString()}").ToArray());
+                    Assert.Equal("needs_human_input", lifecycleItems[^1].GetProperty("status").GetString());
+                    Assert.Equal("NeedsHumanInput", lifecycleItems[^1].GetProperty("state").GetString());
+                    Assert.DoesNotContain(await File.ReadAllTextAsync(lifecycleLogPath), codexExecutable, StringComparison.OrdinalIgnoreCase);
+                }
+                finally
+                {
+                    foreach (var item in lifecycle) item.Dispose();
+                }
 
                 ValidateAgentEvidence(runDirectory, implementerCalls[0], "implementer", requireResponse: true);
                 ValidateAgentEvidence(runDirectory, reviewerCalls[0], "reviewer", requireResponse: false);
@@ -260,6 +281,10 @@ public sealed class CodexIntegrationTests
                 Console.Error.WriteLine($"失敗時の証跡を保全しました: {fixture.RootDirectory}");
             }
         }
+
+        Assert.True(File.Exists(lifecycleLogPath), "fixture cleanup後も設定した永続JSONLが残っていません。");
+        Assert.Contains("\"role\":\"Orchestrator\"", await File.ReadAllTextAsync(lifecycleLogPath));
+        File.Delete(lifecycleLogPath);
     }
 
     private static string FormatFailure(Exception exception, string fixtureDirectory, string? runDirectory, ProcessResult? run)
@@ -287,7 +312,7 @@ public sealed class CodexIntegrationTests
         throw new FileNotFoundException("CLI assemblyが見つかりません。先にソリューションをビルドしてください。");
     }
 
-    private static async Task<ProcessResult> InvokeOrchestratorAsync(string cliAssembly, string codexExecutable, IsolatedFixture fixture)
+    private static async Task<ProcessResult> InvokeOrchestratorAsync(string cliAssembly, string codexExecutable, IsolatedFixture fixture, string lifecycleLogPath)
     {
         var start = new ProcessStartInfo("dotnet")
         {
@@ -300,7 +325,7 @@ public sealed class CodexIntegrationTests
         foreach (var argument in new[]
         {
             cliAssembly, "run", fixture.ContractPath, "--agent", "codex", "--codex-exe", codexExecutable,
-            "--runs", fixture.RunsDirectory
+            "--runs", fixture.RunsDirectory, "--lifecycle-log", lifecycleLogPath
         }) start.ArgumentList.Add(argument);
 
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Orchestrator CLIを開始できませんでした。");

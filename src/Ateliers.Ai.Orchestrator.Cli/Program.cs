@@ -47,7 +47,7 @@ internal static class OrchestratorCli
 
         if (args[0] == "run")
         {
-            if (!TryParseRunOptions(args, out var scenario, out var runRoot, out var evidencePath, out var agentKind,
+            if (!TryParseRunOptions(args, out var scenario, out var runRoot, out var lifecycleLogPath, out var evidencePath, out var agentKind,
                 out var codexOptions, out var optionError))
             {
                 Console.Error.WriteLine(optionError);
@@ -77,9 +77,12 @@ internal static class OrchestratorCli
             {
                 Directory.CreateDirectory(fakeRunDirectory);
                 using var eventStore = JsonlRunEventStore.CreateNew(Path.Combine(fakeRunDirectory, "events.jsonl"), fakeRunId);
+                var lifecycleWriter = new JsonlLifecycleEventWriter(lifecycleLogPath);
                 IAgentRunner runner = agentKind == "codex" ? new CodexCliAgentRunner(codexOptions!) : new FakeAgentRunner(scenario);
                 var result = new FakeAgentWorkflow().Run(contract, contractHash, fakeRunId, fakeRunDirectory,
-                    runner, eventStore, evidence, codexOneShot: agentKind == "codex");
+                    runner, eventStore, evidence, codexOneShot: agentKind == "codex", lifecycleEvents: lifecycleWriter);
+                if (lifecycleWriter.FailedWrites > 0)
+                    Console.Error.WriteLine($"警告: ライフサイクルJSONLへの書き込みに{lifecycleWriter.FailedWrites}件失敗しました。実行結果は継続しています。");
                 if (!result.PersistenceSucceeded)
                 {
                     Console.Error.WriteLine($"実行は人間判断待ちで停止しましたが、成果物または実行記録の保存に失敗しました: {fakeRunDirectory}");
@@ -198,10 +201,11 @@ internal static class OrchestratorCli
     /// <param name="error">解析失敗時の説明です。</param>
     /// <returns>すべての引数が認識できた場合はtrueです。</returns>
     private static bool TryParseRunOptions(string[] args, out FakeScenario scenario, out string runsDirectory,
-        out string? evidencePath, out string agentKind, out CodexCliRunnerOptions? codexOptions, out string error)
+        out string lifecycleLogPath, out string? evidencePath, out string agentKind, out CodexCliRunnerOptions? codexOptions, out string error)
     {
         scenario = FakeScenario.Success;
         runsDirectory = Path.GetFullPath(Path.Combine(".ateliers-orchestrator", "runs"));
+        lifecycleLogPath = Path.GetFullPath(Path.Combine(".ateliers-orchestrator", "lifecycle.jsonl"));
         evidencePath = null;
         agentKind = "fake";
         codexOptions = null;
@@ -245,6 +249,9 @@ internal static class OrchestratorCli
                 case "--runs":
                     if (!TryResolveFullPath(args[index + 1], "--runs", out var runPath, out error)) return false;
                     runsDirectory = runPath;
+                    break;
+                case "--lifecycle-log":
+                    if (!TryResolveFullPath(args[index + 1], "--lifecycle-log", out lifecycleLogPath, out error)) return false;
                     break;
                 case "--review-evidence":
                     if (!TryResolveFullPath(args[index + 1], "--review-evidence", out var reviewPath, out error)) return false;
@@ -337,6 +344,6 @@ internal static class OrchestratorCli
         Console.Error.WriteLine("使用方法:");
         Console.Error.WriteLine("  ateliers-orchestrator validate <contract.json>");
         Console.Error.WriteLine("  ateliers-orchestrator start <contract.json> [--runs <ディレクトリ>]");
-        Console.Error.WriteLine("  ateliers-orchestrator run <contract.json> [--agent fake|codex] [--scenario <FakeScenario>] [--codex-exe <絶対パス>] [--implementer-codex-home <絶対パス>] [--reviewer-codex-home <絶対パス>] [--runs <ディレクトリ>] [--review-evidence <証跡.json>]");
+        Console.Error.WriteLine("  ateliers-orchestrator run <contract.json> [--agent fake|codex] [--scenario <FakeScenario>] [--codex-exe <絶対パス>] [--implementer-codex-home <絶対パス>] [--reviewer-codex-home <絶対パス>] [--runs <ディレクトリ>] [--lifecycle-log <JSONL>] [--review-evidence <証跡.json>]");
     }
 }
