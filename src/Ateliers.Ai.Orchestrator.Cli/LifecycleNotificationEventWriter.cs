@@ -10,11 +10,15 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
     private static readonly TimeSpan NotificationDrainTimeout = TimeSpan.FromSeconds(2);
     private readonly JsonlLifecycleEventWriter jsonlWriter;
     private readonly SlackLifecycleNotificationDispatcher? slackDispatcher;
+    private readonly object notificationStateLock = new();
     private Channel<LifecycleEvent>? slackQueue;
     private CancellationTokenSource? slackCancellation;
     private Task? slackWorker;
     private int droppedNotifications;
-    private int unfinishedNotifications;
+    private int failedNotifications;
+    private int pendingNotifications;
+    private int abandonedNotifications;
+    private bool notificationAccountingFinalized;
 
     public LifecycleNotificationEventWriter(string lifecycleLogPath, bool notificationsDisabled)
         : this(lifecycleLogPath, notificationsDisabled, configurationPath: null, secretsPath: null, discoverSettings: true)
@@ -28,7 +32,7 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
     }
 
     internal LifecycleNotificationEventWriter(string lifecycleLogPath, bool notificationsDisabled,
-        Func<LifecycleEvent, CancellationToken, Task> notificationSender)
+        Func<LifecycleEvent, CancellationToken, Task<bool>> notificationSender)
     {
         ArgumentNullException.ThrowIfNull(notificationSender);
         jsonlWriter = new JsonlLifecycleEventWriter(lifecycleLogPath);
@@ -50,7 +54,7 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
             if (slackDispatcher is not null)
                 StartNotificationWorker(async (item, cancellationToken) =>
                 {
-                    await slackDispatcher.TrySendAsync(item.RunId, item.Role, item.EventType, item.Status, item.State,
+                    return await slackDispatcher.TrySendAsync(item.RunId, item.Role, item.EventType, item.Status, item.State,
                         item.TimestampUtc, cancellationToken).ConfigureAwait(false);
                 });
         }
@@ -61,14 +65,21 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
     }
 
     public int FailedWrites => jsonlWriter.FailedWrites;
-    public int FailedSlackSends => (slackDispatcher?.FailedSends ?? 0) + Volatile.Read(ref droppedNotifications) +
-        Volatile.Read(ref unfinishedNotifications);
+    public int FailedSlackSends => Volatile.Read(ref droppedNotifications) + Volatile.Read(ref failedNotifications) +
+        Volatile.Read(ref abandonedNotifications);
 
     public bool TryAppend(LifecycleEvent item)
     {
         var recorded = jsonlWriter.TryAppend(item);
-        if (slackQueue is { } queue && !queue.Writer.TryWrite(item))
-            Interlocked.Increment(ref droppedNotifications);
+        if (slackQueue is { } queue)
+        {
+            Interlocked.Increment(ref pendingNotifications);
+            if (!queue.Writer.TryWrite(item))
+            {
+                Interlocked.Decrement(ref pendingNotifications);
+                Interlocked.Increment(ref droppedNotifications);
+            }
+        }
         return recorded;
     }
 
@@ -76,7 +87,11 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
     {
         if (slackQueue is not { } queue || slackWorker is not { } worker) return;
         queue.Writer.TryComplete();
-        if (cancellationToken.IsCancellationRequested) return;
+        if (cancellationToken.IsCancellationRequested)
+        {
+            CancelAndAccountPendingNotifications();
+            return;
+        }
 
         try
         {
@@ -84,24 +99,23 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
         }
         catch (TimeoutException)
         {
-            Interlocked.Increment(ref unfinishedNotifications);
+            CancelAndAccountPendingNotifications();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // Cancellation must not wait for the optional notification worker.
+            CancelAndAccountPendingNotifications();
         }
     }
 
     public void Dispose()
     {
         slackQueue?.Writer.TryComplete();
-        try { slackCancellation?.Cancel(); }
-        catch (Exception) { }
+        CancelAndAccountPendingNotifications();
         slackDispatcher?.Dispose();
         slackCancellation?.Dispose();
     }
 
-    private void StartNotificationWorker(Func<LifecycleEvent, CancellationToken, Task> notificationSender)
+    private void StartNotificationWorker(Func<LifecycleEvent, CancellationToken, Task<bool>> notificationSender)
     {
         slackQueue = Channel.CreateBounded<LifecycleEvent>(new BoundedChannelOptions(256)
         {
@@ -116,7 +130,19 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
             try
             {
                 await foreach (var item in slackQueue.Reader.ReadAllAsync(slackCancellation.Token).ConfigureAwait(false))
-                    await notificationSender(item, slackCancellation.Token).ConfigureAwait(false);
+                {
+                    bool sent;
+                    try
+                    {
+                        sent = await notificationSender(item, slackCancellation.Token).ConfigureAwait(false);
+                    }
+                    catch (Exception)
+                    {
+                        sent = false;
+                    }
+                    CompleteNotification(sent);
+                    if (slackCancellation.IsCancellationRequested) return;
+                }
             }
             catch (OperationCanceledException) when (slackCancellation.IsCancellationRequested)
             {
@@ -124,9 +150,32 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
             }
             catch (Exception)
             {
-                Interlocked.Increment(ref unfinishedNotifications);
+                // Unexpected worker failures do not affect the workflow.
+                CancelAndAccountPendingNotifications();
             }
         });
+    }
+
+    private void CompleteNotification(bool sent)
+    {
+        lock (notificationStateLock)
+        {
+            Interlocked.Decrement(ref pendingNotifications);
+            if (!notificationAccountingFinalized && !sent)
+                Interlocked.Increment(ref failedNotifications);
+        }
+    }
+
+    private void CancelAndAccountPendingNotifications()
+    {
+        lock (notificationStateLock)
+        {
+            if (notificationAccountingFinalized) return;
+            notificationAccountingFinalized = true;
+            Interlocked.Add(ref abandonedNotifications, Volatile.Read(ref pendingNotifications));
+        }
+        try { slackCancellation?.Cancel(); }
+        catch (Exception) { }
     }
 
     private static void WriteWarning(string message)

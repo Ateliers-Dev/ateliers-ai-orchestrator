@@ -957,12 +957,13 @@ static void SlowSlackNotificationsDoNotBlockWorkflowCancellation()
     using var stopSource = new CancellationTokenSource();
     var sendStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     var sendCanceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-    async Task SlowSender(LifecycleEvent _, CancellationToken cancellationToken)
+    async Task<bool> SlowSender(LifecycleEvent _, CancellationToken cancellationToken)
     {
         sendStarted.TrySetResult();
         try
         {
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return true;
         }
         catch (OperationCanceledException)
         {
@@ -982,6 +983,8 @@ static void SlowSlackNotificationsDoNotBlockWorkflowCancellation()
         elapsed.Stop();
         Assert.True(sendStarted.Task.Wait(TimeSpan.FromSeconds(2)), "Fake実行中に通知workerが開始しませんでした。");
         lifecycleWriter.FlushSlackNotificationsAsync(stopSource.Token).GetAwaiter().GetResult();
+        Assert.Equal(File.ReadAllLines(Path.Combine(temp.Path, "lifecycle.jsonl")).Length, lifecycleWriter.FailedSlackSends,
+            "停止時に未送信の通知がすべて失敗件数へ反映されませんでした。");
     }
 
     Assert.Equal(RunState.NeedsHumanInput, result.State);
@@ -992,10 +995,11 @@ static void SlowSlackNotificationsDoNotBlockWorkflowCancellation()
     var timedRunDirectory = Path.Combine(temp.Path, "timed-run");
     Directory.CreateDirectory(timedRunDirectory);
     var timedSendStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-    async Task TimedSlowSender(LifecycleEvent _, CancellationToken cancellationToken)
+    async Task<bool> TimedSlowSender(LifecycleEvent _, CancellationToken cancellationToken)
     {
         timedSendStarted.TrySetResult();
         await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        return true;
     }
 
     FakeWorkflowResult timedResult;
@@ -1012,6 +1016,8 @@ static void SlowSlackNotificationsDoNotBlockWorkflowCancellation()
         elapsed.Stop();
         Assert.True(timedSendStarted.Task.Wait(TimeSpan.FromSeconds(2)), "Fake実行中に遅延通知workerが開始しませんでした。");
         lifecycleWriter.FlushSlackNotificationsAsync().GetAwaiter().GetResult();
+        Assert.Equal(File.ReadAllLines(Path.Combine(temp.Path, "timed-lifecycle.jsonl")).Length, lifecycleWriter.FailedSlackSends,
+            "排出タイムアウト時に未送信通知数が正確に失敗件数へ反映されませんでした。");
     }
 
     Assert.Equal(RunState.NeedsHumanInput, timedResult.State);
