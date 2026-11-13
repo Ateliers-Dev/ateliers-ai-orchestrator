@@ -62,7 +62,7 @@ public sealed class SlackBotClient : IDisposable
             }
 
             if (body is null || !body.Ok)
-                throw SlackNotificationException.ApiFailure(response.StatusCode, body?.Error);
+                throw SlackNotificationException.ApiFailure(response.StatusCode);
 
             if (string.IsNullOrWhiteSpace(body.Channel) || string.IsNullOrWhiteSpace(body.Ts))
                 throw SlackNotificationException.InvalidResponse(response.StatusCode);
@@ -92,7 +92,7 @@ public sealed class SlackBotClient : IDisposable
     }
 
     private sealed record SlackPostMessageRequest(string Channel, string Text);
-    private sealed record SlackPostMessageResponse(bool Ok, string? Error, string? Channel, string? Ts);
+    private sealed record SlackPostMessageResponse(bool Ok, string? Channel, string? Ts);
 }
 
 public sealed record SlackPostMessageResult(string ChannelId, string Timestamp);

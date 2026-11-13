@@ -36,14 +36,15 @@ public sealed class SlackBotConfiguration
         {
             var configuration = JsonSerializer.Deserialize<ConfigurationFile>(File.ReadAllText(configurationPath), JsonOptions)
                 ?? throw new InvalidOperationException();
-            var bot = configuration.Bots.SingleOrDefault(candidate => string.Equals(candidate.Id, botId, StringComparison.Ordinal))
+            var bot = configuration.Bots?.SingleOrDefault(candidate => candidate is not null &&
+                string.Equals(candidate.Id, botId, StringComparison.Ordinal))
                 ?? throw new InvalidOperationException();
             var secrets = JsonSerializer.Deserialize<SecretsFile>(File.ReadAllText(secretsPath), JsonOptions)
                 ?? throw new InvalidOperationException();
 
             if (string.IsNullOrWhiteSpace(bot.Name) || string.IsNullOrWhiteSpace(bot.BotUserId) ||
                 string.IsNullOrWhiteSpace(bot.ChannelId) || !bot.Enabled ||
-                !secrets.Tokens.TryGetValue(bot.Id, out var token) || string.IsNullOrWhiteSpace(token))
+                secrets.Tokens is null || !secrets.Tokens.TryGetValue(bot.Id, out var token) || string.IsNullOrWhiteSpace(token))
             {
                 throw new InvalidOperationException();
             }
@@ -58,11 +59,11 @@ public sealed class SlackBotConfiguration
 
     private sealed class ConfigurationFile
     {
-        public List<SlackBotDefinition> Bots { get; init; } = [];
+        public List<SlackBotDefinition?>? Bots { get; init; } = [];
     }
 
     private sealed class SecretsFile
     {
-        public Dictionary<string, string> Tokens { get; init; } = new(StringComparer.Ordinal);
+        public Dictionary<string, string?>? Tokens { get; init; } = new(StringComparer.Ordinal);
     }
 }

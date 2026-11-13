@@ -41,9 +41,24 @@ public sealed class SlackBotClientUnitTests
 
         var exception = await Assert.ThrowsAsync<SlackNotificationException>(() => client.SendMessageAsync("test"));
 
-        Assert.Contains("missing_scope", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("Slack Web API rejected the request.", exception.Message);
         Assert.DoesNotContain(Token, exception.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain(ApiUri.ToString(), exception.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_ApiErrorThatContainsTokenIsNotExposed()
+    {
+        using var files = new TestConfigurationFiles();
+        var configuration = files.Load();
+        using var handler = new RecordingHandler(_ => JsonResponse($"{{\"ok\":false,\"error\":\"{Token}\"}}"));
+        using var client = new SlackBotClient(configuration, handler);
+
+        var exception = await Assert.ThrowsAsync<SlackNotificationException>(() => client.SendMessageAsync("test"));
+
+        Assert.Equal("Slack Web API rejected the request.", exception.Message);
+        Assert.DoesNotContain(Token, exception.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(string.Concat(Token.Where(char.IsAsciiLetterOrDigit)), exception.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -95,7 +110,7 @@ public sealed class SlackBotClientUnitTests
         var exception = await Assert.ThrowsAsync<SlackNotificationException>(() => client.SendMessageAsync("test"));
 
         Assert.Equal(HttpStatusCode.OK, exception.StatusCode);
-        Assert.Contains("channel_not_found", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("Slack Web API rejected the request.", exception.Message);
     }
 
     [Fact]
@@ -104,6 +119,28 @@ public sealed class SlackBotClientUnitTests
         var exception = Assert.Throws<ArgumentException>(() => SlackBotConfiguration.Load("slack.json", "slack.secrets.json", "test-bot"));
 
         Assert.DoesNotContain("slack.secrets.json", exception.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ConfigurationRejectsNullBots()
+    {
+        using var files = new TestConfigurationFiles("{\"bots\":null}", "{\"tokens\":{\"test-bot\":\"xoxb-test\"}}");
+
+        var exception = Assert.Throws<InvalidOperationException>(() => files.Load());
+
+        Assert.Equal("Slack bot configuration is missing or invalid.", exception.Message);
+    }
+
+    [Fact]
+    public void ConfigurationRejectsNullTokens()
+    {
+        using var files = new TestConfigurationFiles(
+            "{\"bots\":[{\"id\":\"test-bot\",\"name\":\"Ateliers Test Bot\",\"botUserId\":\"U123TEST\",\"channelId\":\"C123TEST\",\"enabled\":true}]}",
+            "{\"tokens\":null}");
+
+        var exception = Assert.Throws<InvalidOperationException>(() => files.Load());
+
+        Assert.Equal("Slack bot configuration is missing or invalid.", exception.Message);
     }
 
     private static HttpResponseMessage JsonResponse(string json) => new(HttpStatusCode.OK)
@@ -115,11 +152,11 @@ public sealed class SlackBotClientUnitTests
     {
         private readonly string directory = Path.Combine(Path.GetTempPath(), $"ateliers-slack-tests-{Guid.NewGuid():N}");
 
-        public TestConfigurationFiles()
+        public TestConfigurationFiles(string? configurationJson = null, string? secretsJson = null)
         {
             Directory.CreateDirectory(directory);
-            File.WriteAllText(Path.Combine(directory, "slack.json"), """{"bots":[{"id":"test-bot","name":"Ateliers Test Bot","botUserId":"U123TEST","channelId":"C123TEST","enabled":true}]}""");
-            File.WriteAllText(Path.Combine(directory, "slack.secrets.json"), JsonSerializer.Serialize(new { tokens = new Dictionary<string, string> { ["test-bot"] = Token } }));
+            File.WriteAllText(Path.Combine(directory, "slack.json"), configurationJson ?? """{"bots":[{"id":"test-bot","name":"Ateliers Test Bot","botUserId":"U123TEST","channelId":"C123TEST","enabled":true}]}""");
+            File.WriteAllText(Path.Combine(directory, "slack.secrets.json"), secretsJson ?? JsonSerializer.Serialize(new { tokens = new Dictionary<string, string> { ["test-bot"] = Token } }));
         }
 
         public SlackBotConfiguration Load() => SlackBotConfiguration.Load(

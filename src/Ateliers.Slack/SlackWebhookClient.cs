@@ -92,8 +92,8 @@ public sealed class SlackNotificationException : Exception
     internal static SlackNotificationException InvalidResponse(HttpStatusCode statusCode) =>
         new("Slack webhook returned an unexpected success response.", statusCode);
 
-    internal static SlackNotificationException ApiFailure(HttpStatusCode statusCode, string? error) =>
-        new($"Slack Web API rejected the request ({SafeErrorCode(error)}).", statusCode);
+    internal static SlackNotificationException ApiFailure(HttpStatusCode statusCode) =>
+        new("Slack Web API rejected the request.", statusCode);
 
     internal static SlackNotificationException RateLimited(int? retryAfterSeconds) =>
         new("Slack Web API rate limit reached (HTTP 429).", HttpStatusCode.TooManyRequests, retryAfterSeconds);
@@ -111,12 +111,4 @@ public sealed class SlackNotificationException : Exception
         RetryAfterSeconds = retryAfterSeconds;
     }
 
-    private static string SafeErrorCode(string? error)
-    {
-        if (string.IsNullOrWhiteSpace(error))
-            return "unknown_error";
-
-        var safe = new string(error.Where(character => char.IsAsciiLetterOrDigit(character) || character == '_').Take(64).ToArray());
-        return safe.Length == 0 ? "unknown_error" : safe;
-    }
 }
