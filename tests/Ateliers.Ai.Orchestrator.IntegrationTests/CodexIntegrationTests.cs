@@ -325,7 +325,7 @@ public sealed class CodexIntegrationTests
         foreach (var argument in new[]
         {
             cliAssembly, "run", fixture.ContractPath, "--agent", "codex", "--codex-exe", codexExecutable,
-            "--runs", fixture.RunsDirectory, "--lifecycle-log", lifecycleLogPath
+            "--runs", fixture.RunsDirectory, "--lifecycle-log", lifecycleLogPath, "--slack-notifications", "disabled"
         }) start.ArgumentList.Add(argument);
 
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Orchestrator CLIを開始できませんでした。");

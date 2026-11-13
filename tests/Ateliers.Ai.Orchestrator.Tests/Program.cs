@@ -1575,7 +1575,10 @@ static (int ExitCode, string Output, string Error) RunCli(params string[] argume
         RedirectStandardError = true,
         UseShellExecute = false
     };
-    foreach (var argument in new[] { "run", "--project", cliProject, "--configuration", configuration, "--no-build", "--" }.Concat(arguments))
+    var cliArguments = new[] { "run", "--project", cliProject, "--configuration", configuration, "--no-build", "--" }.Concat(arguments);
+    if (arguments.Length > 0 && arguments[0] == "run")
+        cliArguments = cliArguments.Concat(["--slack-notifications", "disabled"]);
+    foreach (var argument in cliArguments)
         start.ArgumentList.Add(argument);
 
     using var process = Process.Start(start) ?? throw new Exception("CLIプロセスを開始できません。");

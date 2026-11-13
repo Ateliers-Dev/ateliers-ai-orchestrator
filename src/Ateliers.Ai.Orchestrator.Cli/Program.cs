@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Ateliers.Ai.Orchestrator.Core;
+using Ateliers.Ai.Orchestrator.Cli;
 
 return await OrchestratorCli.RunAsync(args);
 
@@ -48,7 +49,7 @@ internal static class OrchestratorCli
         if (args[0] == "run")
         {
             if (!TryParseRunOptions(args, out var scenario, out var runRoot, out var lifecycleLogPath, out var evidencePath, out var agentKind,
-                out var codexOptions, out var optionError))
+                out var codexOptions, out var notificationsDisabled, out var optionError))
             {
                 Console.Error.WriteLine(optionError);
                 PrintUsage();
@@ -77,12 +78,14 @@ internal static class OrchestratorCli
             {
                 Directory.CreateDirectory(fakeRunDirectory);
                 using var eventStore = JsonlRunEventStore.CreateNew(Path.Combine(fakeRunDirectory, "events.jsonl"), fakeRunId);
-                var lifecycleWriter = new JsonlLifecycleEventWriter(lifecycleLogPath);
+                using var lifecycleWriter = new LifecycleNotificationEventWriter(lifecycleLogPath, notificationsDisabled);
                 IAgentRunner runner = agentKind == "codex" ? new CodexCliAgentRunner(codexOptions!) : new FakeAgentRunner(scenario);
                 var result = new FakeAgentWorkflow().Run(contract, contractHash, fakeRunId, fakeRunDirectory,
                     runner, eventStore, evidence, codexOneShot: agentKind == "codex", lifecycleEvents: lifecycleWriter);
                 if (lifecycleWriter.FailedWrites > 0)
                     Console.Error.WriteLine($"警告: ライフサイクルJSONLへの書き込みに{lifecycleWriter.FailedWrites}件失敗しました。実行結果は継続しています。");
+                if (lifecycleWriter.FailedSlackSends > 0)
+                    Console.Error.WriteLine($"警告: Slack通知に{lifecycleWriter.FailedSlackSends}件失敗しました。実行結果は継続しています。");
                 if (!result.PersistenceSucceeded)
                 {
                     Console.Error.WriteLine($"実行は人間判断待ちで停止しましたが、成果物または実行記録の保存に失敗しました: {fakeRunDirectory}");
@@ -201,7 +204,8 @@ internal static class OrchestratorCli
     /// <param name="error">解析失敗時の説明です。</param>
     /// <returns>すべての引数が認識できた場合はtrueです。</returns>
     private static bool TryParseRunOptions(string[] args, out FakeScenario scenario, out string runsDirectory,
-        out string lifecycleLogPath, out string? evidencePath, out string agentKind, out CodexCliRunnerOptions? codexOptions, out string error)
+        out string lifecycleLogPath, out string? evidencePath, out string agentKind, out CodexCliRunnerOptions? codexOptions,
+        out bool notificationsDisabled, out string error)
     {
         scenario = FakeScenario.Success;
         runsDirectory = Path.GetFullPath(Path.Combine(".ateliers-orchestrator", "runs"));
@@ -209,6 +213,7 @@ internal static class OrchestratorCli
         evidencePath = null;
         agentKind = "fake";
         codexOptions = null;
+        notificationsDisabled = false;
         error = string.Empty;
         var seen = new HashSet<string>(StringComparer.Ordinal);
         string? executable = null, implementerHome = null, reviewerHome = null;
@@ -256,6 +261,14 @@ internal static class OrchestratorCli
                 case "--review-evidence":
                     if (!TryResolveFullPath(args[index + 1], "--review-evidence", out var reviewPath, out error)) return false;
                     evidencePath = reviewPath;
+                    break;
+                case "--slack-notifications":
+                    if (args[index + 1] is not ("auto" or "disabled"))
+                    {
+                        error = "--slack-notifications は auto または disabled を指定してください。";
+                        return false;
+                    }
+                    notificationsDisabled = args[index + 1] == "disabled";
                     break;
                 default:
                     error = $"未対応のrunオプションです: {args[index]}";
@@ -344,6 +357,6 @@ internal static class OrchestratorCli
         Console.Error.WriteLine("使用方法:");
         Console.Error.WriteLine("  ateliers-orchestrator validate <contract.json>");
         Console.Error.WriteLine("  ateliers-orchestrator start <contract.json> [--runs <ディレクトリ>]");
-        Console.Error.WriteLine("  ateliers-orchestrator run <contract.json> [--agent fake|codex] [--scenario <FakeScenario>] [--codex-exe <絶対パス>] [--implementer-codex-home <絶対パス>] [--reviewer-codex-home <絶対パス>] [--runs <ディレクトリ>] [--lifecycle-log <JSONL>] [--review-evidence <証跡.json>]");
+        Console.Error.WriteLine("  ateliers-orchestrator run <contract.json> [--agent fake|codex] [--scenario <FakeScenario>] [--codex-exe <絶対パス>] [--implementer-codex-home <絶対パス>] [--reviewer-codex-home <絶対パス>] [--runs <ディレクトリ>] [--lifecycle-log <JSONL>] [--review-evidence <証跡.json>] [--slack-notifications auto|disabled]");
     }
 }

@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Ateliers.Ai.Orchestrator.Core\Ateliers.Ai.Orchestrator.Core.csproj" />
+    <ProjectReference Include="..\Ateliers.Slack\Ateliers.Slack.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

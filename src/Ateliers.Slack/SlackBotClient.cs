@@ -8,7 +8,7 @@ namespace Ateliers.Slack;
 public sealed class SlackBotClient : IDisposable
 {
     private static readonly Uri PostMessageUri = new("https://slack.com/api/chat.postMessage");
-    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
+    private readonly TimeSpan requestTimeout;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -18,15 +18,18 @@ public sealed class SlackBotClient : IDisposable
     private readonly SlackBotConfiguration configuration;
 
     public SlackBotClient(SlackBotConfiguration configuration)
-        : this(configuration, SlackWebhookClient.CreateHandler())
+        : this(configuration, SlackWebhookClient.CreateHandler(), TimeSpan.FromSeconds(10))
     {
     }
 
-    internal SlackBotClient(SlackBotConfiguration configuration, HttpMessageHandler handler)
+    internal SlackBotClient(SlackBotConfiguration configuration, HttpMessageHandler handler, TimeSpan? requestTimeout = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(handler);
         this.configuration = configuration;
+        this.requestTimeout = requestTimeout ?? TimeSpan.FromSeconds(10);
+        if (this.requestTimeout <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(requestTimeout));
         httpClient = new HttpClient(handler);
         httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", configuration.Token);
     }
@@ -36,7 +39,7 @@ public sealed class SlackBotClient : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(message);
 
         using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutSource.CancelAfter(RequestTimeout);
+        timeoutSource.CancelAfter(requestTimeout);
 
         try
         {
