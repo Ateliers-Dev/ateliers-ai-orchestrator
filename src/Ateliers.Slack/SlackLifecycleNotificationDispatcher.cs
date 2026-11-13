@@ -35,38 +35,60 @@ public sealed class SlackLifecycleNotificationDispatcher : IDisposable
     /// <summary>ローカル設定からDispatcherを作ります。設定が未配置または有効なBotがない場合はnullを返します。</summary>
     public static SlackLifecycleNotificationDispatcher? TryCreate(string configurationPath, string secretsPath)
     {
-        return TryCreate(configurationPath, secretsPath, handlerFactory: null);
+        return TryCreate(configurationPath, secretsPath, out _);
+    }
+
+    /// <summary>不完全または不正な設定時はnullを返し、秘密情報を含まない警告理由を返します。</summary>
+    public static SlackLifecycleNotificationDispatcher? TryCreate(string configurationPath, string secretsPath, out string? warning)
+    {
+        return TryCreate(configurationPath, secretsPath, handlerFactory: null, requestTimeout: null, out warning);
     }
 
     internal static SlackLifecycleNotificationDispatcher? TryCreate(
         string configurationPath,
         string secretsPath,
         Func<string, HttpMessageHandler>? handlerFactory,
-        TimeSpan? requestTimeout = null)
+        TimeSpan? requestTimeout = null) =>
+        TryCreate(configurationPath, secretsPath, handlerFactory, requestTimeout, out _);
+
+    private static SlackLifecycleNotificationDispatcher? TryCreate(
+        string configurationPath,
+        string secretsPath,
+        Func<string, HttpMessageHandler>? handlerFactory,
+        TimeSpan? requestTimeout,
+        out string? warning)
     {
-        if (string.IsNullOrWhiteSpace(configurationPath) || string.IsNullOrWhiteSpace(secretsPath) ||
-            !Path.IsPathFullyQualified(configurationPath) || !Path.IsPathFullyQualified(secretsPath) ||
-            !File.Exists(configurationPath) || !File.Exists(secretsPath))
+        warning = null;
+        if (string.IsNullOrWhiteSpace(configurationPath) || !Path.IsPathFullyQualified(configurationPath))
+        {
+            warning = "Slack通知の設定が不正です。";
             return null;
+        }
+        if (!File.Exists(configurationPath)) return null;
+        if (string.IsNullOrWhiteSpace(secretsPath) || !Path.IsPathFullyQualified(secretsPath) || !File.Exists(secretsPath))
+        {
+            warning = "Slack通知のsecrets設定が不足または不正です。";
+            return null;
+        }
 
         var clients = new Dictionary<string, SlackBotClient>(StringComparer.Ordinal);
-        foreach (var (role, botId) in BotRoutes)
+        try
         {
-            try
+            foreach (var (role, botId) in BotRoutes)
             {
                 var configuration = SlackBotConfiguration.Load(configurationPath, secretsPath, botId);
                 clients.Add(role, handlerFactory is null
                     ? new SlackBotClient(configuration)
                     : new SlackBotClient(configuration, handlerFactory(botId), requestTimeout));
             }
-            catch (InvalidOperationException)
-            {
-                // Bot未設定・不正設定はその役割の通知を無効にし、詳細や秘密情報を表示しません。
-            }
+            return new SlackLifecycleNotificationDispatcher(clients);
         }
-
-        if (clients.Count == 0) return null;
-        return new SlackLifecycleNotificationDispatcher(clients);
+        catch (Exception)
+        {
+            DisposeClients(clients.Values);
+            warning = "Slack通知のBot定義またはsecrets設定が不足または不正です。";
+            return null;
+        }
     }
 
     public int FailedSends => Volatile.Read(ref failedSends);
@@ -98,6 +120,15 @@ public sealed class SlackLifecycleNotificationDispatcher : IDisposable
 
     public void Dispose()
     {
-        foreach (var client in clients.Values) client.Dispose();
+        DisposeClients(clients.Values);
+    }
+
+    private static void DisposeClients(IEnumerable<SlackBotClient> clients)
+    {
+        foreach (var client in clients)
+        {
+            try { client.Dispose(); }
+            catch (Exception) { }
+        }
     }
 }

@@ -128,7 +128,7 @@ dotnet build Ateliers.Ai.Orchestrator.sln
 
 ### 実行ライフサイクルのSlack通知
 
-`run` コマンドは、`config/slack.json` と `config/slack.secrets.json` がリポジトリ内にある場合に限り、ライフサイクルイベントを `#ateliers-ai-notifications` へ送信します。設定探索は実行ディレクトリとCLI出力ディレクトリの親をたどるため、Visual Studioからも環境変数なしで利用できます。設定ファイルがないCIや通常の開発環境では実送信しません。明示的に止める場合は `--slack-notifications disabled` を指定します。
+`run` コマンドは、`config/slack.json` と `config/slack.secrets.json` がリポジトリ内にあり、3役すべてのBot定義とTokenが有効な場合に限り、ライフサイクルイベントを `#ateliers-ai-notifications` へ送信します。`slack.json` がない環境は通知無効として正常に実行します。設定ファイルがあるのにsecretsまたはBot設定が不足・不正な場合は、秘密やパスを含めない警告を出して全通知をスキップします。設定探索は実行ディレクトリとCLI出力ディレクトリの親をたどるため、Visual Studioからも環境変数なしで利用できます。明示的に止める場合は `--slack-notifications disabled` を指定します。
 
 送信者をSlackの `from:<@U...>` で検索できるよう、Orchestrator、Implementer、Reviewerに1体ずつ独立したSlackアプリとBotを使います。3体とも `chat:write` のみを付与し、`#ateliers-ai-notifications` に招待してください。各BotのUser IDとチャンネルIDは `config/slack.json`、各Bot TokenはGit除外対象の `config/slack.secrets.json` に記録します。雛形は `config/slack.json.example` と `config/slack.secrets.example.json` にあります。
 

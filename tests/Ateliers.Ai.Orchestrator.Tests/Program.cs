@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Security.Cryptography;
 using System.Diagnostics;
 using Ateliers.Ai.Orchestrator.Core;
+using Ateliers.Ai.Orchestrator.Cli;
 
 if (args.Length >= 1 && args[0] == "--fake-codex-fixture") return RunFakeCodexFixture(args);
 if (args.Length >= 1 && args[0] == "--external-process-fixture") return RunExternalProcessFixture(args);
@@ -30,6 +31,7 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("複数プロセスからの同時追記で全JSONL行を保持する", LifecycleJsonlSerializesConcurrentProcesses);
     suite.Add("Reviewer失敗・停止要求・再レビューをライフサイクルへ正しい順序で記録する", LifecycleEventsCoverFailureStopAndRevision);
     suite.Add("ライフサイクル記録失敗は実行結果を隠さない", LifecycleWriteFailureDoesNotHideWorkflowResult);
+    suite.Add("Slack設定不備を警告して通知をスキップしFake実行とJSONLを維持する", InvalidSlackSettingsDoNotAffectFakeRunOrJsonl);
     suite.Add("禁止遷移は状態と記録を変えない", RejectedTransitionDoesNotMutate);
     suite.Add("Fake正常系は成果物固定後にレビューし証跡不足で停止する", FakeSuccessKeepsReviewAndReadyEvidenceSeparate);
     suite.Add("Fake修正系は同一Reviewerで再レビューし上限を守る", FakeRevisionIsBoundedAndReReviewed);
@@ -905,6 +907,45 @@ static void LifecycleWriteFailureDoesNotHideWorkflowResult()
     Assert.Equal(0, cliResult.ExitCode, "ログ保存失敗がCLIのFake実行を失敗させました。");
     Assert.True(cliResult.Error.Contains("ライフサイクルJSONL", StringComparison.Ordinal), "ログ保存失敗の警告がありません。");
     Assert.False(cliResult.Error.Contains(logPath, StringComparison.OrdinalIgnoreCase), "ログ保存先の絶対パスが標準エラーへ出ています。");
+}
+
+static void InvalidSlackSettingsDoNotAffectFakeRunOrJsonl()
+{
+    using var temp = new TemporaryDirectory();
+    var settingsDirectory = Path.Combine(temp.Path, "config");
+    Directory.CreateDirectory(settingsDirectory);
+    var slackSettingsPath = Path.Combine(settingsDirectory, "slack.json");
+    var slackSecretsPath = Path.Combine(settingsDirectory, "slack.secrets.json");
+    File.WriteAllText(slackSettingsPath, """{"bots":[]}""");
+    File.WriteAllText(slackSecretsPath, """{"tokens":{}}""");
+    var lifecyclePath = Path.Combine(temp.Path, "lifecycle.jsonl");
+    var runId = Guid.NewGuid().ToString("N");
+    var runDirectory = Path.Combine(temp.Path, "run");
+    Directory.CreateDirectory(runDirectory);
+    var previousError = Console.Error;
+    using var capturedError = new StringWriter();
+    FakeWorkflowResult result;
+    try
+    {
+        Console.SetError(capturedError);
+        using var lifecycleWriter = new LifecycleNotificationEventWriter(lifecyclePath, notificationsDisabled: false,
+            configurationPath: slackSettingsPath, secretsPath: slackSecretsPath);
+        using var eventStore = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), runId);
+        result = new FakeAgentWorkflow().Run(SampleContract(), new string('a', 64), runId, runDirectory,
+            new FakeAgentRunner(FakeScenario.Success), eventStore, lifecycleEvents: lifecycleWriter);
+    }
+    finally
+    {
+        Console.SetError(previousError);
+    }
+
+    Assert.Equal(RunState.NeedsHumanInput, result.State);
+    Assert.True(result.PersistenceSucceeded, "Slack設定不備がFake実行または実行記録の成否へ伝播しました。");
+    Assert.True(File.Exists(lifecyclePath), "Slack設定不備がJSONL保存を妨げました。");
+    Assert.True(File.ReadAllLines(lifecyclePath).Length > 0, "Slack設定不備でライフサイクルJSONLが空です。");
+    Assert.True(capturedError.ToString().Contains("警告", StringComparison.Ordinal), "不完全なSlack設定の警告がありません。");
+    Assert.False(capturedError.ToString().Contains(slackSettingsPath, StringComparison.Ordinal), "Slack設定パスが警告へ含まれました。");
+    Assert.False(capturedError.ToString().Contains(slackSecretsPath, StringComparison.Ordinal), "Slack secretsパスが警告へ含まれました。");
 }
 
 static void LifecycleJsonlSerializesConcurrentProcesses()

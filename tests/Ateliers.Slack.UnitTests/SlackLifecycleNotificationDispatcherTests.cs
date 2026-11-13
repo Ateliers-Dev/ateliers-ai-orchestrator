@@ -47,9 +47,64 @@ public sealed class SlackLifecycleNotificationDispatcherTests
         using var temp = new TemporaryDirectory();
 
         var dispatcher = SlackLifecycleNotificationDispatcher.TryCreate(
-            Path.Combine(temp.Path, "slack.json"), Path.Combine(temp.Path, "slack.secrets.json"));
+            Path.Combine(temp.Path, "slack.json"), Path.Combine(temp.Path, "slack.secrets.json"), out var warning);
 
         Assert.Null(dispatcher);
+        Assert.Null(warning);
+    }
+
+    [Fact]
+    public void TryCreate_WarnsAndSkipsWhenSecretsAreMissing()
+    {
+        using var files = new LifecycleSettingsFiles();
+        File.Delete(files.SecretsPath);
+
+        var dispatcher = SlackLifecycleNotificationDispatcher.TryCreate(files.ConfigurationPath, files.SecretsPath, out var warning);
+
+        Assert.Null(dispatcher);
+        Assert.Contains("secrets", warning, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(TokenPrefix, warning!, StringComparison.Ordinal);
+        Assert.DoesNotContain(files.SecretsPath, warning!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TryCreate_WarnsAndSkipsAllNotificationsWhenAnyBotDefinitionIsMissing()
+    {
+        using var files = new LifecycleSettingsFiles();
+        File.WriteAllText(files.ConfigurationPath, """{"bots":[{"id":"orchestrator","name":"Orchestrator","botUserId":"U1","channelId":"C1","enabled":true},{"id":"implementer","name":"Implementer","botUserId":"U2","channelId":"C1","enabled":true}]}""");
+
+        var dispatcher = SlackLifecycleNotificationDispatcher.TryCreate(files.ConfigurationPath, files.SecretsPath, out var warning);
+
+        Assert.Null(dispatcher);
+        Assert.Contains("Bot", warning, StringComparison.Ordinal);
+        Assert.DoesNotContain(TokenPrefix, warning!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TryCreate_WarnsAndSkipsAllNotificationsWhenAnyBotTokenIsMissing()
+    {
+        using var files = new LifecycleSettingsFiles();
+        File.WriteAllText(files.SecretsPath, """{"tokens":{"orchestrator":"test-token","implementer":"test-token"}}""");
+
+        var dispatcher = SlackLifecycleNotificationDispatcher.TryCreate(files.ConfigurationPath, files.SecretsPath, out var warning);
+
+        Assert.Null(dispatcher);
+        Assert.Contains("secrets", warning, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("test-token", warning!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TryCreate_WarnsAndSkipsForMalformedSettingsWithoutExposingContents()
+    {
+        using var files = new LifecycleSettingsFiles();
+        File.WriteAllText(files.ConfigurationPath, $"invalid {TokenPrefix}not-a-real-token");
+
+        var dispatcher = SlackLifecycleNotificationDispatcher.TryCreate(files.ConfigurationPath, files.SecretsPath, out var warning);
+
+        Assert.Null(dispatcher);
+        Assert.NotNull(warning);
+        Assert.DoesNotContain(TokenPrefix, warning!, StringComparison.Ordinal);
+        Assert.DoesNotContain(files.ConfigurationPath, warning!, StringComparison.Ordinal);
     }
 
     [Fact]
