@@ -126,6 +126,23 @@ opt-in時はImplementerとReviewerを各1回呼び出すため、モデル利用
 dotnet build Ateliers.Ai.Orchestrator.sln
 ```
 
+### 実行ライフサイクルのSlack通知
+
+`run` コマンドは、`config/slack.json` と `config/slack.secrets.json` がリポジトリ内にあり、3役すべてのBot定義とTokenが有効な場合に限り、ライフサイクルイベントを `#ateliers-ai-notifications` へ送信します。`slack.json` がない環境は通知無効として正常に実行します。設定ファイルがあるのにsecretsまたはBot設定が不足・不正な場合は、秘密やパスを含めない警告を出して全通知をスキップします。設定探索は実行ディレクトリとCLI出力ディレクトリの親をたどるため、Visual Studioからも環境変数なしで利用できます。明示的に止める場合は `--slack-notifications disabled` を指定します。
+
+送信者をSlackの `from:<@U...>` で検索できるよう、Orchestrator、Implementer、Reviewerに1体ずつ独立したSlackアプリとBotを使います。3体とも `chat:write` のみを付与し、`#ateliers-ai-notifications` に招待してください。各BotのUser IDとチャンネルIDは `config/slack.json`、各Bot TokenはGit除外対象の `config/slack.secrets.json` に記録します。雛形は `config/slack.json.example` と `config/slack.secrets.example.json` にあります。
+
+1. Slack APIの[アプリ作成画面](https://api.slack.com/apps)から Orchestrator、Implementer、Reviewer用のアプリを3つ作り、それぞれBot Userを追加します。
+2. 各アプリの **OAuth & Permissions** でBot Token Scope `chat:write` を設定し、ワークスペースへインストールします。
+3. 3つのBotを `#ateliers-ai-notifications` に招待し、各BotのBot User ID（`U...`）とチャンネルID（`C...`）をローカルの `config/slack.json` へ設定します。
+4. `config/slack.secrets.example.json` を `config/slack.secrets.json` にコピーし、`tokens.orchestrator`、`tokens.implementer`、`tokens.reviewer` に対応するBot User OAuth Tokenを保存します。TokenをチャットやPRへ貼り付けたり、Gitへ追加したりしないでください。
+
+投稿者ごとの確認には、Slack検索欄で `from:<@U...> in:#ateliers-ai-notifications` を使います。`U...` を `slack.json` に登録した各Bot User IDへ置き換えると、Orchestrator、Implementer、Reviewerの投稿を個別に検索できます。
+
+ワークフローの開始・完了・失敗・人間判断待ちと、Implementer/Reviewerの開始・完了・失敗を対応するBotから通知します。本文はrun ID、役割、イベント、状態、UTC時刻だけです。prompt、応答、任意のsummary、Token、設定値は含めません。イベント記録時は通知をメモリキューへ積むだけで、Slackの送信待ちは実行時間上限やキャンセル応答に含めません。ワークフロー終了後に最大2秒だけ通知を排出し、キャンセル時は待たずに終了します。Slack送信はイベントごとに1回で、再試行しません。失敗・タイムアウトは安全な警告だけを出し、実行結果とJSONL記録を変えません。JSONL追記もSlack送信もそれぞれ独立して失敗を処理します。
+
+この連携は既存の `Ateliers.Slack` Incoming Webhook APIと `ATELIERS_SLACK_WEBHOOK_URL` 設定を変更しません。Bot Tokenはソース・PR・ビルド成果物へ含めません。
+
 ### Slack Bot IntegrationTests（外部送信・明示opt-in）
 
 `Ateliers.Slack` は既存のIncoming Webhookと並行して、Slack Web API `chat.postMessage` を使うBot送信を提供します。Bot定義は `config/slack.json.example`、Token例は `config/slack.secrets.example.json` を参照してください。ローカルで使う場合は例を `config/slack.json` と `config/slack.secrets.json` にコピーし、実際のBot情報を設定します。両方の実ファイルは `.gitignore` 対象です。秘密Tokenはテスト出力へコピーせず、配布用NuGetにも含めません。設定ロードAPIは引き続き絶対パスを受け取ります。

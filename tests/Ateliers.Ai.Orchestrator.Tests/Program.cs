@@ -3,6 +3,8 @@ using System.Text.Json;
 using System.Security.Cryptography;
 using System.Diagnostics;
 using Ateliers.Ai.Orchestrator.Core;
+using Ateliers.Ai.Orchestrator.Cli;
+using Ateliers.Slack;
 
 if (args.Length >= 1 && args[0] == "--fake-codex-fixture") return RunFakeCodexFixture(args);
 if (args.Length >= 1 && args[0] == "--external-process-fixture") return RunExternalProcessFixture(args);
@@ -30,6 +32,9 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("複数プロセスからの同時追記で全JSONL行を保持する", LifecycleJsonlSerializesConcurrentProcesses);
     suite.Add("Reviewer失敗・停止要求・再レビューをライフサイクルへ正しい順序で記録する", LifecycleEventsCoverFailureStopAndRevision);
     suite.Add("ライフサイクル記録失敗は実行結果を隠さない", LifecycleWriteFailureDoesNotHideWorkflowResult);
+    suite.Add("Slack設定不備を警告して通知をスキップしFake実行とJSONLを維持する", InvalidSlackSettingsDoNotAffectFakeRunOrJsonl);
+    suite.Add("NeedsHumanInput終端イベントの重複抑止を失敗件数へ加算しない", IntentionalSlackSkipDoesNotWarn);
+    suite.Add("遅いSlack通知は実行時間と停止応答を遅らせない", SlowSlackNotificationsDoNotBlockWorkflowCancellation);
     suite.Add("禁止遷移は状態と記録を変えない", RejectedTransitionDoesNotMutate);
     suite.Add("Fake正常系は成果物固定後にレビューし証跡不足で停止する", FakeSuccessKeepsReviewAndReadyEvidenceSeparate);
     suite.Add("Fake修正系は同一Reviewerで再レビューし上限を守る", FakeRevisionIsBoundedAndReReviewed);
@@ -907,6 +912,155 @@ static void LifecycleWriteFailureDoesNotHideWorkflowResult()
     Assert.False(cliResult.Error.Contains(logPath, StringComparison.OrdinalIgnoreCase), "ログ保存先の絶対パスが標準エラーへ出ています。");
 }
 
+static void InvalidSlackSettingsDoNotAffectFakeRunOrJsonl()
+{
+    using var temp = new TemporaryDirectory();
+    var settingsDirectory = Path.Combine(temp.Path, "config");
+    Directory.CreateDirectory(settingsDirectory);
+    var slackSettingsPath = Path.Combine(settingsDirectory, "slack.json");
+    var slackSecretsPath = Path.Combine(settingsDirectory, "slack.secrets.json");
+    File.WriteAllText(slackSettingsPath, """{"bots":[]}""");
+    File.WriteAllText(slackSecretsPath, """{"tokens":{}}""");
+    var lifecyclePath = Path.Combine(temp.Path, "lifecycle.jsonl");
+    var runId = Guid.NewGuid().ToString("N");
+    var runDirectory = Path.Combine(temp.Path, "run");
+    Directory.CreateDirectory(runDirectory);
+    var previousError = Console.Error;
+    using var capturedError = new StringWriter();
+    FakeWorkflowResult result;
+    try
+    {
+        Console.SetError(capturedError);
+        using var lifecycleWriter = new LifecycleNotificationEventWriter(lifecyclePath, notificationsDisabled: false,
+            configurationPath: slackSettingsPath, secretsPath: slackSecretsPath);
+        using var eventStore = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), runId);
+        result = new FakeAgentWorkflow().Run(SampleContract(), new string('a', 64), runId, runDirectory,
+            new FakeAgentRunner(FakeScenario.Success), eventStore, lifecycleEvents: lifecycleWriter);
+    }
+    finally
+    {
+        Console.SetError(previousError);
+    }
+
+    Assert.Equal(RunState.NeedsHumanInput, result.State);
+    Assert.True(result.PersistenceSucceeded, "Slack設定不備がFake実行または実行記録の成否へ伝播しました。");
+    Assert.True(File.Exists(lifecyclePath), "Slack設定不備がJSONL保存を妨げました。");
+    Assert.True(File.ReadAllLines(lifecyclePath).Length > 0, "Slack設定不備でライフサイクルJSONLが空です。");
+    Assert.True(capturedError.ToString().Contains("警告", StringComparison.Ordinal), "不完全なSlack設定の警告がありません。");
+    Assert.False(capturedError.ToString().Contains(slackSettingsPath, StringComparison.Ordinal), "Slack設定パスが警告へ含まれました。");
+    Assert.False(capturedError.ToString().Contains(slackSecretsPath, StringComparison.Ordinal), "Slack secretsパスが警告へ含まれました。");
+}
+
+static void SlowSlackNotificationsDoNotBlockWorkflowCancellation()
+{
+    using var temp = new TemporaryDirectory();
+    var runDirectory = Path.Combine(temp.Path, "run");
+    Directory.CreateDirectory(runDirectory);
+    using var stopSource = new CancellationTokenSource();
+    var sendStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var sendCanceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    async Task<SlackNotificationSendResult> SlowSender(LifecycleEvent _, CancellationToken cancellationToken)
+    {
+        sendStarted.TrySetResult();
+        try
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return SlackNotificationSendResult.Sent;
+        }
+        catch (OperationCanceledException)
+        {
+            sendCanceled.TrySetResult();
+            throw;
+        }
+    }
+
+    FakeWorkflowResult result;
+    var elapsed = Stopwatch.StartNew();
+    using (var lifecycleWriter = new LifecycleNotificationEventWriter(
+        Path.Combine(temp.Path, "lifecycle.jsonl"), notificationsDisabled: false, notificationSender: SlowSender))
+    using (var eventStore = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "slack-slow-cancel"))
+    {
+        result = new FakeAgentWorkflow().Run(SampleContract(), new string('a', 64), "slack-slow-cancel", runDirectory,
+            new CancellingAgentRunner(stopSource), eventStore, stopToken: stopSource.Token, lifecycleEvents: lifecycleWriter);
+        elapsed.Stop();
+        Assert.True(sendStarted.Task.Wait(TimeSpan.FromSeconds(2)), "Fake実行中に通知workerが開始しませんでした。");
+        lifecycleWriter.FlushSlackNotificationsAsync(stopSource.Token).GetAwaiter().GetResult();
+        Assert.Equal(File.ReadAllLines(Path.Combine(temp.Path, "lifecycle.jsonl")).Length, lifecycleWriter.FailedSlackSends,
+            "停止時に未送信の通知がすべて失敗件数へ反映されませんでした。");
+    }
+
+    Assert.Equal(RunState.NeedsHumanInput, result.State);
+    Assert.True(result.PersistenceSucceeded, "Slack送信待ちで停止要求時の実行記録に影響しました。");
+    Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(2), $"Slack送信待ちが停止応答に加算されました: {elapsed.Elapsed}");
+    Assert.True(sendCanceled.Task.Wait(TimeSpan.FromSeconds(1)), "ワークフロー終了後も通知workerを停止できませんでした。");
+
+    var timedRunDirectory = Path.Combine(temp.Path, "timed-run");
+    Directory.CreateDirectory(timedRunDirectory);
+    var timedSendStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    async Task<SlackNotificationSendResult> TimedSlowSender(LifecycleEvent _, CancellationToken cancellationToken)
+    {
+        timedSendStarted.TrySetResult();
+        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        return SlackNotificationSendResult.Sent;
+    }
+
+    FakeWorkflowResult timedResult;
+    elapsed.Restart();
+    using (var lifecycleWriter = new LifecycleNotificationEventWriter(
+        Path.Combine(temp.Path, "timed-lifecycle.jsonl"), notificationsDisabled: false, notificationSender: TimedSlowSender))
+    using (var eventStore = JsonlRunEventStore.CreateNew(Path.Combine(timedRunDirectory, "events.jsonl"), "slack-slow-time"))
+    {
+        timedResult = new FakeAgentWorkflow().Run(SampleContract() with
+        {
+            Limits = SampleContract().Limits with { MaxDurationMinutes = 1 }
+        }, new string('b', 64), "slack-slow-time", timedRunDirectory,
+            new FakeAgentRunner(FakeScenario.Success), eventStore, lifecycleEvents: lifecycleWriter);
+        elapsed.Stop();
+        Assert.True(timedSendStarted.Task.Wait(TimeSpan.FromSeconds(2)), "Fake実行中に遅延通知workerが開始しませんでした。");
+        lifecycleWriter.FlushSlackNotificationsAsync().GetAwaiter().GetResult();
+        Assert.Equal(File.ReadAllLines(Path.Combine(temp.Path, "timed-lifecycle.jsonl")).Length, lifecycleWriter.FailedSlackSends,
+            "排出タイムアウト時に未送信通知数が正確に失敗件数へ反映されませんでした。");
+    }
+
+    Assert.Equal(RunState.NeedsHumanInput, timedResult.State);
+    Assert.False(timedResult.Detail?.Contains("実行時間上限", StringComparison.Ordinal) ?? false,
+        "Slack送信待ちによりワークフローの時間上限へ到達しました。");
+    Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(2), $"Slack送信待ちがワークフロー実行時間へ加算されました: {elapsed.Elapsed}");
+}
+
+static void IntentionalSlackSkipDoesNotWarn()
+{
+    using var temp = new TemporaryDirectory();
+    var runDirectory = Path.Combine(temp.Path, "run");
+    Directory.CreateDirectory(runDirectory);
+    var sentEvents = new List<string>();
+    Task<SlackNotificationSendResult> Send(LifecycleEvent item, CancellationToken _)
+    {
+        sentEvents.Add($"{item.EventType}:{item.Status}");
+        return Task.FromResult(item.EventType == "completed" && item.Status == "needs_human_input"
+            ? SlackNotificationSendResult.Skipped
+            : SlackNotificationSendResult.Sent);
+    }
+
+    FakeWorkflowResult result;
+    using (var lifecycleWriter = new LifecycleNotificationEventWriter(
+        Path.Combine(temp.Path, "lifecycle.jsonl"), notificationsDisabled: false, notificationSender: Send))
+    using (var eventStore = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "intentional-slack-skip"))
+    {
+        result = new FakeAgentWorkflow().Run(SampleContract(), new string('c', 64), "intentional-slack-skip", runDirectory,
+            new FakeAgentRunner(FakeScenario.Stop), eventStore, lifecycleEvents: lifecycleWriter);
+        lifecycleWriter.FlushSlackNotificationsAsync().GetAwaiter().GetResult();
+
+        Assert.Equal(RunState.NeedsHumanInput, result.State);
+        Assert.True(sentEvents.Contains("needs_human_input:needs_human_input", StringComparer.Ordinal),
+            "NeedsHumanInput通知が送信対象になりませんでした。");
+        Assert.True(sentEvents.Contains("completed:needs_human_input", StringComparer.Ordinal),
+            "重複抑止対象の終端イベントが処理されませんでした。");
+        Assert.Equal(0, lifecycleWriter.FailedSlackSends,
+            "意図的な重複抑止でSlack通知失敗警告が出る件数になりました。");
+    }
+}
+
 static void LifecycleJsonlSerializesConcurrentProcesses()
 {
     using var temp = new TemporaryDirectory();
@@ -1575,7 +1729,10 @@ static (int ExitCode, string Output, string Error) RunCli(params string[] argume
         RedirectStandardError = true,
         UseShellExecute = false
     };
-    foreach (var argument in new[] { "run", "--project", cliProject, "--configuration", configuration, "--no-build", "--" }.Concat(arguments))
+    var cliArguments = new[] { "run", "--project", cliProject, "--configuration", configuration, "--no-build", "--" }.Concat(arguments);
+    if (arguments.Length > 0 && arguments[0] == "run")
+        cliArguments = cliArguments.Concat(["--slack-notifications", "disabled"]);
+    foreach (var argument in cliArguments)
         start.ArgumentList.Add(argument);
 
     using var process = Process.Start(start) ?? throw new Exception("CLIプロセスを開始できません。");

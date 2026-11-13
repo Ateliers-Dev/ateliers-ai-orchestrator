@@ -1,6 +1,27 @@
 {
   "bots": [
     {
+      "id": "orchestrator",
+      "name": "Ateliers Orchestrator Bot",
+      "botUserId": "U_REPLACE_WITH_ORCHESTRATOR_BOT_USER_ID",
+      "channelId": "C_REPLACE_WITH_ATELIERS_AI_NOTIFICATIONS_CHANNEL_ID",
+      "enabled": true
+    },
+    {
+      "id": "implementer",
+      "name": "Ateliers Implementer Bot",
+      "botUserId": "U_REPLACE_WITH_IMPLEMENTER_BOT_USER_ID",
+      "channelId": "C_REPLACE_WITH_ATELIERS_AI_NOTIFICATIONS_CHANNEL_ID",
+      "enabled": true
+    },
+    {
+      "id": "reviewer",
+      "name": "Ateliers Reviewer Bot",
+      "botUserId": "U_REPLACE_WITH_REVIEWER_BOT_USER_ID",
+      "channelId": "C_REPLACE_WITH_ATELIERS_AI_NOTIFICATIONS_CHANNEL_ID",
+      "enabled": true
+    },
+    {
       "id": "test-bot",
       "name": "Ateliers Test Bot",
       "botUserId": "U_REPLACE_WITH_SLACK_BOT_USER_ID",
