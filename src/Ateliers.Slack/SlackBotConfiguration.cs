@@ -13,17 +13,20 @@ public sealed class SlackBotConfiguration
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
-    private SlackBotConfiguration(SlackBotDefinition bot, string token)
+    private SlackBotConfiguration(SlackBotDefinition bot, string token, string channelId)
     {
         Bot = bot;
         Token = token;
+        ChannelId = channelId;
     }
 
     public SlackBotDefinition Bot { get; }
 
+    public string ChannelId { get; }
+
     internal string Token { get; }
 
-    public static SlackBotConfiguration Load(string configurationPath, string secretsPath, string botId)
+    public static SlackBotConfiguration Load(string configurationPath, string secretsPath, string botId, bool useTestChannel = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(configurationPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(secretsPath);
@@ -42,14 +45,15 @@ public sealed class SlackBotConfiguration
             var secrets = JsonSerializer.Deserialize<SecretsFile>(File.ReadAllText(secretsPath), JsonOptions)
                 ?? throw new InvalidOperationException();
 
+            var channelId = useTestChannel ? configuration.TestChannelId : bot.ChannelId;
             if (string.IsNullOrWhiteSpace(bot.Name) || string.IsNullOrWhiteSpace(bot.BotUserId) ||
-                string.IsNullOrWhiteSpace(bot.ChannelId) || !bot.Enabled ||
+                string.IsNullOrWhiteSpace(channelId) || !bot.Enabled ||
                 secrets.Tokens is null || !secrets.Tokens.TryGetValue(bot.Id, out var token) || string.IsNullOrWhiteSpace(token))
             {
                 throw new InvalidOperationException();
             }
 
-            return new SlackBotConfiguration(bot, token);
+            return new SlackBotConfiguration(bot, token, channelId);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or ArgumentException)
         {
@@ -60,6 +64,7 @@ public sealed class SlackBotConfiguration
     private sealed class ConfigurationFile
     {
         public List<SlackBotDefinition?>? Bots { get; init; } = [];
+        public string? TestChannelId { get; init; }
     }
 
     private sealed class SecretsFile

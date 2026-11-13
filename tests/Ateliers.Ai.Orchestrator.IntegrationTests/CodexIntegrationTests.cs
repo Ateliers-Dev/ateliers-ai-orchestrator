@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Ateliers.Slack;
 using Xunit;
 using Xunit.Sdk;
 
@@ -14,6 +15,7 @@ public sealed class CodexIntegrationTests
 {
     private const string OptInVariable = "ATELIERS_RUN_CODEX_INTEGRATION_TESTS";
     private const string CodexPathVariable = "ATELIERS_CODEX_CLI_PATH";
+    private const string SlackOptInVariable = "ATELIERS_RUN_SLACK_INTEGRATION_TESTS";
 
     [Fact]
     public async Task IsolatedFixture_DisposeRemovesReadOnlyGitObject()
@@ -122,6 +124,7 @@ public sealed class CodexIntegrationTests
         ProcessResult? run = null;
         string? runDirectory = null;
         var lifecycleLogPath = Path.Combine(Path.GetTempPath(), $"ateliers-lifecycle-{Guid.NewGuid():N}.jsonl");
+        var slackMode = "disabled";
 
         try
         {
@@ -131,12 +134,41 @@ public sealed class CodexIntegrationTests
             Assert.True(Path.IsPathFullyQualified(codexExecutable), $"{CodexPathVariable} は絶対パスで指定してください。");
             Assert.True(File.Exists(codexExecutable), $"Codex CLIが見つかりません: {codexExecutable}");
 
+            if (Environment.GetEnvironmentVariable(SlackOptInVariable) == "1")
+            {
+                if (TryValidateSlackTestSettings(out var settingsError))
+                    slackMode = "test";
+                else
+                    Console.WriteLine($"Slack通知部分をSkip: {settingsError}");
+            }
+            else
+            {
+                Console.WriteLine($"Slack通知部分をSkip: {SlackOptInVariable}=1 が指定されていません。");
+            }
+
+            if (slackMode == "test")
+            {
+                var repositoryRoot = FindRepositoryRoot()!;
+                var configurationPath = Path.Combine(repositoryRoot, "config", "slack.json");
+                var secretsPath = Path.Combine(repositoryRoot, "config", "slack.secrets.json");
+                using var dispatcher = SlackLifecycleNotificationDispatcher.TryCreate(
+                    configurationPath, secretsPath, useTestChannel: true);
+                Assert.NotNull(dispatcher);
+                Assert.True(await dispatcher!.VerifyBotIdentitiesAsync(),
+                    "Slack Tokenと設定した3役のBot User IDが一致しません。通知投稿前に停止しました。");
+            }
+
             fixture.CreateSeedRepository();
             fixture.WriteTaskContract();
             var cliAssembly = FindCliAssembly();
-            run = await InvokeOrchestratorAsync(cliAssembly, Path.GetFullPath(codexExecutable!), fixture, lifecycleLogPath);
+            run = await InvokeOrchestratorAsync(cliAssembly, Path.GetFullPath(codexExecutable!), fixture, lifecycleLogPath, slackMode);
             Assert.True(run.ExitCode == 0,
                 $"Orchestrator終了コードが0ではありません: {run.ExitCode}");
+            if (slackMode == "test")
+            {
+                Assert.DoesNotContain("Slack通知に", run.StandardError, StringComparison.Ordinal);
+                Assert.Contains("Slack通知送信成功: 6件", run.StandardOutput, StringComparison.Ordinal);
+            }
 
             var runDirectories = Directory.GetDirectories(fixture.RunsDirectory);
             Assert.True(runDirectories.Length == 1, $"実行記録ディレクトリ数が1ではありません: {runDirectories.Length}");
@@ -312,7 +344,55 @@ public sealed class CodexIntegrationTests
         throw new FileNotFoundException("CLI assemblyが見つかりません。先にソリューションをビルドしてください。");
     }
 
-    private static async Task<ProcessResult> InvokeOrchestratorAsync(string cliAssembly, string codexExecutable, IsolatedFixture fixture, string lifecycleLogPath)
+    private static bool TryValidateSlackTestSettings(out string reason)
+    {
+        reason = "config/slack.jsonまたはconfig/slack.secrets.jsonがありません。";
+        var root = FindRepositoryRoot();
+        if (root is null) return false;
+        var configPath = Path.Combine(root, "config", "slack.json");
+        var secretsPath = Path.Combine(root, "config", "slack.secrets.json");
+        if (!File.Exists(configPath) || !File.Exists(secretsPath)) return false;
+
+        try
+        {
+            var roles = new[] { "orchestrator", "implementer", "reviewer" };
+            var settings = roles.Select(role => SlackBotConfiguration.Load(configPath, secretsPath, role, useTestChannel: true)).ToArray();
+            var testChannel = settings[0].ChannelId;
+            if (settings.Any(item => !string.Equals(item.ChannelId, testChannel, StringComparison.Ordinal)))
+            {
+                reason = "3役のテストチャンネル設定が一致しません。";
+                return false;
+            }
+            if (settings.Any(item => string.Equals(item.Bot.ChannelId, testChannel, StringComparison.Ordinal)))
+            {
+                reason = "テストチャンネルが通常の通知先と同じです。";
+                return false;
+            }
+            if (settings.Select(item => item.Bot.BotUserId).Distinct(StringComparer.Ordinal).Count() != roles.Length)
+            {
+                reason = "3役のBot User IDが重複しています。";
+                return false;
+            }
+            reason = string.Empty;
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            reason = "3役のBot設定、testChannelId、またはローカルTokenが不足・不正です。";
+            return false;
+        }
+    }
+
+    private static string? FindRepositoryRoot()
+    {
+        for (var current = new DirectoryInfo(AppContext.BaseDirectory); current is not null; current = current.Parent)
+            if (File.Exists(Path.Combine(current.FullName, "Ateliers.Ai.Orchestrator.sln")) &&
+                File.Exists(Path.Combine(current.FullName, "tests", "Ateliers.Ai.Orchestrator.IntegrationTests", "Ateliers.Ai.Orchestrator.IntegrationTests.csproj")))
+                return current.FullName;
+        return null;
+    }
+
+    private static async Task<ProcessResult> InvokeOrchestratorAsync(string cliAssembly, string codexExecutable, IsolatedFixture fixture, string lifecycleLogPath, string slackMode)
     {
         var start = new ProcessStartInfo("dotnet")
         {
@@ -325,7 +405,7 @@ public sealed class CodexIntegrationTests
         foreach (var argument in new[]
         {
             cliAssembly, "run", fixture.ContractPath, "--agent", "codex", "--codex-exe", codexExecutable,
-            "--runs", fixture.RunsDirectory, "--lifecycle-log", lifecycleLogPath, "--slack-notifications", "disabled"
+            "--runs", fixture.RunsDirectory, "--lifecycle-log", lifecycleLogPath, "--slack-notifications", slackMode
         }) start.ArgumentList.Add(argument);
 
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Orchestrator CLIを開始できませんでした。");

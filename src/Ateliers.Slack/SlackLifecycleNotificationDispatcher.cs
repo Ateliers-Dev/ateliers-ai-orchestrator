@@ -40,15 +40,23 @@ public sealed class SlackLifecycleNotificationDispatcher : IDisposable
     private SlackLifecycleNotificationDispatcher(Dictionary<string, SlackBotClient> clients) => this.clients = clients;
 
     /// <summary>ローカル設定からDispatcherを作ります。設定が未配置または有効なBotがない場合はnullを返します。</summary>
-    public static SlackLifecycleNotificationDispatcher? TryCreate(string configurationPath, string secretsPath)
+    public static SlackLifecycleNotificationDispatcher? TryCreate(string configurationPath, string secretsPath) =>
+        TryCreate(configurationPath, secretsPath, useTestChannel: false);
+
+    public static SlackLifecycleNotificationDispatcher? TryCreate(string configurationPath, string secretsPath, bool useTestChannel)
     {
-        return TryCreate(configurationPath, secretsPath, out _);
+        return TryCreate(configurationPath, secretsPath, useTestChannel, out _);
     }
 
     /// <summary>不完全または不正な設定時はnullを返し、秘密情報を含まない警告理由を返します。</summary>
     public static SlackLifecycleNotificationDispatcher? TryCreate(string configurationPath, string secretsPath, out string? warning)
     {
-        return TryCreate(configurationPath, secretsPath, handlerFactory: null, requestTimeout: null, out warning);
+        return TryCreate(configurationPath, secretsPath, useTestChannel: false, handlerFactory: null, requestTimeout: null, out warning);
+    }
+
+    public static SlackLifecycleNotificationDispatcher? TryCreate(string configurationPath, string secretsPath, bool useTestChannel, out string? warning)
+    {
+        return TryCreate(configurationPath, secretsPath, useTestChannel, handlerFactory: null, requestTimeout: null, out warning);
     }
 
     internal static SlackLifecycleNotificationDispatcher? TryCreate(
@@ -56,11 +64,20 @@ public sealed class SlackLifecycleNotificationDispatcher : IDisposable
         string secretsPath,
         Func<string, HttpMessageHandler>? handlerFactory,
         TimeSpan? requestTimeout = null) =>
-        TryCreate(configurationPath, secretsPath, handlerFactory, requestTimeout, out _);
+        TryCreate(configurationPath, secretsPath, useTestChannel: false, handlerFactory, requestTimeout, out _);
+
+    internal static SlackLifecycleNotificationDispatcher? TryCreate(
+        string configurationPath,
+        string secretsPath,
+        bool useTestChannel,
+        Func<string, HttpMessageHandler>? handlerFactory,
+        TimeSpan? requestTimeout = null) =>
+        TryCreate(configurationPath, secretsPath, useTestChannel, handlerFactory, requestTimeout, out _);
 
     private static SlackLifecycleNotificationDispatcher? TryCreate(
         string configurationPath,
         string secretsPath,
+        bool useTestChannel,
         Func<string, HttpMessageHandler>? handlerFactory,
         TimeSpan? requestTimeout,
         out string? warning)
@@ -81,9 +98,14 @@ public sealed class SlackLifecycleNotificationDispatcher : IDisposable
         var clients = new Dictionary<string, SlackBotClient>(StringComparer.Ordinal);
         try
         {
+            var botUserIds = new HashSet<string>(StringComparer.Ordinal);
             foreach (var (role, botId) in BotRoutes)
             {
-                var configuration = SlackBotConfiguration.Load(configurationPath, secretsPath, botId);
+                var configuration = SlackBotConfiguration.Load(configurationPath, secretsPath, botId, useTestChannel);
+                if (useTestChannel && string.Equals(configuration.ChannelId, configuration.Bot.ChannelId, StringComparison.Ordinal))
+                    throw new InvalidOperationException();
+                if (useTestChannel && !botUserIds.Add(configuration.Bot.BotUserId))
+                    throw new InvalidOperationException();
                 clients.Add(role, handlerFactory is null
                     ? new SlackBotClient(configuration)
                     : new SlackBotClient(configuration, handlerFactory(botId), requestTimeout));
@@ -99,6 +121,24 @@ public sealed class SlackLifecycleNotificationDispatcher : IDisposable
     }
 
     public int FailedSends => Volatile.Read(ref failedSends);
+
+    /// <summary>全役割のTokenをSlack auth.testで照合し、設定Bot User IDとの一致だけを返します。</summary>
+    public async Task<bool> VerifyBotIdentitiesAsync(CancellationToken cancellationToken = default)
+    {
+        var allMatched = true;
+        foreach (var (role, _) in BotRoutes)
+        {
+            try
+            {
+                if (!await clients[role].VerifyBotIdentityAsync(cancellationToken).ConfigureAwait(false)) allMatched = false;
+            }
+            catch (SlackNotificationException)
+            {
+                allMatched = false;
+            }
+        }
+        return allMatched;
+    }
 
     /// <summary>送信結果を返し、Slack障害は例外として呼出し元へ伝えません。</summary>
     public async Task<SlackNotificationSendResult> TrySendAsync(string runId, string role, string eventType, string status, string state,

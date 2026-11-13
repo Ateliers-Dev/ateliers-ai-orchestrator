@@ -7,8 +7,9 @@ namespace Ateliers.Slack.UnitTests;
 
 public sealed class SlackBotClientUnitTests
 {
-    private const string Token = "xoxb-unit-test-secret";
+    private const string Token = "unit-test-token";
     private static readonly Uri ApiUri = new("https://slack.com/api/chat.postMessage");
+    private static readonly Uri AuthTestUri = new("https://slack.com/api/auth.test");
 
     [Fact]
     public async Task SendMessageAsync_PostsAsConfiguredBotAndReturnsMessageReference()
@@ -29,6 +30,32 @@ public sealed class SlackBotClientUnitTests
         Assert.Equal("hello from test bot", payload.RootElement.GetProperty("text").GetString());
         Assert.Equal("C123TEST", result.ChannelId);
         Assert.Equal("1700000000.000001", result.Timestamp);
+    }
+
+    [Fact]
+    public async Task VerifyBotIdentityAsync_MatchesAuthTestUserIdToConfiguredBot()
+    {
+        using var files = new TestConfigurationFiles();
+        var configuration = files.Load();
+        using var handler = new RecordingHandler(request => JsonResponse(
+            request.RequestUri == AuthTestUri ? "{\"ok\":true,\"user_id\":\"U123TEST\",\"bot_id\":\"B123TEST\"}" : "{}"));
+        using var client = new SlackBotClient(configuration, handler);
+
+        Assert.True(await client.VerifyBotIdentityAsync());
+        Assert.Single(handler.Requests);
+        Assert.Equal(AuthTestUri, handler.Requests[0].RequestUri);
+        Assert.Equal(Token, handler.Requests[0].Headers.Authorization!.Parameter);
+    }
+
+    [Fact]
+    public async Task VerifyBotIdentityAsync_ReturnsFalseWhenTokenBelongsToAnotherBot()
+    {
+        using var files = new TestConfigurationFiles();
+        var configuration = files.Load();
+        using var handler = new RecordingHandler(_ => JsonResponse("{\"ok\":true,\"user_id\":\"U_OTHER\",\"bot_id\":\"B_OTHER\"}"));
+        using var client = new SlackBotClient(configuration, handler);
+
+        Assert.False(await client.VerifyBotIdentityAsync());
     }
 
     [Fact]
@@ -124,7 +151,7 @@ public sealed class SlackBotClientUnitTests
     [Fact]
     public void ConfigurationRejectsNullBots()
     {
-        using var files = new TestConfigurationFiles("{\"bots\":null}", "{\"tokens\":{\"test-bot\":\"xoxb-test\"}}");
+        using var files = new TestConfigurationFiles("{\"bots\":null}", "{\"tokens\":{\"test-bot\":\"invalid-test-token\"}}");
 
         var exception = Assert.Throws<InvalidOperationException>(() => files.Load());
 

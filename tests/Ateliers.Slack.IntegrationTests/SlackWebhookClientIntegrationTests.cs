@@ -6,6 +6,7 @@ namespace Ateliers.Slack.IntegrationTests;
 public sealed class SlackWebhookClientIntegrationTests
 {
     private const string TestWebhookEnvironmentVariable = "ATELIERS_SLACK_TEST_WEBHOOK_URL";
+    private const string TestChannelConfirmationVariable = "ATELIERS_SLACK_TEST_CHANNEL_NAME";
 
     [SlackWebhookFact]
     [Trait("Category", "ExternalIntegration")]
@@ -13,6 +14,7 @@ public sealed class SlackWebhookClientIntegrationTests
     {
         var webhookUrl = Environment.GetEnvironmentVariable(TestWebhookEnvironmentVariable);
         Assert.False(string.IsNullOrWhiteSpace(webhookUrl));
+        Assert.Equal("#ateliers-test-notifications", Environment.GetEnvironmentVariable(TestChannelConfirmationVariable));
         Assert.True(Uri.TryCreate(webhookUrl, UriKind.Absolute, out var webhookUri) &&
             webhookUri.Scheme == Uri.UriSchemeHttps && string.IsNullOrEmpty(webhookUri.UserInfo),
             $"{TestWebhookEnvironmentVariable} must contain an absolute HTTPS URL.");
@@ -29,8 +31,12 @@ public sealed class SlackWebhookFactAttribute : FactAttribute
 {
     public SlackWebhookFactAttribute()
     {
-        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ATELIERS_SLACK_TEST_WEBHOOK_URL")))
-            Skip = "ATELIERS_SLACK_TEST_WEBHOOK_URL is not set; live Slack delivery is opt-in.";
+        if (Environment.GetEnvironmentVariable("ATELIERS_RUN_SLACK_INTEGRATION_TESTS") != "1")
+            Skip = "Set ATELIERS_RUN_SLACK_INTEGRATION_TESTS=1 to opt in to live Slack delivery.";
+        else if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ATELIERS_SLACK_TEST_WEBHOOK_URL")))
+            Skip = "ATELIERS_SLACK_TEST_WEBHOOK_URL is not set; live Slack delivery is skipped.";
+        else if (Environment.GetEnvironmentVariable("ATELIERS_SLACK_TEST_CHANNEL_NAME") != "#ateliers-test-notifications")
+            Skip = "Set ATELIERS_SLACK_TEST_CHANNEL_NAME=#ateliers-test-notifications to confirm the webhook destination.";
     }
 }
 
@@ -46,14 +52,17 @@ public sealed class SlackBotClientIntegrationTests
         if (!SlackBotSettingsLocator.TryFindSettingsPaths(typeof(SlackBotClientIntegrationTests).Assembly.Location, out var configurationPath, out var secretsPath))
             throw new InvalidOperationException("Slack Bot settings disappeared after test discovery.");
 
-        var configuration = SlackBotConfiguration.Load(configurationPath, secretsPath, BotId);
+        var configuration = SlackBotConfiguration.Load(configurationPath, secretsPath, BotId, useTestChannel: true);
         var runId = Guid.NewGuid().ToString("N");
         var message = $"[TEST] {configuration.Bot.Name} Slack Web API integration test\nBot ID: {configuration.Bot.BotUserId}\nRun ID: {runId}";
         using var client = new SlackBotClient(configuration);
 
+        Assert.True(await client.VerifyBotIdentityAsync(),
+            "Slack Tokenとtest-botのBot User IDが一致しません。投稿前に停止しました。");
+
         var result = await client.SendMessageAsync(message);
 
-        Assert.Equal(configuration.Bot.ChannelId, result.ChannelId);
+        Assert.Equal(configuration.ChannelId, result.ChannelId);
         Assert.False(string.IsNullOrWhiteSpace(result.Timestamp));
     }
 }
@@ -62,6 +71,11 @@ public sealed class SlackBotFactAttribute : FactAttribute
 {
     public SlackBotFactAttribute()
     {
+        if (Environment.GetEnvironmentVariable("ATELIERS_RUN_SLACK_INTEGRATION_TESTS") != "1")
+        {
+            Skip = "Set ATELIERS_RUN_SLACK_INTEGRATION_TESTS=1 to opt in to live Slack delivery.";
+            return;
+        }
         if (!SlackBotSettingsLocator.TryFindSettingsPaths(typeof(SlackBotClientIntegrationTests).Assembly.Location, out var configurationPath, out var secretsPath))
         {
             Skip = "Slack Bot settings are not present under the repository config directory; live Slack delivery is skipped.";
@@ -70,7 +84,11 @@ public sealed class SlackBotFactAttribute : FactAttribute
 
         try
         {
-            _ = SlackBotConfiguration.Load(configurationPath, secretsPath, "test-bot");
+            var testBot = SlackBotConfiguration.Load(configurationPath, secretsPath, "test-bot", useTestChannel: true);
+            var productionChannels = new[] { "orchestrator", "implementer", "reviewer" }
+                .Select(botId => SlackBotConfiguration.Load(configurationPath, secretsPath, botId).Bot.ChannelId);
+            if (productionChannels.Contains(testBot.ChannelId, StringComparer.Ordinal))
+                Skip = "testChannelId must differ from all normal notification channel IDs.";
         }
         catch (InvalidOperationException)
         {
