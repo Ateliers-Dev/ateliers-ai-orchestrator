@@ -123,7 +123,8 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
             var timeout = request.RemainingTime is { } remaining && remaining < TimeSpan.FromMinutes(request.Contract.Limits.MaxDurationMinutes)
                 ? remaining : TimeSpan.FromMinutes(request.Contract.Limits.MaxDurationMinutes);
             var exitTask = process.WaitForExitAsync();
-            var stopTask = Task.Delay(Timeout.InfiniteTimeSpan, options.CancellationToken);
+            var cancellationToken = request.StopToken.CanBeCanceled ? request.StopToken : options.CancellationToken;
+            var stopTask = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             var completedTask = await Task.WhenAny(exitTask, Task.Delay(timeout), stopTask);
             if (completedTask != exitTask)
             {
@@ -498,3 +499,4 @@ internal sealed record CodexCliRunnerOptions(string ExecutablePath, string Imple
     }
 
 }
+
