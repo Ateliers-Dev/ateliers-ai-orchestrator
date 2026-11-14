@@ -560,9 +560,15 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            failure = $"保存失敗のため人間判断待ちで停止しました。追加Agentは起動していません。永続化状態は個別に確認してください。 ({exception.GetType().Name})";
+            failure = requiresPullRequest
+                ? $"PR必須経路のイベント・証跡保存に失敗しました。レビュー結果コメントを含む外部操作を成功扱いしていません。 ({exception.GetType().Name})"
+                : $"保存失敗のため人間判断待ちで停止しました。追加Agentは起動していません。永続化状態は個別に確認してください。 ({exception.GetType().Name})";
             persistenceFailed = true;
-            run.StopInMemoryAfterPersistenceFailure();
+            if (requiresPullRequest)
+            {
+                if (run.State != RunState.Failed) run.Transition(RunState.Failed);
+            }
+            else run.StopInMemoryAfterPersistenceFailure();
         }
 
         var persistenceSucceeded = !persistenceFailed;
