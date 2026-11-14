@@ -71,6 +71,7 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("Codex子プロセスへSystemDriveを渡す", CodexChildInheritsSystemDrive);
     suite.Add("Fake Codexが生成した未追跡バイナリを差分固定時に拒否する", CodexRejectsUntrackedBinaryChanges);
     suite.Add("既存CODEX_HOMEと通常のユーザープロファイルを使える", CodexExistingProfilesAreAccepted);
+    suite.Add("再実装プロンプトの契約範囲をFake Codexが読み取る", CodexFakeParsesScopeBeforeRevisionFinding);
     suite.Add("Codex Fakeプロセスで独立レビューまで縦断し固定hashを引き継ぐ", CodexFakeProcessesCompleteIndependentReviewSlice);
     suite.Add("Codex一回モードは成功・指摘・失敗を記録し追加起動せず人間判断待ちで止まる", CodexOneShotStopsWithoutRetries);
 }
@@ -93,10 +94,23 @@ static int RunFakeCodexFixture(string[] args)
     var prompt = new UTF8Encoding(false, true).GetString(promptBytes);
     if (prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal) || prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal))
     {
+        var contractMarker = "契約:\n";
+        var contractStart = prompt.IndexOf(contractMarker, StringComparison.Ordinal);
+        if (contractStart < 0) throw new InvalidOperationException("Fake Codexプロンプトに契約JSONがありません。");
+        contractStart += contractMarker.Length;
+        var contractEnd = prompt.IndexOf("\n\n固定成果物:", contractStart, StringComparison.Ordinal);
+        var reviewFindingStart = prompt.IndexOf("\n前回レビュー指摘:", contractStart, StringComparison.Ordinal);
+        if (reviewFindingStart >= 0 && (contractEnd < 0 || reviewFindingStart < contractEnd))
+            contractEnd = reviewFindingStart;
+        if (contractEnd < 0) contractEnd = prompt.Length;
+        using var contractJson = JsonDocument.Parse(prompt[contractStart..contractEnd]);
+        var scope = contractJson.RootElement.GetProperty("Scope");
+        var included = scope.GetProperty("Included").EnumerateArray().Select(value => value.GetString() ?? throw new InvalidOperationException("Includedに文字列以外の値があります。")).ToArray();
+        var excluded = scope.GetProperty("Excluded").EnumerateArray().Select(value => value.GetString() ?? throw new InvalidOperationException("Excludedに文字列以外の値があります。")).ToArray();
         var policy = new
         {
-            scope_included_present = prompt.Contains("\"Included\"", StringComparison.Ordinal),
-            scope_excluded_present = prompt.Contains("\"Excluded\"", StringComparison.Ordinal),
+            scope_included = included,
+            scope_excluded = excluded,
             os_boundary_disclaimed = prompt.Contains("作業範囲はAgentへの指示であり、OSレベルで範囲外アクセスを完全に防ぐ保証ではありません。", StringComparison.Ordinal),
             utf8_bom_present = promptBytes.AsSpan().StartsWith(Encoding.UTF8.GetPreamble())
         };
@@ -649,6 +663,18 @@ static void CodexExistingProfilesAreAccepted()
     finally { Environment.SetEnvironmentVariable("CODEX_HOME", original); }
 }
 
+static void CodexFakeParsesScopeBeforeRevisionFinding()
+{
+    var (runner, request, root) = CreateCodexFixture("success");
+    using (root)
+    {
+        var response = runner.Implement(request with { ReviewFinding = "修正後の応答に必要なテスト結果が不足しています。" });
+        Assert.True(response.Succeeded, "レビュー指摘付きの再実装プロンプトをFake Codexが処理できませんでした。");
+        var stdout = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "codex.stdout.jsonl"));
+        AssertCodexFixturePolicy(stdout, "workspace-write", "Implementer", ["src"], ["bin"]);
+    }
+}
+
 static void CodexFakeProcessesCompleteIndependentReviewSlice()
 {
     var (runner, request, root) = CreateCodexFixture("artifact-only");
@@ -680,12 +706,12 @@ static void CodexFakeProcessesCompleteIndependentReviewSlice()
             .Contains("IMPLEMENTER-SELF-ASSESSMENT-SECRET", StringComparison.Ordinal));
         var implementerStdout = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "codex.stdout.jsonl"));
         Assert.False(implementerStdout.Contains("--version", StringComparison.Ordinal), "Codex版確認プロセスが起動しています。");
-        AssertCodexFixturePolicy(implementerStdout, "workspace-write", "Implementer");
+        AssertCodexFixturePolicy(implementerStdout, "workspace-write", "Implementer", ["src"], ["bin"]);
         var firstReviewStdoutPath = Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "codex.stdout.jsonl");
         var firstReviewStdout = File.ReadAllText(firstReviewStdoutPath);
         Assert.True(firstReviewStdout.Contains("\"self_assessment_present\":false", StringComparison.Ordinal),
             "ReviewerプロンプトにImplementerの自己評価が混入しました。");
-        AssertCodexFixturePolicy(firstReviewStdout, "workspace-write", "Reviewer");
+        AssertCodexFixturePolicy(firstReviewStdout, "workspace-write", "Reviewer", ["src"], ["bin"]);
         var reviewerArtifact = Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "workspace", "artifacts", "review-notes.txt");
         Assert.True(File.Exists(reviewerArtifact), "Reviewerが生成した任意成果物が保持されていません。");
         Assert.Equal("fixture supplemental artifact", File.ReadAllText(reviewerArtifact));
@@ -726,13 +752,18 @@ static void CodexFakeProcessesCompleteIndependentReviewSlice()
     }
 }
 
-static void AssertCodexFixturePolicy(string stdout, string expectedSandbox, string role)
+static void AssertCodexFixturePolicy(string stdout, string expectedSandbox, string role,
+    string[] expectedIncluded, string[] expectedExcluded)
 {
     var policyLine = stdout.Split('\n').First(line => line.Contains("fixture.prompt_policy", StringComparison.Ordinal));
     using var policyEvent = JsonDocument.Parse(policyLine);
     var policy = policyEvent.RootElement.GetProperty("policy");
-    Assert.True(policy.GetProperty("scope_included_present").GetBoolean(), "Agent要求に含める作業範囲がありません。");
-    Assert.True(policy.GetProperty("scope_excluded_present").GetBoolean(), "Agent要求に除外範囲がありません。");
+    var included = policy.GetProperty("scope_included").EnumerateArray().Select(value => value.GetString()).ToArray();
+    var excluded = policy.GetProperty("scope_excluded").EnumerateArray().Select(value => value.GetString()).ToArray();
+    Assert.True(included.SequenceEqual(expectedIncluded, StringComparer.Ordinal),
+        $"{role}の包含範囲が期待値と異なります: expected={JsonSerializer.Serialize(expectedIncluded)}, actual={JsonSerializer.Serialize(included)}");
+    Assert.True(excluded.SequenceEqual(expectedExcluded, StringComparer.Ordinal),
+        $"{role}の除外範囲が期待値と異なります: expected={JsonSerializer.Serialize(expectedExcluded)}, actual={JsonSerializer.Serialize(excluded)}");
     Assert.True(policy.GetProperty("os_boundary_disclaimed").GetBoolean(), $"{role}要求にOS境界の説明がありません: {policyEvent.RootElement.GetRawText()}");
 
     var argumentsLine = stdout.Split('\n').First(line => line.Contains("fixture.arguments", StringComparison.Ordinal));
