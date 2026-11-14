@@ -6,7 +6,7 @@ using System.Collections.Concurrent;
 using Ateliers.Ai.Orchestrator.Core;
 
 /// <summary>Codex CLIのJSONL実行をCoreのAgentRunner境界へ接続します。</summary>
-internal sealed class CodexCliAgentRunner : IAgentRunner
+internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAgentRunner
 {
     private const string ScopeBoundaryInstruction = "作業範囲はAgentへの指示であり、OSレベルで範囲外アクセスを完全に防ぐ保証ではありません。";
     private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
@@ -78,7 +78,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
             foreach (var argument in codexArguments) start.ArgumentList.Add(argument);
         PrepareEnvironment(start, profileRoot);
         var redactOutput = CreateProxyOutputRedactor(start.Environment);
-        if (role == "implementer" && request.Attempt == 1)
+        if (role == "implementer")
         {
             try { initialCommits[request.RunId] = PrepareCleanGitWorkspace(request.Contract.WorkingDirectory); }
             catch (Exception exception) when (exception is IOException or InvalidOperationException)
@@ -93,6 +93,8 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
         string? threadId = null;
         string? terminalEvent = null;
         string? usageJson = null;
+        string? workspaceSnapshotReference = null;
+        string? workspaceSnapshotSha256 = null;
         var response = new StringBuilder();
 
         try
@@ -120,6 +122,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
             await process.StandardInput.BaseStream.WriteAsync(promptBytes);
             await process.StandardInput.BaseStream.FlushAsync();
             process.StandardInput.Close();
+            options.BeforeTimeoutForTesting?.Invoke(stdoutPath);
             var timeout = request.RemainingTime is { } remaining && remaining < TimeSpan.FromMinutes(request.Contract.Limits.MaxDurationMinutes)
                 ? remaining : TimeSpan.FromMinutes(request.Contract.Limits.MaxDurationMinutes);
             var exitTask = process.WaitForExitAsync();
@@ -199,9 +202,12 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
             try
             {
                 var baseCommit = initialCommits[request.RunId];
-                var changes = CaptureChanges(request.Contract.WorkingDirectory, baseCommit);
+                var changes = CaptureChanges(request.Contract.WorkingDirectory, baseCommit, request.RunDirectory!, request.Attempt,
+                    request.Contract.Reporting.PullRequestExpected);
                 selfAssessment = content;
-                content = changes;
+                content = changes.Content;
+                workspaceSnapshotReference = changes.Reference;
+                workspaceSnapshotSha256 = changes.Sha256;
             }
             catch (Exception exception) when (exception is IOException or InvalidOperationException or UnauthorizedAccessException)
             {
@@ -216,7 +222,8 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
             processExitObserved, streamsClosed, stopRequested, stopReason, Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(prompt))),
             start.WorkingDirectory, request.ArtifactSha256, error);
         return new AgentResponse(content, succeeded, timedOut, SelfAssessment: selfAssessment,
-            ExecutionEvidence: evidence, StopRequested: stopRequested, ArtifactReferences: artifactReferences);
+            ExecutionEvidence: evidence, StopRequested: stopRequested, ArtifactReferences: artifactReferences,
+            WorkspaceSnapshotReference: workspaceSnapshotReference, WorkspaceSnapshotSha256: workspaceSnapshotSha256);
     }
 
     private static ProcessStartInfo CreateProcessStartInfo(string executablePath, string role, AgentRequest request, string? artifactDirectory)
@@ -347,7 +354,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
             if (!string.Equals(actualArtifactSha256, request.ArtifactSha256, StringComparison.Ordinal))
                 throw new InvalidOperationException("Reviewerへ渡す固定成果物のSHA-256が一致しません。");
             var artifact = StrictUtf8.GetString(artifactBytes);
-            return $"ROLE=REVIEWER\nREVIEW_ATTEMPT: {request.Attempt}\nあなたは独立したReviewerです。実装者の会話・自己評価は受け取っていません。以下の固定成果物をレビューしてください。レビュー対象のソースコードや設計書は変更せず、必要な分析資料・提案などがあれば任意の形式・ファイル名で作業ディレクトリに保存できます。最終応答や保存ファイルに特定の成果物形式を求めません。契約に記された作業範囲と許可操作を守ってください。{ScopeBoundaryInstruction}\n任意成果物の保存先: {Path.Combine(request.RunDirectory!, "exchanges", $"reviewer-{request.Attempt}", "workspace", "artifacts")}\n対象SHA-256: {request.ArtifactSha256}\n\n契約:\n{contract}\n\n固定成果物:\n{artifact}";
+            return $"ROLE=REVIEWER\nREVIEW_ATTEMPT: {request.Attempt}\nあなたは独立したReviewerです。実装者の会話・自己評価は受け取っていません。以下の固定成果物を契約要件・受け入れ条件に照らしてレビューしてください。応答の最初の行は次のいずれかを完全一致で書いてください: `判定: 承認`、`判定: 修正依頼`、`判定: 人間判断`。2行目は `指摘有無: あり` または `指摘有無: なし` を完全一致で書き、空行の後に具体的なレビュー内容を続けてください。承認状態と指摘有無は別々に実態どおり記録してください。指摘有無が「あり」の場合は各指摘の開始に独立行 `指摘:` を置き、その後に `重要度:`, `対象:`, `根拠:`, `改善案:` をそれぞれ値付きで1行ずつ書いてください。各ブロックに4項目すべてを含め、複数指摘を1つのブロックへまとめないでください。「なし」の場合は指摘ブロックやこれらの構造化指摘行を含めないでください。レビュー内容は16,000文字以内にし、上限を超える場合は重要な情報を削らず要約してください。判定・指摘有無と本文に矛盾があれば、応答を見直して矛盾を解消してください。機密情報の値や認証情報はレビュー結果に含めないでください。明確な根拠なしに承認しないでください。レビュー対象のソースコードや設計書は変更せず、必要な分析資料・提案などがあれば任意の形式・ファイル名で作業ディレクトリに保存できます。保存ファイルの形式は問いません。契約に記された作業範囲と許可操作を守ってください。{ScopeBoundaryInstruction}\n任意成果物の保存先: {Path.Combine(request.RunDirectory!, "exchanges", $"reviewer-{request.Attempt}", "workspace", "artifacts")}\n対象SHA-256: {request.ArtifactSha256}\n\n契約:\n{contract}\n\n固定成果物:\n{artifact}";
         }
         var revision = request.ReviewFinding is null ? "" : $"\n前回レビュー指摘:\n{request.ReviewFinding}\n";
         return $"ROLE=IMPLEMENTER\nあなたはImplementerです。契約に記された作業領域と許可操作の範囲内でのみ作業し、外部書込・削除・マージを行わず、変更後の unified diff とテスト結果を最終応答に含めてください。{ScopeBoundaryInstruction}\n\n契約:\n{contract}{revision}";
@@ -405,33 +412,25 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
         return RunGit(workingDirectory, "rev-parse", "HEAD").Trim();
     }
 
-    private static string CaptureChanges(string workingDirectory, string baseCommit)
+    private static CapturedWorkspaceChanges CaptureChanges(string workingDirectory, string baseCommit, string runDirectory, int attempt,
+        bool captureStrictSnapshot)
     {
         var tracked = RunGit(workingDirectory, "diff", "--binary", "--no-ext-diff", baseCommit, "--");
+        var summary = RunGit(workingDirectory, "diff", "--summary", baseCommit, "--");
+        if (captureStrictSnapshot && (summary.Contains("mode change", StringComparison.OrdinalIgnoreCase) || summary.Contains("type change", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("modeまたはfile type変更を含む差分は安全に固定できません。");
+        var paths = new HashSet<string>(RunGit(workingDirectory, "diff", "--name-only", "-z", "--no-renames", baseCommit, "--")
+            .Split('\0', StringSplitOptions.RemoveEmptyEntries), StringComparer.Ordinal);
         var untrackedStatus = RunGit(workingDirectory, "status", "--porcelain", "-z", "--untracked-files=all");
         var newFiles = untrackedStatus.Split('\0', StringSplitOptions.RemoveEmptyEntries)
             .Where(entry => entry.StartsWith("?? ", StringComparison.Ordinal)).Select(entry => entry[3..]).ToArray();
+        foreach (var path in newFiles) paths.Add(path);
         var result = new StringBuilder(tracked);
+        var entries = new List<CapturedWorkspaceEntry>();
         foreach (var relativePath in newFiles)
         {
-            var path = Path.GetFullPath(Path.Combine(workingDirectory, relativePath));
-            var workspaceRoot = Path.GetFullPath(workingDirectory) + Path.DirectorySeparatorChar;
-            if (!path.StartsWith(workspaceRoot, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException($"未追跡ファイルが作業領域外を指しています: {relativePath}");
-            var component = path;
-            while (component.StartsWith(workspaceRoot, StringComparison.OrdinalIgnoreCase))
-            {
-                if ((File.GetAttributes(component) & FileAttributes.ReparsePoint) != 0)
-                    throw new InvalidOperationException($"未追跡パスの構成要素がsymlinkまたはreparse pointです: {relativePath}");
-                var parent = Path.GetDirectoryName(component);
-                if (parent is null || string.Equals(parent + Path.DirectorySeparatorChar, workspaceRoot, StringComparison.OrdinalIgnoreCase))
-                {
-                    if ((File.GetAttributes(Path.TrimEndingDirectorySeparator(workingDirectory)) & FileAttributes.ReparsePoint) != 0)
-                        throw new InvalidOperationException("Git作業領域ルートがsymlinkまたはreparse pointです。");
-                    break;
-                }
-                component = parent;
-            }
+            var path = ResolveWorkspacePath(workingDirectory, relativePath);
+            RejectReparsePath(workingDirectory, path, relativePath);
             var bytes = File.ReadAllBytes(path);
             if (bytes.Length > 1_000_000 || bytes.Contains((byte)0))
                 throw new InvalidOperationException($"未追跡ファイルはテキスト差分として安全にレビューできません: {relativePath}");
@@ -446,8 +445,86 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
             foreach (var line in lines) result.Append('+').AppendLine(line);
         }
         if (result.Length == 0) throw new InvalidOperationException("Gitからレビュー可能な変更差分を取得できませんでした。");
-        return $"基準commit: {baseCommit}\n\n```diff\n{result}\n```";
+        if (!captureStrictSnapshot)
+            return new CapturedWorkspaceChanges($"基準commit: {baseCommit}\n\n```diff\n{result}\n```", null, null);
+
+        foreach (var relativePath in paths.Except(newFiles, StringComparer.Ordinal).Order(StringComparer.Ordinal))
+        {
+            var path = ResolveWorkspacePath(workingDirectory, relativePath);
+            var modeOutput = RunGit(workingDirectory, "ls-tree", "-r", "-z", baseCommit, "--", $":(literal){relativePath}");
+            var modeLine = modeOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+            var mode = modeLine?.Split(' ')[0];
+            if (mode is "120000" or "160000")
+                throw new InvalidOperationException($"symlinkまたはsubmoduleの変更は公開差分として固定できません: {relativePath}");
+            if (File.Exists(path))
+            {
+                RejectReparsePath(workingDirectory, path, relativePath);
+                var bytes = File.ReadAllBytes(path);
+                entries.Add(new CapturedWorkspaceEntry(relativePath, false, mode ?? "100644",
+                    Convert.ToHexStringLower(SHA256.HashData(bytes)), Convert.ToBase64String(bytes)));
+            }
+            else if (mode is not null)
+                entries.Add(new CapturedWorkspaceEntry(relativePath, true, mode, null, null));
+            else
+                throw new InvalidOperationException($"snapshot対象ファイルを読み取れません: {relativePath}");
+        }
+        foreach (var relativePath in newFiles.Order(StringComparer.Ordinal))
+        {
+            var path = ResolveWorkspacePath(workingDirectory, relativePath);
+            var bytes = File.ReadAllBytes(path);
+            entries.Add(new CapturedWorkspaceEntry(relativePath, false, GetNewFileGitMode(path),
+                Convert.ToHexStringLower(SHA256.HashData(bytes)), Convert.ToBase64String(bytes)));
+        }
+        var snapshotBytes = JsonSerializer.SerializeToUtf8Bytes(new CapturedWorkspaceSnapshot(baseCommit, entries));
+        var reference = Path.Combine("artifacts", $"implementer-snapshot-{attempt}.json");
+        var snapshotPath = Path.Combine(runDirectory, reference);
+        Directory.CreateDirectory(Path.GetDirectoryName(snapshotPath)!);
+        File.WriteAllBytes(snapshotPath, snapshotBytes);
+        var snapshotHash = Convert.ToHexStringLower(SHA256.HashData(snapshotBytes));
+        return new CapturedWorkspaceChanges($"基準commit: {baseCommit}\n\n```diff\n{result}\n```", reference, snapshotHash);
     }
+
+    private static string ResolveWorkspacePath(string workingDirectory, string relativePath)
+    {
+        if (Path.IsPathRooted(relativePath) || relativePath.Any(char.IsControl) || relativePath.Split(['/', '\\']).Any(part => part is "." or "..") ||
+            relativePath.Equals(".git", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.StartsWith(".git/", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.StartsWith(".git\\", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"workspace変更パスが不正です: {relativePath}");
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(workingDirectory));
+        var fullPath = Path.GetFullPath(Path.Combine(root, relativePath));
+        if (!fullPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"workspace変更パスがroot外を指しています: {relativePath}");
+        return fullPath;
+    }
+
+    private static void RejectReparsePath(string workingDirectory, string path, string relativePath)
+    {
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(workingDirectory));
+        var current = path;
+        while (current.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        {
+            if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                throw new InvalidOperationException($"変更パスの構成要素がsymlinkまたはreparse pointです: {relativePath}");
+            var parent = Path.GetDirectoryName(current);
+            if (parent is null || string.Equals(parent, root, StringComparison.OrdinalIgnoreCase)) break;
+            current = parent;
+        }
+        if ((File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0)
+            throw new InvalidOperationException("Git作業領域ルートがsymlinkまたはreparse pointです。");
+    }
+
+    private static string GetNewFileGitMode(string path)
+    {
+        if (OperatingSystem.IsWindows()) return "100644";
+        var mode = File.GetUnixFileMode(path);
+        return (mode & (UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute)) != 0
+            ? "100755" : "100644";
+    }
+
+    private sealed record CapturedWorkspaceChanges(string Content, string? Reference, string? Sha256);
+    private sealed record CapturedWorkspaceSnapshot(string BaseSha, IReadOnlyList<CapturedWorkspaceEntry> Entries);
+    private sealed record CapturedWorkspaceEntry(string Path, bool Deleted, string Mode, string? Sha256, string? ContentBase64);
 
     private static string RunGit(string workingDirectory, params string[] arguments)
     {
@@ -473,7 +550,8 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
 /// <param name="PrefixArguments">ラッパー実行ファイルを使う場合の先行引数です。</param>
 internal sealed record CodexCliRunnerOptions(string ExecutablePath, string ImplementerCodexHome,
     string ReviewerCodexHome, IReadOnlyList<string>? PrefixArguments = null,
-    Action<Process>? KillProcessForTesting = null, CancellationToken CancellationToken = default)
+    Action<Process>? KillProcessForTesting = null, CancellationToken CancellationToken = default,
+    Action<string>? BeforeTimeoutForTesting = null)
 {
     /// <summary>CLIと、指定または既定のCODEX_HOMEを検証します。</summary>
     /// <returns>検証済み設定です。</returns>
