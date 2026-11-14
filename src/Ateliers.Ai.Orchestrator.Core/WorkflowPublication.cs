@@ -17,8 +17,9 @@ public sealed record WorkflowPullRequest(string Url, string HeadSha, string Base
 /// <summary>必須GitHub提出を段階ごとに実行する境界です。</summary>
 public interface IWorkflowPublisher
 {
-    WorkflowPublicationSession Start(TaskContract contract, string runId);
-    WorkflowPublicationSnapshot PushChanges(WorkflowPublicationSession session, int attempt, string runDirectory);
+    WorkflowPublicationSession Start(TaskContract contract, string runId, CancellationToken stopToken);
+    WorkflowPublicationSnapshot PushChanges(WorkflowPublicationSession session, int attempt, string runDirectory,
+        string implementerSnapshotReference, string implementerSnapshotSha256, CancellationToken stopToken);
     WorkflowPullRequest CreatePullRequest(WorkflowPublicationSession session, WorkflowPublicationSnapshot snapshot,
-        TaskContract contract, string runDirectory);
+        TaskContract contract, string runDirectory, CancellationToken stopToken);
 }

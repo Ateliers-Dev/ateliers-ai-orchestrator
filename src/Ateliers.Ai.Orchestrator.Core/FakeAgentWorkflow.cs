@@ -32,7 +32,8 @@ public sealed record AgentRequest(
 /// <param name="ArtifactReferences">任意成果物の参照です。空またはnullを許容し、成果物形式は定めません。</param>
 public sealed record AgentResponse(string Content = "", bool Succeeded = true, bool TimedOut = false,
     string? SelfAssessment = null, AgentExecutionEvidence? ExecutionEvidence = null, bool StopRequested = false,
-    IReadOnlyList<string>? ArtifactReferences = null);
+    IReadOnlyList<string>? ArtifactReferences = null, string? WorkspaceSnapshotReference = null,
+    string? WorkspaceSnapshotSha256 = null);
 
 /// <summary>Agentプロセスから取得できた実行識別子と終了証跡です。</summary>
 /// <param name="ProcessId">起動したプロセスのIDです。</param>
@@ -216,7 +217,14 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                 }
                 else
                 {
-                    try { publicationSession = publisher.Start(contract, runId); }
+                    try { publicationSession = publisher.Start(contract, runId, stopToken); }
+                    catch (OperationCanceledException)
+                    {
+                        failure = "GitHub公開の開始前または事前確認中に停止要求を受け付けました。外部操作を成功扱いしません。";
+                        eventWriter.Append("github_publication_cancelled", "cancelled", from: run.State, to: run.State,
+                            detail: failure, role: "Orchestrator");
+                        run.Transition(RunState.Failed);
+                    }
                     catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
                     {
                         failure = $"GitHub提出の事前確認に失敗しました。認証・リモート・ブランチ・権限を確認してください。 ({exception.GetType().Name})";
@@ -288,7 +296,10 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                 {
                     try
                     {
-                        publicationSnapshot = publisher!.PushChanges(publicationSession, implementationAttempt, runDirectory);
+                        if (implementResponse.WorkspaceSnapshotReference is null || implementResponse.WorkspaceSnapshotSha256 is null)
+                            throw new InvalidOperationException("Implementer終了時点の差分snapshot証跡がありません。");
+                        publicationSnapshot = publisher!.PushChanges(publicationSession, implementationAttempt, runDirectory,
+                            implementResponse.WorkspaceSnapshotReference, implementResponse.WorkspaceSnapshotSha256, stopToken);
                         currentArtifact = publicationSnapshot.ArtifactReference;
                         currentHash = publicationSnapshot.DiffSha256;
                         eventWriter.Append("github_push_verified", "accepted", from: run.State, to: run.State,
@@ -304,7 +315,27 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                         run.Transition(RunState.Failed);
                         break;
                     }
+                    catch (OperationCanceledException)
+                    {
+                        failure = "GitHub push中に停止要求を受け付けました。リモート状態が未確定の場合を含め、成功扱いしていません。";
+                        eventWriter.Append("github_publication_cancelled", "cancelled", from: run.State, to: run.State,
+                            detail: failure, outputReference: File.Exists(Path.Combine(runDirectory, "github-push-interrupted.json"))
+                                ? "github-push-interrupted.json" : null,
+                            targetCommitSha: publicationSnapshot?.CommitSha, diffSha256: publicationSnapshot?.DiffSha256,
+                            role: "Orchestrator");
+                        run.Transition(RunState.Failed);
+                        break;
+                    }
                 }
+                if (publicationSession is not null && StopWasRequested(stopToken))
+                {
+                    failure = "GitHub pushを照合した後に停止要求を受け付けました。ReviewerとPR作成へは進まず、成功扱いしません。";
+                    eventWriter.Append("github_publication_cancelled", "cancelled", from: run.State, to: run.State,
+                        detail: failure, targetCommitSha: publicationSnapshot?.CommitSha,
+                        diffSha256: publicationSnapshot?.DiffSha256, role: "Orchestrator");
+                    run.Transition(RunState.Failed);
+                }
+                if (run.State == RunState.Failed) break;
 
                 if (publicationSession is null)
                 {
@@ -410,7 +441,11 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                         {
                             try
                             {
-                                publishedPullRequest = publisher!.CreatePullRequest(publicationSession, publicationSnapshot, contract, runDirectory);
+                                if (StopWasRequested(stopToken))
+                                    throw new OperationCanceledException(stopToken);
+                                publishedPullRequest = publisher!.CreatePullRequest(publicationSession, publicationSnapshot, contract, runDirectory, stopToken);
+                                if (StopWasRequested(stopToken))
+                                    throw new OperationCanceledException("PR作成後に停止要求を受け付けました。作成結果を成功扱いしません。", stopToken);
                                 eventWriter.Append("github_pull_request_created", "accepted", from: run.State, to: run.State,
                                     detail: $"PRとレビュー済みhead/base SHAを照合しました。url={publishedPullRequest.Url}; branch={publishedPullRequest.Branch}; base={publishedPullRequest.BaseBranch}; baseSha={publishedPullRequest.BaseSha}",
                                     outputReference: publishedPullRequest.EvidenceReference, targetCommitSha: publishedPullRequest.HeadSha,
@@ -424,8 +459,20 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                                 eventWriter.Append("github_publication_failed", "failed", from: run.State, to: run.State,
                                     detail: "必須GitHub PR作成または証跡照合に失敗しました。部分証跡があれば確認してください。例外出力は記録していません。",
                                     error: failure,
-                                    outputReference: File.Exists(Path.Combine(runDirectory, "github-pull-request.json")) ? "github-pull-request.json" : null,
+                                    outputReference: File.Exists(Path.Combine(runDirectory, "github-pull-request.json")) ? "github-pull-request.json" :
+                                        File.Exists(Path.Combine(runDirectory, "github-pull-request-pending.json")) ? "github-pull-request-pending.json" : null,
                                     targetCommitSha: publicationSnapshot.CommitSha, diffSha256: publicationSnapshot.DiffSha256);
+                                run.Transition(RunState.Failed);
+                            }
+                            catch (OperationCanceledException)
+                            {
+                                failure = "GitHub PR作成または照合中に停止要求を受け付けました。PRが作成済みか未確定の場合を含め、成功扱いしていません。";
+                                eventWriter.Append("github_publication_cancelled", "cancelled", from: run.State, to: run.State,
+                                    detail: failure, outputReference: File.Exists(Path.Combine(runDirectory, "github-pull-request.json"))
+                                        ? "github-pull-request.json" : File.Exists(Path.Combine(runDirectory, "github-pull-request-pending.json"))
+                                            ? "github-pull-request-pending.json" : null,
+                                    targetCommitSha: publicationSnapshot.CommitSha, diffSha256: publicationSnapshot.DiffSha256,
+                                    role: "Orchestrator");
                                 run.Transition(RunState.Failed);
                             }
                             break;

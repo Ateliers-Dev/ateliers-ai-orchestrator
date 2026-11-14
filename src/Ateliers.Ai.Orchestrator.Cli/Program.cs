@@ -80,7 +80,7 @@ internal static class OrchestratorCli
                 using var eventStore = JsonlRunEventStore.CreateNew(Path.Combine(fakeRunDirectory, "events.jsonl"), fakeRunId);
                 using var lifecycleWriter = new LifecycleNotificationEventWriter(lifecycleLogPath, notificationsDisabled, useSlackTestChannel);
                 IAgentRunner runner = agentKind == "codex" ? new CodexCliAgentRunner(codexOptions!) : new FakeAgentRunner(scenario);
-                IWorkflowPublisher? publisher = agentKind == "codex" && contract.Reporting.PullRequestExpected
+                using var publisher = agentKind == "codex" && contract.Reporting.PullRequestExpected
                     ? new GitHubWorkflowPublisher() : null;
                 var result = new FakeAgentWorkflow().Run(contract, contractHash, fakeRunId, fakeRunDirectory,
                     runner, eventStore, evidence, stopToken: stopSource.Token,
