@@ -364,7 +364,6 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
     {
         var summary = result.Summary.Trim();
         WorkflowReviewAssessment.Validate(result.Decision, result.HasFindings, summary);
-        if (summary.Length > 16000) summary = summary[..16000] + "\n\n（長さ上限により後続を省略）";
         var decision = result.Decision switch
         {
             WorkflowReviewDecision.Approve => "承認",

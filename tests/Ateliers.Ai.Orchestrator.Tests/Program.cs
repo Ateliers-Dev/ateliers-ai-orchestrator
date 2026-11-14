@@ -153,7 +153,7 @@ static void ReviewCommentIsStructuredAndIdempotent()
     var findings = GitHubWorkflowPublisher.FormatReviewComment(reviewResult with
     {
         HasFindings = true,
-        Summary = "重要度: P2\n対象: src/File.cs\n根拠: null入力時に例外となる\n改善案: 入力検証を追加する"
+        Summary = "指摘:\n重要度: P2\n対象: src/File.cs\n根拠: null入力時に例外となる\n改善案: 入力検証を追加する"
     }, marker);
     Assert.True(findings.Contains("判定: 承認", StringComparison.Ordinal));
     Assert.True(findings.Contains("指摘有無: あり", StringComparison.Ordinal));
@@ -161,6 +161,14 @@ static void ReviewCommentIsStructuredAndIdempotent()
     Assert.True(findings.Contains("対象: src/File.cs", StringComparison.Ordinal));
     Assert.True(findings.Contains("根拠:", StringComparison.Ordinal));
     Assert.True(findings.Contains("改善案:", StringComparison.Ordinal));
+    var multipleFindings = reviewResult with
+    {
+        HasFindings = true,
+        Summary = "指摘:\n重要度: P1\n対象: src/A.cs\n根拠: Aの根拠\n改善案: Aを直す\n\n指摘:\n重要度: P2\n対象: src/B.cs\n根拠: Bの根拠\n改善案: Bを直す"
+    };
+    var multipleFindingsComment = GitHubWorkflowPublisher.FormatReviewComment(multipleFindings, marker);
+    Assert.True(multipleFindingsComment.Contains("対象: src/A.cs", StringComparison.Ordinal));
+    Assert.True(multipleFindingsComment.Contains("対象: src/B.cs", StringComparison.Ordinal));
 
     var matchingBody = JsonSerializer.Serialize(new[] { new { id = 10, body = approval, html_url = "https://github.com/Ateliers-Dev/test/pull/9#issuecomment-10" } });
     Assert.True(GitHubWorkflowPublisher.FindExistingReviewComment(matchingBody, marker, approval) is not null);
@@ -178,15 +186,19 @@ static void ReviewCommentIsStructuredAndIdempotent()
     Assert.Throws<InvalidOperationException>(() => GitHubWorkflowPublisher.EnsurePullRequestTargetsReview(
         [headSha, baseSha, "codex/run-1", "release", "OPEN"], session, snapshot, pullRequest));
     Assert.Throws<InvalidOperationException>(() => GitHubWorkflowPublisher.FormatReviewComment(
-        reviewResult with { Summary = "重要度: P1\n対象: src/File.cs\n根拠: null入力時に例外となる\n改善案: 入力検証を追加する" }, marker));
+        reviewResult with { Summary = "指摘:\n重要度: P1\n対象: src/File.cs\n根拠: null入力時に例外となる\n改善案: 入力検証を追加する" }, marker));
     Assert.Throws<InvalidOperationException>(() => WorkflowReviewAssessment.Parse(
         "判定: 承認\n指摘有無: なし\n\n重要度: P1\n対象: src/File.cs\n根拠: null入力時に例外となる\n改善案: 入力検証を追加する"));
     Assert.Throws<InvalidOperationException>(() => WorkflowReviewAssessment.Parse(
         "レビュー合格: 指摘なし\n\n重要度: P1\n対象: src/File.cs\n根拠: null入力時に例外となる\n改善案: 入力検証を追加する"));
     Assert.Throws<InvalidOperationException>(() => WorkflowReviewAssessment.Parse(
         "判定: 修正依頼\n指摘有無: なし\n\n根拠を追記してください"));
+    Assert.Throws<InvalidOperationException>(() => WorkflowReviewAssessment.Parse(
+        "判定: 修正依頼\n指摘有無: あり\n\n指摘:\n重要度: P1\n対象: src/File.cs\n根拠: null入力時に例外となる\n改善案: 入力検証を追加する\n\n指摘:\n重要度: P2\n対象: src/Other.cs"));
+    Assert.Throws<InvalidOperationException>(() => WorkflowReviewAssessment.Parse(
+        "判定: 承認\n指摘有無: あり\n\n指摘:\n重要度: P1\n対象: src/File.cs\n根拠: null入力時に例外となる\n改善案: 入力検証を追加する\n\n詳細: " + new string('x', WorkflowReviewAssessment.MaximumSummaryCharacters)));
     var requestChanges = WorkflowReviewAssessment.Parse(
-        "判定: 修正依頼\n指摘有無: あり\n\n重要度: P1\n対象: src/File.cs\n根拠: null入力時に例外となる\n改善案: 入力検証を追加する");
+        "判定: 修正依頼\n指摘有無: あり\n\n指摘:\n重要度: P1\n対象: src/File.cs\n根拠: null入力時に例外となる\n改善案: 入力検証を追加する");
     Assert.Equal(WorkflowReviewDecision.RequestChanges, requestChanges.Decision);
     Assert.True(requestChanges.HasFindings);
 
@@ -311,30 +323,38 @@ static void RequiredPullRequestWorkflowFailsClosedOnReviewCommentFailure()
         finally { Directory.Delete(root, true); }
     }
 
-    var inconsistentRoot = Path.Combine(Path.GetTempPath(), $"required-pr-inconsistent-review-{Guid.NewGuid():N}");
-    var inconsistentRunDirectory = Path.Combine(inconsistentRoot, "run");
-    Directory.CreateDirectory(inconsistentRoot);
-    Directory.CreateDirectory(inconsistentRunDirectory);
-    try
+    var invalidAssessments = new[]
     {
-        using var events = JsonlRunEventStore.CreateNew(Path.Combine(inconsistentRunDirectory, "events.jsonl"), "required-pr-inconsistent-review");
-        var publisher = new StubWorkflowPublisher();
-        var runner = new CountingPublicationAgentRunner(FakeScenario.Success,
-            "判定: 承認\n指摘有無: なし\n\n重要度: P1\n対象: src/File.cs\n根拠: null入力時に例外となる\n改善案: 入力検証を追加する");
-        var result = new FakeAgentWorkflow().Run(SampleContract() with
-            { WorkingDirectory = inconsistentRoot, Reporting = new ReportingRequirements { PullRequestExpected = true, FinalReportFormat = "markdown" } },
-            "contract-hash", "required-pr-inconsistent-review", inconsistentRunDirectory, runner, events,
-            codexOneShot: true, publisher: publisher);
-        events.Dispose();
+        ("required-pr-inconsistent-review", "判定: 承認\n指摘有無: なし\n\n指摘:\n重要度: P1\n対象: src/File.cs\n根拠: null入力時に例外となる\n改善案: 入力検証を追加する"),
+        ("required-pr-incomplete-finding", "判定: 承認\n指摘有無: あり\n\n指摘:\n重要度: P1\n対象: src/A.cs\n根拠: Aの根拠\n改善案: Aを直す\n\n指摘:\n重要度: P2\n対象: src/B.cs"),
+        ("required-pr-oversized-finding", "判定: 承認\n指摘有無: あり\n\n指摘:\n重要度: P1\n対象: src/A.cs\n根拠: Aの根拠\n改善案: Aを直す\n\n詳細: " + new string('x', WorkflowReviewAssessment.MaximumSummaryCharacters))
+    };
+    foreach (var (runId, content) in invalidAssessments)
+    {
+        var invalidRoot = Path.Combine(Path.GetTempPath(), $"{runId}-{Guid.NewGuid():N}");
+        var invalidRunDirectory = Path.Combine(invalidRoot, "run");
+        Directory.CreateDirectory(invalidRoot);
+        Directory.CreateDirectory(invalidRunDirectory);
+        try
+        {
+            using var events = JsonlRunEventStore.CreateNew(Path.Combine(invalidRunDirectory, "events.jsonl"), runId);
+            var publisher = new StubWorkflowPublisher();
+            var runner = new CountingPublicationAgentRunner(FakeScenario.Success, content);
+            var result = new FakeAgentWorkflow().Run(SampleContract() with
+                { WorkingDirectory = invalidRoot, Reporting = new ReportingRequirements { PullRequestExpected = true, FinalReportFormat = "markdown" } },
+                "contract-hash", runId, invalidRunDirectory, runner, events,
+                codexOneShot: true, publisher: publisher);
+            events.Dispose();
 
-        Assert.Equal(RunState.Failed, result.State);
-        Assert.False(publisher.Calls.Contains("create-pr"), "矛盾したレビュー結果でPRを作成しました。");
-        Assert.False(publisher.Calls.Contains("post-review-comment"), "矛盾したレビュー結果をコメント投稿しました。");
-        var log = File.ReadAllText(Path.Combine(inconsistentRunDirectory, "events.jsonl"));
-        Assert.True(log.Contains("github_review_assessment_failed", StringComparison.Ordinal));
-        Assert.False(log.Contains("github_pull_request_created", StringComparison.Ordinal));
+            Assert.Equal(RunState.Failed, result.State);
+            Assert.False(publisher.Calls.Contains("create-pr"), "不正・不完全なレビュー指摘でPRを作成しました。");
+            Assert.False(publisher.Calls.Contains("post-review-comment"), "不正・不完全なレビュー指摘をコメント投稿しました。");
+            var log = File.ReadAllText(Path.Combine(invalidRunDirectory, "events.jsonl"));
+            Assert.True(log.Contains("github_review_assessment_failed", StringComparison.Ordinal));
+            Assert.False(log.Contains("github_pull_request_created", StringComparison.Ordinal));
+        }
+        finally { Directory.Delete(invalidRoot, true); }
     }
-    finally { Directory.Delete(inconsistentRoot, true); }
 }
 
 static void RequiredPullRequestWorkflowRequiresPersistedEvidence()
@@ -2536,7 +2556,7 @@ sealed class CountingPublicationAgentRunner(FakeScenario scenario, string? revie
         if (response.Content.StartsWith("レビュー合格:", StringComparison.Ordinal))
             return response with { Content = $"判定: 承認\n指摘有無: なし\n\n{response.Content["レビュー合格:".Length..].Trim()}" };
         if (response.Content.StartsWith("指摘:", StringComparison.Ordinal))
-            return response with { Content = $"判定: 修正依頼\n指摘有無: あり\n\n重要度: P2\n対象: {request.ArtifactReference ?? "対象成果物"}\n根拠: {response.Content["指摘:".Length..].Trim()}\n改善案: 指摘内容に従って修正する" };
+            return response with { Content = $"判定: 修正依頼\n指摘有無: あり\n\n指摘:\n重要度: P2\n対象: {request.ArtifactReference ?? "対象成果物"}\n根拠: {response.Content["指摘:".Length..].Trim()}\n改善案: 指摘内容に従って修正する" };
         if (response.Content.StartsWith("要件に判断が必要です:", StringComparison.Ordinal))
             return response with { Content = $"判定: 人間判断\n指摘有無: なし\n\n{response.Content["要件に判断が必要です:".Length..].Trim()}" };
         return response;

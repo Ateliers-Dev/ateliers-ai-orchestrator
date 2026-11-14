@@ -25,6 +25,8 @@ public enum WorkflowReviewDecision
 /// <summary>厳密なヘッダーから解析したReviewerの判定と指摘有無です。</summary>
 public sealed record WorkflowReviewAssessment(WorkflowReviewDecision Decision, bool HasFindings, string Summary)
 {
+    public const int MaximumSummaryCharacters = 16_000;
+    private const string FindingMarker = "指摘:";
     private static readonly string[] FindingFields = ["重要度:", "対象:", "根拠:", "改善案:"];
 
     /// <summary>Reviewer応答の先頭2行を厳密に解析し、本文の指摘項目とも照合します。</summary>
@@ -59,16 +61,44 @@ public sealed record WorkflowReviewAssessment(WorkflowReviewDecision Decision, b
     {
         if (string.IsNullOrWhiteSpace(summary))
             throw new InvalidOperationException("Reviewer応答にレビュー内容がありません。");
+        if (summary.Length > MaximumSummaryCharacters)
+            throw new InvalidOperationException($"Reviewer応答が上限 {MaximumSummaryCharacters} 文字を超えています。全内容を保持できないため投稿しません。");
         if (decision == WorkflowReviewDecision.RequestChanges && !hasFindings)
             throw new InvalidOperationException("修正依頼には指摘有無: ありが必要です。");
-        var summaryLines = summary.Split('\n').Select(line => line.TrimStart())
-            .Select(line => line.StartsWith("- ", StringComparison.Ordinal) ? line[2..] : line).ToArray();
-        var fieldPresence = FindingFields.Select(field => summaryLines.Any(line =>
-            line.StartsWith(field, StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(line[field.Length..]))).ToArray();
-        if (hasFindings && fieldPresence.Any(present => !present))
-            throw new InvalidOperationException("指摘ありのReviewer応答には重要度・対象・根拠・改善案が必要です。");
-        if (!hasFindings && fieldPresence.Any(present => present))
-            throw new InvalidOperationException("指摘有無: なしとレビュー本文の構造化指摘が一致しません。");
+        var summaryLines = summary.Split('\n').Select(NormalizeSummaryLine).ToArray();
+        var markerIndexes = summaryLines.Select((line, index) => (line, index))
+            .Where(item => item.line == FindingMarker).Select(item => item.index).ToArray();
+        var hasFieldLines = summaryLines.Any(line => FindingFields.Any(field => line.StartsWith(field, StringComparison.Ordinal)));
+        if (!hasFindings)
+        {
+            if (markerIndexes.Length > 0 || hasFieldLines)
+                throw new InvalidOperationException("指摘有無: なしとレビュー本文の構造化指摘が一致しません。");
+            return;
+        }
+        if (markerIndexes.Length == 0)
+            throw new InvalidOperationException("指摘ありのReviewer応答には指摘ブロックが必要です。");
+        if (summaryLines.Take(markerIndexes[0]).Any(line => FindingFields.Any(field => line.StartsWith(field, StringComparison.Ordinal))))
+            throw new InvalidOperationException("指摘項目が指摘ブロックの外にあります。");
+
+        for (var findingIndex = 0; findingIndex < markerIndexes.Length; findingIndex++)
+        {
+            var start = markerIndexes[findingIndex] + 1;
+            var end = findingIndex + 1 < markerIndexes.Length ? markerIndexes[findingIndex + 1] : summaryLines.Length;
+            var block = summaryLines[start..end];
+            foreach (var field in FindingFields)
+            {
+                var values = block.Where(line => line.StartsWith(field, StringComparison.Ordinal))
+                    .Select(line => line[field.Length..].Trim()).ToArray();
+                if (values.Length != 1 || string.IsNullOrWhiteSpace(values[0]))
+                    throw new InvalidOperationException($"各指摘ブロックには {field} を値付きで1つずつ含めてください。");
+            }
+        }
+    }
+
+    private static string NormalizeSummaryLine(string line)
+    {
+        var normalized = line.TrimStart();
+        return normalized.StartsWith("- ", StringComparison.Ordinal) ? normalized[2..] : normalized;
     }
 }
 
