@@ -198,8 +198,11 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         File.WriteAllText(bodyPath, body, new UTF8Encoding(false));
         var title = contract.Purpose.Replace('\r', ' ').Replace('\n', ' ').Trim();
         if (title.Length > 120) title = title[..120];
-        var evidencePath = Path.Combine(runDirectory, "github-pull-request-pending.json");
-        WritePendingPullRequestEvidence(evidencePath, session, snapshot, "create-request-started", null);
+        var pendingEvidencePath = Path.Combine(runDirectory, "github-pull-request-pending.json");
+        var verifiedEvidencePath = Path.Combine(runDirectory, "github-pull-request.json");
+        if (File.Exists(verifiedEvidencePath))
+            throw new InvalidOperationException("検証済みPR証跡ファイルが既にあります。実行記録を上書きしません。");
+        WritePendingPullRequestEvidence(pendingEvidencePath, session, snapshot, "create-request-started", null);
         string create;
         try
         {
@@ -217,7 +220,7 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
             !Regex.IsMatch(url.AbsolutePath, $"^{Regex.Escape(expectedPrPath)}\\d+/?$", RegexOptions.CultureInvariant))
             throw new InvalidOperationException("GitHub CLIのPR作成結果からGitHub PR URLを確認できません。");
 
-        WritePendingPullRequestEvidence(evidencePath, session, snapshot, "create-returned", create);
+        WritePendingPullRequestEvidence(pendingEvidencePath, session, snapshot, "create-returned", create);
         string[] details;
         try
         {
@@ -254,9 +257,40 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
             verified = true,
             verifiedAtUtc = DateTimeOffset.UtcNow
         };
-        File.WriteAllText(evidencePath, JsonSerializer.Serialize(evidence, new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
-        File.Delete(Path.Combine(runDirectory, "github-pull-request-pending.json"));
+        PersistVerifiedPullRequestEvidence(runDirectory, evidence, details[0], details[1], details[2]);
         return new WorkflowPullRequest(details[0], details[1], details[2], details[3], details[4], "github-pull-request.json");
+    }
+
+    internal static void PersistVerifiedPullRequestEvidence(string runDirectory, object evidence,
+        string expectedUrl, string expectedHeadSha, string expectedBaseSha)
+    {
+        var pendingEvidencePath = Path.Combine(runDirectory, "github-pull-request-pending.json");
+        var verifiedEvidencePath = Path.Combine(runDirectory, "github-pull-request.json");
+        if (File.Exists(verifiedEvidencePath))
+            throw new InvalidOperationException("検証済みPR証跡ファイルが既にあります。実行記録を上書きしません。");
+        var temporaryEvidencePath = verifiedEvidencePath + $".{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(temporaryEvidencePath,
+                JsonSerializer.Serialize(evidence, new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
+            File.Move(temporaryEvidencePath, verifiedEvidencePath);
+            using (var savedEvidence = JsonDocument.Parse(File.ReadAllBytes(verifiedEvidencePath)))
+            {
+                var saved = savedEvidence.RootElement;
+                if (saved.GetProperty("evidenceKind").GetString() != "github-pull-request-created" ||
+                    saved.GetProperty("verified").ValueKind != JsonValueKind.True ||
+                    saved.GetProperty("merged").ValueKind != JsonValueKind.False ||
+                    saved.GetProperty("url").GetString() != expectedUrl ||
+                    saved.GetProperty("headSha").GetString() != expectedHeadSha ||
+                    saved.GetProperty("baseSha").GetString() != expectedBaseSha)
+                    throw new InvalidOperationException("保存後のPR証跡を再検証できません。");
+            }
+            File.Delete(pendingEvidencePath);
+        }
+        finally
+        {
+            if (File.Exists(temporaryEvidencePath)) File.Delete(temporaryEvidencePath);
+        }
     }
 
     private static StringComparison PathComparison => OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;

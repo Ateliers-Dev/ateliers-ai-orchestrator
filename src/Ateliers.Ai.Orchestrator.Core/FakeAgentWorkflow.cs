@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace Ateliers.Ai.Orchestrator.Core;
 
@@ -444,6 +445,7 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                                 if (StopWasRequested(stopToken))
                                     throw new OperationCanceledException(stopToken);
                                 publishedPullRequest = publisher!.CreatePullRequest(publicationSession, publicationSnapshot, contract, runDirectory, stopToken);
+                                VerifyPublishedPullRequestEvidence(runDirectory, publishedPullRequest, publicationSession, publicationSnapshot);
                                 if (StopWasRequested(stopToken))
                                     throw new OperationCanceledException("PR作成後に停止要求を受け付けました。作成結果を成功扱いしません。", stopToken);
                                 eventWriter.Append("github_pull_request_created", "accepted", from: run.State, to: run.State,
@@ -672,6 +674,46 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
     }
 
     private static bool StopWasRequested(CancellationToken token) => token.IsCancellationRequested;
+
+    private static void VerifyPublishedPullRequestEvidence(string runDirectory, WorkflowPullRequest pullRequest,
+        WorkflowPublicationSession session, WorkflowPublicationSnapshot snapshot)
+    {
+        if (Path.IsPathRooted(pullRequest.EvidenceReference) ||
+            pullRequest.EvidenceReference.Split(['/', '\\']).Any(part => part is "" or "." or ".."))
+            throw new InvalidOperationException("PR証跡の参照先が実行記録ディレクトリ内の相対パスではありません。");
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(runDirectory)) + Path.DirectorySeparatorChar;
+        var evidencePath = Path.GetFullPath(Path.Combine(root, pullRequest.EvidenceReference));
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!evidencePath.StartsWith(root, comparison) || !File.Exists(evidencePath))
+            throw new InvalidOperationException("検証済みPR証跡ファイルが保存されていません。");
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllBytes(evidencePath));
+            var evidence = document.RootElement;
+            if (evidence.GetProperty("evidenceKind").GetString() != "github-pull-request-created" ||
+                evidence.GetProperty("verified").ValueKind != JsonValueKind.True ||
+                evidence.GetProperty("merged").ValueKind != JsonValueKind.False ||
+                evidence.GetProperty("url").GetString() != pullRequest.Url ||
+                evidence.GetProperty("headSha").GetString() != pullRequest.HeadSha ||
+                evidence.GetProperty("baseSha").GetString() != pullRequest.BaseSha ||
+                evidence.GetProperty("branch").GetString() != session.Branch ||
+                evidence.GetProperty("baseBranch").GetString() != session.BaseBranch ||
+                evidence.GetProperty("reviewDiffSha256").GetString() != snapshot.DiffSha256 ||
+                evidence.GetProperty("reviewArtifactReference").GetString() != snapshot.ArtifactReference ||
+                !pullRequest.HeadSha.Equals(snapshot.CommitSha, StringComparison.OrdinalIgnoreCase) ||
+                !pullRequest.BaseSha.Equals(session.BaseSha, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("保存済みPR証跡がPublisherの検証結果と一致しません。");
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidOperationException("保存済みPR証跡のJSONを読み取れません。", exception);
+        }
+        catch (KeyNotFoundException exception)
+        {
+            throw new InvalidOperationException("保存済みPR証跡に必須項目がありません。", exception);
+        }
+    }
 }
 
 internal sealed class PhysicalFakeWorkflowStorage : IFakeWorkflowStorage

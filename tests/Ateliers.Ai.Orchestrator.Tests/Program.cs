@@ -28,6 +28,7 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("すべての状態ペアを許可表どおりに判定する", AllTransitionsAreExplicit);
     suite.Add("確認待ちはIssue #3では到達不能", ReviewReadyIsUnavailableUntilEvidenceIntegration);
     suite.Add("origin URL検証はGitHubホストとrepository pathを厳密に照合する", GitHubRemoteUrlRequiresExactHostAndPath);
+    suite.Add("PublisherはPR証跡の保存確認後にpendingだけを削除する", PublisherPersistsVerifiedPrEvidenceBeforeRemovingPending);
     suite.Add("JSONLイベントに連番とUTC時刻を記録する", EventLogIsSequencedAndUtc);
     suite.Add("ライフサイクルJSONLは順序・再読込・秘匿・fixture削除後の保存を満たす", LifecycleEventsArePersistedSafely);
     suite.Add("複数プロセスからの同時追記で全JSONL行を保持する", LifecycleJsonlSerializesConcurrentProcesses);
@@ -41,6 +42,7 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("PR必須Codex経路はpush済み差分をレビューしPR証跡後に人間待ちへ進む", RequiredPullRequestWorkflowPushesReviewsAndCreatesPr);
     suite.Add("PR必須Codex経路はpush失敗を成功扱いせずReviewerを起動しない", RequiredPullRequestWorkflowFailsClosedOnPushFailure);
     suite.Add("PR必須Codex経路はPR作成失敗を成功扱いしない", RequiredPullRequestWorkflowFailsClosedOnPrFailure);
+    suite.Add("PR証跡ファイルがない場合は人間確認待ちへ進まない", RequiredPullRequestWorkflowRequiresPersistedEvidence);
     suite.Add("PR必須Codex経路はPush中の停止要求を失敗として記録する", RequiredPullRequestWorkflowStopsDuringPush);
     suite.Add("PR必須Codex経路はPush確認後の停止要求を証跡付きで失敗記録する", RequiredPullRequestWorkflowStopsAfterVerifiedPush);
     suite.Add("PR必須Codex経路はPR作成中の停止要求を成功扱いしない", RequiredPullRequestWorkflowStopsDuringPrCreation);
@@ -78,6 +80,7 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("Codex子プロセスへSystemDriveを渡す", CodexChildInheritsSystemDrive);
     suite.Add("Fake Codexが生成した未追跡バイナリを差分固定時に拒否する", CodexRejectsUntrackedBinaryChanges);
     suite.Add("PR不要のCodex実行では実行bit変更を許容する", CodexNonPullRequestAllowsExecutableModeChange);
+    suite.Add("PR必須Codex snapshotは新規実行ファイルのmodeを保持する", CodexPullRequestSnapshotPreservesNewExecutableMode);
     suite.Add("既存CODEX_HOMEと通常のユーザープロファイルを使える", CodexExistingProfilesAreAccepted);
     suite.Add("再実装プロンプトの契約範囲をFake Codexが読み取る", CodexFakeParsesScopeBeforeRevisionFinding);
     suite.Add("Codex Fakeプロセスで独立レビューまで縦断し固定hashを引き継ぐ", CodexFakeProcessesCompleteIndependentReviewSlice);
@@ -92,6 +95,36 @@ static void GitHubRemoteUrlRequiresExactHostAndPath()
     Assert.False(GitHubWorkflowPublisher.RemoteMatches("https://attacker.example/path/github.com/Ateliers-Dev/ateliers-ai-orchestrator", "Ateliers-Dev/ateliers-ai-orchestrator"));
     Assert.False(GitHubWorkflowPublisher.RemoteMatches("https://github.com.attacker.example/Ateliers-Dev/ateliers-ai-orchestrator", "Ateliers-Dev/ateliers-ai-orchestrator"));
     Assert.False(GitHubWorkflowPublisher.RemoteMatches("https://github.com/Ateliers-Dev/other-repo", "Ateliers-Dev/ateliers-ai-orchestrator"));
+}
+
+static void PublisherPersistsVerifiedPrEvidenceBeforeRemovingPending()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"verified-pr-evidence-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(root);
+    try
+    {
+        var pendingPath = Path.Combine(root, "github-pull-request-pending.json");
+        File.WriteAllText(pendingPath, "{\"state\":\"create-returned\"}");
+        var evidence = new
+        {
+            evidenceKind = "github-pull-request-created",
+            url = "https://github.com/Ateliers-Dev/test/pull/9",
+            headSha = new string('a', 40),
+            baseSha = new string('b', 40),
+            merged = false,
+            verified = true
+        };
+
+        GitHubWorkflowPublisher.PersistVerifiedPullRequestEvidence(root, evidence, evidence.url, evidence.headSha, evidence.baseSha);
+
+        var finalPath = Path.Combine(root, "github-pull-request.json");
+        Assert.True(File.Exists(finalPath));
+        Assert.False(File.Exists(pendingPath));
+        using var saved = JsonDocument.Parse(File.ReadAllBytes(finalPath));
+        Assert.Equal(evidence.url, saved.RootElement.GetProperty("url").GetString());
+        Assert.True(saved.RootElement.GetProperty("verified").GetBoolean());
+    }
+    finally { Directory.Delete(root, true); }
 }
 
 static void RequiredPullRequestWorkflowPushesReviewsAndCreatesPr()
@@ -122,8 +155,37 @@ static void RequiredPullRequestWorkflowPushesReviewsAndCreatesPr()
         Assert.True(storedEvents.Any(line => line.Contains("github_push_verified", StringComparison.Ordinal)));
         Assert.True(storedEvents.Any(line => line.Contains("github_pull_request_created", StringComparison.Ordinal) &&
             line.Contains("head-sha-2", StringComparison.Ordinal)));
+        var evidencePath = Path.Combine(runDirectory, "github-pull-request.json");
+        Assert.True(File.Exists(evidencePath), "成功したPRの検証済み証跡が実行記録に残っていません。");
+        Assert.False(File.Exists(Path.Combine(runDirectory, "github-pull-request-pending.json")));
+        using (var savedEvidence = JsonDocument.Parse(File.ReadAllBytes(evidencePath)))
+            Assert.True(savedEvidence.RootElement.GetProperty("verified").GetBoolean());
         var report = File.ReadAllText(Path.Combine(runDirectory, "report.md"));
         Assert.True(report.Contains("https://github.com/Ateliers-Dev/test/pull/9", StringComparison.Ordinal));
+    }
+    finally { Directory.Delete(root, true); }
+}
+
+static void RequiredPullRequestWorkflowRequiresPersistedEvidence()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"required-pr-missing-evidence-{Guid.NewGuid():N}");
+    var runDirectory = Path.Combine(root, "run");
+    Directory.CreateDirectory(root);
+    Directory.CreateDirectory(runDirectory);
+    try
+    {
+        using var events = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "required-pr-missing-evidence");
+        var publisher = new StubWorkflowPublisher { OmitPrEvidence = true };
+        var runner = new CountingPublicationAgentRunner(FakeScenario.Success);
+        var result = new FakeAgentWorkflow().Run(SampleContract() with
+            { WorkingDirectory = root, Reporting = new ReportingRequirements { PullRequestExpected = true, FinalReportFormat = "markdown" } },
+            "contract-hash", "required-pr-missing-evidence", runDirectory, runner, events,
+            codexOneShot: true, publisher: publisher);
+        events.Dispose();
+
+        Assert.Equal(RunState.Failed, result.State);
+        Assert.False(File.ReadAllText(Path.Combine(runDirectory, "events.jsonl")).Contains("github_pull_request_created", StringComparison.Ordinal));
+        Assert.True(File.ReadAllText(Path.Combine(runDirectory, "events.jsonl")).Contains("github_publication_failed", StringComparison.Ordinal));
     }
     finally { Directory.Delete(root, true); }
 }
@@ -331,6 +393,11 @@ static int RunFakeCodexFixture(string[] args)
     if (prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal)) File.WriteAllText("example.txt", "fixture change\n");
     if (mode == "executable-mode-change" && prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal) && !OperatingSystem.IsWindows())
         File.SetUnixFileMode("example.txt", UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+    if (mode == "new-executable" && prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal) && !OperatingSystem.IsWindows())
+    {
+        File.WriteAllText("new-script.sh", "#!/bin/sh\necho fixture\n");
+        File.SetUnixFileMode("new-script.sh", UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+    }
     if (mode == "untracked-binary" && prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal))
         File.WriteAllBytes("fixture-cache.db", [0x43, 0x56, 0x45, 0x52, 0x53, 0x49, 0x4f, 0x4e, 0x53, 0x00, 0x01]);
     if (prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal) && mode is "workflow" or "artifact-only")
@@ -389,6 +456,24 @@ static void CodexNonPullRequestAllowsExecutableModeChange()
         { Contract = request.Contract with { Reporting = request.Contract.Reporting with { PullRequestExpected = false } } });
         Assert.True(response.Succeeded, response.ExecutionEvidence?.Error ?? "PR不要のrunで実行bit変更を許可しませんでした。");
         Assert.True(response.WorkspaceSnapshotReference is null);
+    }
+}
+
+static void CodexPullRequestSnapshotPreservesNewExecutableMode()
+{
+    if (OperatingSystem.IsWindows()) return;
+    var (runner, request, root) = CreateCodexFixture("new-executable");
+    using (root)
+    {
+        var response = runner.Implement(request with
+        { Contract = request.Contract with { Reporting = request.Contract.Reporting with { PullRequestExpected = true } } });
+        Assert.True(response.Succeeded, response.ExecutionEvidence?.Error ?? "実行ファイルsnapshotを作成できませんでした。");
+        Assert.True(response.WorkspaceSnapshotReference is not null && response.WorkspaceSnapshotSha256 is not null);
+        var snapshotPath = Path.Combine(request.RunDirectory!, response.WorkspaceSnapshotReference!);
+        using var snapshot = JsonDocument.Parse(File.ReadAllBytes(snapshotPath));
+        var executable = snapshot.RootElement.GetProperty("Entries").EnumerateArray()
+            .Single(entry => entry.GetProperty("Path").GetString() == "new-script.sh");
+        Assert.Equal("100755", executable.GetProperty("Mode").GetString());
     }
 }
 
@@ -2244,6 +2329,7 @@ sealed class StubWorkflowPublisher : IWorkflowPublisher
     public List<string> SnapshotHashes { get; } = [];
     public bool FailPush { get; init; }
     public bool FailCreatePullRequest { get; init; }
+    public bool OmitPrEvidence { get; init; }
     public CancellationTokenSource? CancelDuringPush { get; init; }
     public CancellationTokenSource? CancelAfterPush { get; init; }
     public CancellationTokenSource? CancelDuringPrCreation { get; init; }
@@ -2287,7 +2373,25 @@ sealed class StubWorkflowPublisher : IWorkflowPublisher
         }
         if (FailCreatePullRequest) throw new InvalidOperationException("test PR creation failure");
         const string reference = "github-pull-request.json";
-        File.WriteAllText(Path.Combine(directory, reference), "{}\n");
+        if (!OmitPrEvidence)
+        {
+            var evidence = new
+            {
+                evidenceKind = "github-pull-request-created",
+                repository = session.Repository,
+                url = "https://github.com/Ateliers-Dev/test/pull/9",
+                branch = session.Branch,
+                baseBranch = session.BaseBranch,
+                headSha = snapshot.CommitSha,
+                baseSha = session.BaseSha,
+                reviewDiffSha256 = snapshot.DiffSha256,
+                reviewArtifactReference = snapshot.ArtifactReference,
+                merged = false,
+                verified = true,
+                verifiedAtUtc = DateTimeOffset.UtcNow
+            };
+            File.WriteAllText(Path.Combine(directory, reference), JsonSerializer.Serialize(evidence));
+        }
         return new WorkflowPullRequest("https://github.com/Ateliers-Dev/test/pull/9", snapshot.CommitSha,
             session.BaseSha, session.Branch, session.BaseBranch, reference);
     }

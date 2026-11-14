@@ -469,8 +469,9 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
         }
         foreach (var relativePath in newFiles.Order(StringComparer.Ordinal))
         {
-            var bytes = File.ReadAllBytes(ResolveWorkspacePath(workingDirectory, relativePath));
-            entries.Add(new CapturedWorkspaceEntry(relativePath, false, "100644",
+            var path = ResolveWorkspacePath(workingDirectory, relativePath);
+            var bytes = File.ReadAllBytes(path);
+            entries.Add(new CapturedWorkspaceEntry(relativePath, false, GetNewFileGitMode(path),
                 Convert.ToHexStringLower(SHA256.HashData(bytes)), Convert.ToBase64String(bytes)));
         }
         var snapshotBytes = JsonSerializer.SerializeToUtf8Bytes(new CapturedWorkspaceSnapshot(baseCommit, entries));
@@ -510,6 +511,14 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
         }
         if ((File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0)
             throw new InvalidOperationException("Git作業領域ルートがsymlinkまたはreparse pointです。");
+    }
+
+    private static string GetNewFileGitMode(string path)
+    {
+        if (OperatingSystem.IsWindows()) return "100644";
+        var mode = File.GetUnixFileMode(path);
+        return (mode & (UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute)) != 0
+            ? "100755" : "100644";
     }
 
     private sealed record CapturedWorkspaceChanges(string Content, string? Reference, string? Sha256);
