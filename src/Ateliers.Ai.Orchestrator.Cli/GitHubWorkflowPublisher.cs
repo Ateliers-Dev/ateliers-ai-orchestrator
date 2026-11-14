@@ -338,7 +338,8 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
                 reviewerId = reviewResult.ReviewerId,
                 headSha = snapshot.CommitSha,
                 reviewDiffSha256 = snapshot.DiffSha256,
-                verdict = reviewResult.Verdict,
+                decision = reviewResult.Decision.ToString(),
+                hasFindings = reviewResult.HasFindings,
                 commentBodySha256 = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(body))),
                 verified = true,
                 verifiedAtUtc = DateTimeOffset.UtcNow
@@ -362,24 +363,20 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
     internal static string FormatReviewComment(WorkflowReviewResult result, string marker)
     {
         var summary = result.Summary.Trim();
-        var separator = summary.IndexOf(':');
-        if (separator >= 0) summary = summary[(separator + 1)..].Trim();
+        WorkflowReviewAssessment.Validate(result.Decision, result.HasFindings, summary);
         if (summary.Length > 16000) summary = summary[..16000] + "\n\n（長さ上限により後続を省略）";
-        var saysFindings = summary.Contains("指摘あり", StringComparison.Ordinal);
-        var saysNoFindings = summary.Contains("指摘なし", StringComparison.Ordinal);
-        if (saysFindings == saysNoFindings)
-            throw new InvalidOperationException("Reviewer応答に『指摘あり』または『指摘なし』の明確な判定がありません。");
-        var verdict = saysFindings ? "指摘あり" : "指摘なし";
-        if (saysFindings)
+        var decision = result.Decision switch
         {
-            foreach (var field in new[] { "重要度:", "対象:", "根拠:", "改善案:" })
-                if (!summary.Contains(field, StringComparison.Ordinal))
-                    throw new InvalidOperationException($"レビュー指摘をPR全体コメントへ記録するための項目 {field} がありません。");
-        }
+            WorkflowReviewDecision.Approve => "承認",
+            WorkflowReviewDecision.RequestChanges => "修正依頼",
+            WorkflowReviewDecision.NeedsHumanInput => "人間判断",
+            _ => throw new InvalidOperationException("Reviewer判定が不明です。")
+        };
+        var findings = result.HasFindings ? "あり" : "なし";
         if (!Uri.TryCreate(result.PullRequestUrl, UriKind.Absolute, out var pullRequestUri) ||
             pullRequestUri.Scheme != Uri.UriSchemeHttps || pullRequestUri.Host != "github.com")
             throw new InvalidOperationException("コメント本文に記録するPR URLがGitHub URLではありません。");
-        return $"{marker}\n## 独立レビュー結果\n\n- PR: {result.PullRequestUrl}\n- 判定: {verdict}\n- Run ID: `{result.RunId}`\n- Reviewer: `{result.ReviewerId.Replace("`", "'")}`\n- レビュー対象 head SHA: `{result.ReviewedHeadSha}`\n- レビュー対象 base: `{result.ReviewedBaseBranch}` (`{result.ReviewedBaseSha}`)\n- レビュー差分 SHA-256: `{result.ReviewDiffSha256}`\n\n### レビュー内容\n\n{summary}\n";
+        return $"{marker}\n## 独立レビュー結果\n\n- PR: {result.PullRequestUrl}\n- 判定: {decision}\n- 指摘有無: {findings}\n- Run ID: `{result.RunId}`\n- Reviewer: `{result.ReviewerId.Replace("`", "'")}`\n- レビュー対象 head SHA: `{result.ReviewedHeadSha}`\n- レビュー対象 base: `{result.ReviewedBaseBranch}` (`{result.ReviewedBaseSha}`)\n- レビュー差分 SHA-256: `{result.ReviewDiffSha256}`\n\n### レビュー内容\n\n{summary}\n";
     }
 
     private static int ParsePullRequestNumber(string url, string repository)
@@ -489,6 +486,8 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
                 root.GetProperty("baseSha").GetString() != result.ReviewedBaseSha ||
                 root.GetProperty("baseBranch").GetString() != result.ReviewedBaseBranch ||
                 root.GetProperty("reviewDiffSha256").GetString() != result.ReviewDiffSha256 ||
+                root.GetProperty("decision").GetString() != result.Decision.ToString() ||
+                root.GetProperty("hasFindings").GetBoolean() != result.HasFindings ||
                 !result.ReviewedHeadSha.Equals(expectedHeadSha, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("保存後のレビュー結果コメント証跡を照合できません。");
             if (File.Exists(pending)) File.Delete(pending);

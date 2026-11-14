@@ -391,7 +391,8 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                         : workflowOneShot && reviewResponse.ArtifactReferences is { Count: > 0 } ? "任意成果物あり"
                         : workflowOneShot && string.IsNullOrWhiteSpace(reviewResponse.Content) ? "本文なし"
                         : workflowOneShot ? "応答あり"
-                        : reviewResponse.Content.StartsWith("レビュー合格:", StringComparison.Ordinal) ? "合格"
+                        : reviewResponse.Content.StartsWith("判定: 承認", StringComparison.Ordinal) ||
+                            reviewResponse.Content.StartsWith("レビュー合格:", StringComparison.Ordinal) ? "合格"
                         : reviewResponse.Content.StartsWith("要件に判断が必要です:", StringComparison.Ordinal) ? "人間判断が必要"
                         : "指摘";
                     if (reviewResponse.ExecutionEvidence is { } reviewExecutionEvidence)
@@ -437,7 +438,29 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                         break;
                     }
 
-                    if (reviewResponse.Content.StartsWith("レビュー合格:", StringComparison.Ordinal))
+                    WorkflowReviewAssessment? publicationAssessment = null;
+                    if (requiresPullRequest || reviewResponse.Content.StartsWith("判定:", StringComparison.Ordinal))
+                    {
+                        try { publicationAssessment = WorkflowReviewAssessment.Parse(reviewResponse.Content); }
+                        catch (InvalidOperationException)
+                        {
+                            failure = requiresPullRequest
+                                ? "Reviewer応答の判定形式または指摘内容が不正・矛盾しているため、PR提出前に停止しました。"
+                                : "Reviewer応答の判定形式または指摘内容が不正・矛盾しているため、人間判断待ちで停止しました。";
+                            eventWriter.Append(requiresPullRequest ? "github_review_assessment_failed" : "review_assessment_failed",
+                                "failed", from: run.State, to: run.State,
+                                detail: requiresPullRequest
+                                    ? "Reviewerの判定・指摘有無・構造化指摘を照合できません。PR作成とコメント投稿は行っていません。"
+                                    : "Reviewerの判定・指摘有無・構造化指摘を照合できません。",
+                                error: failure, inputReference: reviewResponseRef, diffSha256: currentHash, role: "Orchestrator");
+                            run.Transition(requiresPullRequest ? RunState.Failed : RunState.NeedsHumanInput);
+                            break;
+                        }
+                    }
+                    var reviewerApproved = publicationAssessment is not null
+                        ? publicationAssessment.Decision == WorkflowReviewDecision.Approve
+                        : reviewResponse.Content.StartsWith("レビュー合格:", StringComparison.Ordinal);
+                    if (reviewerApproved)
                     {
                         if (publicationSession is not null && publicationSnapshot is not null)
                         {
@@ -456,7 +479,9 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                                     diffSha256: publicationSnapshot.DiffSha256, role: "Orchestrator");
                                 var reviewResult = new WorkflowReviewResult(runId, reviewerId, publishedPullRequest.Url,
                                     publicationSnapshot.CommitSha, publishedPullRequest.BaseSha, publishedPullRequest.BaseBranch,
-                                    publicationSnapshot.DiffSha256, "approve", reviewResponse.Content);
+                                    publicationSnapshot.DiffSha256, publicationAssessment?.Decision ?? WorkflowReviewDecision.Approve,
+                                    publicationAssessment?.HasFindings ?? false,
+                                    publicationAssessment?.Summary ?? reviewResponse.Content);
                                 publishedReviewComment = publisher.PostReviewResultComment(publicationSession, publicationSnapshot,
                                     publishedPullRequest, reviewResult, runDirectory, stopToken);
                                 VerifyPostedReviewCommentEvidence(runDirectory, publishedReviewComment, reviewResult,
@@ -464,7 +489,7 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                                 if (StopWasRequested(stopToken))
                                     throw new OperationCanceledException("レビュー結果コメント投稿後に停止要求を受け付けました。投稿結果を成功扱いしません。", stopToken);
                                 eventWriter.Append("github_review_result_comment_posted", "accepted", from: run.State, to: run.State,
-                                    detail: $"独立レビュー結果をPR全体コメントとして投稿・照合しました。commentId={publishedReviewComment.CommentId}; pr={publishedPullRequest.Url}; headSha={publishedReviewComment.HeadSha}; baseSha={publishedPullRequest.BaseSha}; diffSha256={publicationSnapshot.DiffSha256}; reviewer={reviewerId}",
+                                    detail: $"独立レビュー結果をPR全体コメントとして投稿・照合しました。decision={reviewResult.Decision}; hasFindings={reviewResult.HasFindings}; commentId={publishedReviewComment.CommentId}; pr={publishedPullRequest.Url}; headSha={publishedReviewComment.HeadSha}; baseSha={publishedPullRequest.BaseSha}; diffSha256={publicationSnapshot.DiffSha256}; reviewer={reviewerId}",
                                     outputReference: publishedReviewComment.EvidenceReference, targetCommitSha: publishedReviewComment.HeadSha,
                                     diffSha256: publicationSnapshot.DiffSha256, role: "Orchestrator");
                                 failure = $"独立Reviewerが承認し、push済みの同一head SHAをGitHub PRとレビュー結果コメントで確認しました。人間による最終確認・マージ待ちです: {publishedPullRequest.Url}";
@@ -529,14 +554,15 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                         break;
                     }
 
-                    if (reviewResponse.Content.StartsWith("要件に判断が必要です:", StringComparison.Ordinal))
+                    if (publicationAssessment?.Decision == WorkflowReviewDecision.NeedsHumanInput ||
+                        (publicationAssessment is null && reviewResponse.Content.StartsWith("要件に判断が必要です:", StringComparison.Ordinal)))
                     {
                         failure = reviewResponse.Content;
                         run.Transition(requiresPullRequest ? RunState.Failed : RunState.NeedsHumanInput);
                         break;
                     }
 
-                    lastFinding = reviewResponse.Content;
+                    lastFinding = publicationAssessment?.Summary ?? reviewResponse.Content;
                     if (workflowOneShot)
                     {
                         failure = $"Reviewerの指摘を記録しました。自動修正・再レビューは行わず人間判断待ちで停止します: {lastFinding}";
@@ -776,7 +802,8 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                 evidence.GetProperty("reviewDiffSha256").GetString() != result.ReviewDiffSha256 ||
                 evidence.GetProperty("runId").GetString() != result.RunId ||
                 evidence.GetProperty("reviewerId").GetString() != result.ReviewerId ||
-                evidence.GetProperty("verdict").GetString() != result.Verdict ||
+                evidence.GetProperty("decision").GetString() != result.Decision.ToString() ||
+                evidence.GetProperty("hasFindings").GetBoolean() != result.HasFindings ||
                 !comment.HeadSha.Equals(result.ReviewedHeadSha, StringComparison.OrdinalIgnoreCase) ||
                 !pullRequest.Url.Equals(result.PullRequestUrl, StringComparison.Ordinal) ||
                 !pullRequest.HeadSha.Equals(result.ReviewedHeadSha, StringComparison.OrdinalIgnoreCase) ||

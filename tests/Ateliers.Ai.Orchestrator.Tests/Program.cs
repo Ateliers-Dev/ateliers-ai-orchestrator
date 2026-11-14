@@ -139,9 +139,10 @@ static void ReviewCommentIsStructuredAndIdempotent()
     const string baseBranch = "main";
     const string marker = "<!-- ateliers-review-result run=run-1 head=0123456789012345678901234567890123456789 base=1123456789012345678901234567890123456789 diff=2123456789012345678901234567890123456789 -->";
     var reviewResult = new WorkflowReviewResult("run-1", "reviewer-1", prUrl, headSha, baseSha, baseBranch,
-        diffSha, "approve", "レビュー合格: 指摘なし。条件を満たしています。");
+        diffSha, WorkflowReviewDecision.Approve, false, "条件を満たしています。");
     var approval = GitHubWorkflowPublisher.FormatReviewComment(reviewResult, marker);
-    Assert.True(approval.Contains("判定: 指摘なし", StringComparison.Ordinal));
+    Assert.True(approval.Contains("判定: 承認", StringComparison.Ordinal));
+    Assert.True(approval.Contains("指摘有無: なし", StringComparison.Ordinal));
     Assert.True(approval.Contains("Run ID: `run-1`", StringComparison.Ordinal));
     Assert.True(approval.Contains("Reviewer: `reviewer-1`", StringComparison.Ordinal));
     Assert.True(approval.Contains($"PR: {prUrl}", StringComparison.Ordinal));
@@ -151,9 +152,11 @@ static void ReviewCommentIsStructuredAndIdempotent()
 
     var findings = GitHubWorkflowPublisher.FormatReviewComment(reviewResult with
     {
-        Summary = "レビュー合格: 指摘あり\n重要度: P2\n対象: src/File.cs\n根拠: null入力時に例外となる\n改善案: 入力検証を追加する"
+        HasFindings = true,
+        Summary = "重要度: P2\n対象: src/File.cs\n根拠: null入力時に例外となる\n改善案: 入力検証を追加する"
     }, marker);
-    Assert.True(findings.Contains("判定: 指摘あり", StringComparison.Ordinal));
+    Assert.True(findings.Contains("判定: 承認", StringComparison.Ordinal));
+    Assert.True(findings.Contains("指摘有無: あり", StringComparison.Ordinal));
     Assert.True(findings.Contains("重要度: P2", StringComparison.Ordinal));
     Assert.True(findings.Contains("対象: src/File.cs", StringComparison.Ordinal));
     Assert.True(findings.Contains("根拠:", StringComparison.Ordinal));
@@ -175,7 +178,17 @@ static void ReviewCommentIsStructuredAndIdempotent()
     Assert.Throws<InvalidOperationException>(() => GitHubWorkflowPublisher.EnsurePullRequestTargetsReview(
         [headSha, baseSha, "codex/run-1", "release", "OPEN"], session, snapshot, pullRequest));
     Assert.Throws<InvalidOperationException>(() => GitHubWorkflowPublisher.FormatReviewComment(
-        reviewResult with { Summary = "レビュー合格: 根拠は十分です" }, marker));
+        reviewResult with { Summary = "重要度: P1\n対象: src/File.cs\n根拠: null入力時に例外となる\n改善案: 入力検証を追加する" }, marker));
+    Assert.Throws<InvalidOperationException>(() => WorkflowReviewAssessment.Parse(
+        "判定: 承認\n指摘有無: なし\n\n重要度: P1\n対象: src/File.cs\n根拠: null入力時に例外となる\n改善案: 入力検証を追加する"));
+    Assert.Throws<InvalidOperationException>(() => WorkflowReviewAssessment.Parse(
+        "レビュー合格: 指摘なし\n\n重要度: P1\n対象: src/File.cs\n根拠: null入力時に例外となる\n改善案: 入力検証を追加する"));
+    Assert.Throws<InvalidOperationException>(() => WorkflowReviewAssessment.Parse(
+        "判定: 修正依頼\n指摘有無: なし\n\n根拠を追記してください"));
+    var requestChanges = WorkflowReviewAssessment.Parse(
+        "判定: 修正依頼\n指摘有無: あり\n\n重要度: P1\n対象: src/File.cs\n根拠: null入力時に例外となる\n改善案: 入力検証を追加する");
+    Assert.Equal(WorkflowReviewDecision.RequestChanges, requestChanges.Decision);
+    Assert.True(requestChanges.HasFindings);
 
     var evidenceRoot = Path.Combine(Path.GetTempPath(), $"review-comment-evidence-{Guid.NewGuid():N}");
     Directory.CreateDirectory(evidenceRoot);
@@ -190,7 +203,7 @@ static void ReviewCommentIsStructuredAndIdempotent()
             runId = reviewResult.RunId, reviewerId = reviewResult.ReviewerId, headSha = reviewResult.ReviewedHeadSha,
             pullRequestUrl = reviewResult.PullRequestUrl, baseSha = reviewResult.ReviewedBaseSha,
             baseBranch = reviewResult.ReviewedBaseBranch, reviewDiffSha256 = reviewResult.ReviewDiffSha256,
-            verdict = reviewResult.Verdict, verified = true
+            decision = reviewResult.Decision.ToString(), hasFindings = reviewResult.HasFindings, verified = true
         };
         GitHubWorkflowPublisher.PersistReviewCommentEvidence(evidenceRoot, validEvidence, 10, expectedCommentUrl,
             reviewResult, headSha);
@@ -203,7 +216,8 @@ static void ReviewCommentIsStructuredAndIdempotent()
         {
             validEvidence.evidenceKind, validEvidence.url, validEvidence.commentId, validEvidence.runId,
             validEvidence.reviewerId, validEvidence.headSha, validEvidence.pullRequestUrl, validEvidence.baseSha,
-            validEvidence.baseBranch, reviewDiffSha256 = new string('f', 40), validEvidence.verdict, validEvidence.verified
+            validEvidence.baseBranch, reviewDiffSha256 = new string('f', 40), validEvidence.decision,
+            validEvidence.hasFindings, validEvidence.verified
         };
         Assert.Throws<InvalidOperationException>(() => GitHubWorkflowPublisher.PersistReviewCommentEvidence(
             alteredRoot, alteredEvidence, 10, expectedCommentUrl, reviewResult, headSha));
@@ -255,6 +269,8 @@ static void RequiredPullRequestWorkflowPushesReviewsAndCreatesPr()
             Assert.Equal("required-pr-test", commentEvidence.RootElement.GetProperty("runId").GetString());
             Assert.Equal("codex-cli-reviewer", commentEvidence.RootElement.GetProperty("reviewerId").GetString());
             Assert.Equal("head-sha-2", commentEvidence.RootElement.GetProperty("headSha").GetString());
+            Assert.Equal(nameof(WorkflowReviewDecision.Approve), commentEvidence.RootElement.GetProperty("decision").GetString());
+            Assert.False(commentEvidence.RootElement.GetProperty("hasFindings").GetBoolean());
         }
         var report = File.ReadAllText(Path.Combine(runDirectory, "report.md"));
         Assert.True(report.Contains("https://github.com/Ateliers-Dev/test/pull/9", StringComparison.Ordinal));
@@ -294,6 +310,31 @@ static void RequiredPullRequestWorkflowFailsClosedOnReviewCommentFailure()
         }
         finally { Directory.Delete(root, true); }
     }
+
+    var inconsistentRoot = Path.Combine(Path.GetTempPath(), $"required-pr-inconsistent-review-{Guid.NewGuid():N}");
+    var inconsistentRunDirectory = Path.Combine(inconsistentRoot, "run");
+    Directory.CreateDirectory(inconsistentRoot);
+    Directory.CreateDirectory(inconsistentRunDirectory);
+    try
+    {
+        using var events = JsonlRunEventStore.CreateNew(Path.Combine(inconsistentRunDirectory, "events.jsonl"), "required-pr-inconsistent-review");
+        var publisher = new StubWorkflowPublisher();
+        var runner = new CountingPublicationAgentRunner(FakeScenario.Success,
+            "判定: 承認\n指摘有無: なし\n\n重要度: P1\n対象: src/File.cs\n根拠: null入力時に例外となる\n改善案: 入力検証を追加する");
+        var result = new FakeAgentWorkflow().Run(SampleContract() with
+            { WorkingDirectory = inconsistentRoot, Reporting = new ReportingRequirements { PullRequestExpected = true, FinalReportFormat = "markdown" } },
+            "contract-hash", "required-pr-inconsistent-review", inconsistentRunDirectory, runner, events,
+            codexOneShot: true, publisher: publisher);
+        events.Dispose();
+
+        Assert.Equal(RunState.Failed, result.State);
+        Assert.False(publisher.Calls.Contains("create-pr"), "矛盾したレビュー結果でPRを作成しました。");
+        Assert.False(publisher.Calls.Contains("post-review-comment"), "矛盾したレビュー結果をコメント投稿しました。");
+        var log = File.ReadAllText(Path.Combine(inconsistentRunDirectory, "events.jsonl"));
+        Assert.True(log.Contains("github_review_assessment_failed", StringComparison.Ordinal));
+        Assert.False(log.Contains("github_pull_request_created", StringComparison.Ordinal));
+    }
+    finally { Directory.Delete(inconsistentRoot, true); }
 }
 
 static void RequiredPullRequestWorkflowRequiresPersistedEvidence()
@@ -2480,14 +2521,26 @@ sealed class CountingFakeAgentRunner(FakeScenario scenario) : IAgentRunner
     }
 }
 
-sealed class CountingPublicationAgentRunner(FakeScenario scenario) : IAgentRunner, IPullRequestWorkflowAgentRunner
+sealed class CountingPublicationAgentRunner(FakeScenario scenario, string? reviewResponseOverride = null) : IAgentRunner, IPullRequestWorkflowAgentRunner
 {
     private readonly CountingFakeAgentRunner inner = new(scenario);
     public int ImplementationCalls => inner.ImplementationCalls;
     public int ReviewCalls => inner.ReviewCalls;
     public AgentResponse Implement(AgentRequest request) => inner.Implement(request) with
     { WorkspaceSnapshotReference = "artifacts/implementer-snapshot-test.json", WorkspaceSnapshotSha256 = "snapshot-test-hash" };
-    public AgentResponse Review(AgentRequest request) => inner.Review(request);
+    public AgentResponse Review(AgentRequest request)
+    {
+        var response = inner.Review(request);
+        if (reviewResponseOverride is not null) return response with { Content = reviewResponseOverride };
+        if (!response.Succeeded) return response;
+        if (response.Content.StartsWith("レビュー合格:", StringComparison.Ordinal))
+            return response with { Content = $"判定: 承認\n指摘有無: なし\n\n{response.Content["レビュー合格:".Length..].Trim()}" };
+        if (response.Content.StartsWith("指摘:", StringComparison.Ordinal))
+            return response with { Content = $"判定: 修正依頼\n指摘有無: あり\n\n重要度: P2\n対象: {request.ArtifactReference ?? "対象成果物"}\n根拠: {response.Content["指摘:".Length..].Trim()}\n改善案: 指摘内容に従って修正する" };
+        if (response.Content.StartsWith("要件に判断が必要です:", StringComparison.Ordinal))
+            return response with { Content = $"判定: 人間判断\n指摘有無: なし\n\n{response.Content["要件に判断が必要です:".Length..].Trim()}" };
+        return response;
+    }
 }
 
 sealed class StubWorkflowPublisher : IWorkflowPublisher
@@ -2586,7 +2639,8 @@ sealed class StubWorkflowPublisher : IWorkflowPublisher
             pullRequestUrl = pullRequest.Url, url = "https://github.com/Ateliers-Dev/test/pull/9#issuecomment-10", commentId = 10L,
             runId = reviewResult.RunId, reviewerId = reviewResult.ReviewerId, headSha = snapshot.CommitSha,
             baseSha = reviewResult.ReviewedBaseSha, baseBranch = reviewResult.ReviewedBaseBranch,
-            reviewDiffSha256 = snapshot.DiffSha256, verdict = reviewResult.Verdict, commentBodySha256 = "hash",
+            reviewDiffSha256 = snapshot.DiffSha256, decision = reviewResult.Decision.ToString(),
+            hasFindings = reviewResult.HasFindings, commentBodySha256 = "hash",
             verified = true, verifiedAtUtc = DateTimeOffset.UtcNow };
         File.WriteAllText(Path.Combine(runDirectory, reference), JsonSerializer.Serialize(evidence));
         if (TamperReviewCommentEvidence)
@@ -2595,7 +2649,8 @@ sealed class StubWorkflowPublisher : IWorkflowPublisher
                 pullRequestUrl = evidence.pullRequestUrl, url = evidence.url, commentId = evidence.commentId,
                 runId = evidence.runId, reviewerId = evidence.reviewerId, headSha = evidence.headSha,
                 baseSha = new string('f', 40), baseBranch = evidence.baseBranch,
-                reviewDiffSha256 = evidence.reviewDiffSha256, verdict = evidence.verdict,
+                reviewDiffSha256 = evidence.reviewDiffSha256, decision = evidence.decision,
+                hasFindings = evidence.hasFindings,
                 commentBodySha256 = evidence.commentBodySha256, verified = evidence.verified, verifiedAtUtc = evidence.verifiedAtUtc };
             File.WriteAllText(Path.Combine(runDirectory, reference), JsonSerializer.Serialize(tamperedEvidence));
         }
