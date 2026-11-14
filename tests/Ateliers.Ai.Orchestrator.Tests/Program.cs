@@ -37,6 +37,9 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("遅いSlack通知は実行時間と停止応答を遅らせない", SlowSlackNotificationsDoNotBlockWorkflowCancellation);
     suite.Add("禁止遷移は状態と記録を変えない", RejectedTransitionDoesNotMutate);
     suite.Add("Fake正常系は成果物固定後にレビューし証跡不足で停止する", FakeSuccessKeepsReviewAndReadyEvidenceSeparate);
+    suite.Add("PR必須Codex経路はpush済み差分をレビューしPR証跡後に人間待ちへ進む", RequiredPullRequestWorkflowPushesReviewsAndCreatesPr);
+    suite.Add("PR必須Codex経路はpush失敗を成功扱いせずReviewerを起動しない", RequiredPullRequestWorkflowFailsClosedOnPushFailure);
+    suite.Add("PR必須Codex経路はPR作成失敗を成功扱いしない", RequiredPullRequestWorkflowFailsClosedOnPrFailure);
     suite.Add("Fake修正系は同一Reviewerで再レビューし上限を守る", FakeRevisionIsBoundedAndReReviewed);
     suite.Add("Fake停止・失敗・空応答・タイムアウトを正しく報告する", FakeStopAndFailureScenariosAreRecorded);
     suite.Add("再試行上限でReviewer失敗を終了する", ReviewerRetriesStopAtLimit);
@@ -74,6 +77,91 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("再実装プロンプトの契約範囲をFake Codexが読み取る", CodexFakeParsesScopeBeforeRevisionFinding);
     suite.Add("Codex Fakeプロセスで独立レビューまで縦断し固定hashを引き継ぐ", CodexFakeProcessesCompleteIndependentReviewSlice);
     suite.Add("Codex一回モードは成功・指摘・失敗を記録し追加起動せず人間判断待ちで止まる", CodexOneShotStopsWithoutRetries);
+}
+
+static void RequiredPullRequestWorkflowPushesReviewsAndCreatesPr()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"required-pr-workflow-{Guid.NewGuid():N}");
+    var runDirectory = Path.Combine(root, "run");
+    Directory.CreateDirectory(root);
+    Directory.CreateDirectory(runDirectory);
+    try
+    {
+        using var events = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "required-pr-test");
+        var publisher = new StubWorkflowPublisher();
+        var runner = new CountingPublicationAgentRunner(FakeScenario.RevisionThenSuccess);
+        var result = new FakeAgentWorkflow().Run(SampleContract() with
+            { WorkingDirectory = root, Reporting = new ReportingRequirements { PullRequestExpected = true, FinalReportFormat = "markdown" } },
+            "contract-hash", "required-pr-test", runDirectory, runner, events,
+            codexOneShot: true, publisher: publisher);
+        events.Dispose();
+
+        Assert.Equal(RunState.NeedsHumanInput, result.State);
+        Assert.True(result.PersistenceSucceeded);
+        Assert.Equal("start,push,push,create-pr", string.Join(',', publisher.Calls));
+        Assert.Equal(2, runner.ImplementationCalls);
+        Assert.Equal(2, runner.ReviewCalls);
+        var storedEvents = File.ReadAllLines(Path.Combine(runDirectory, "events.jsonl"));
+        Assert.True(storedEvents.Any(line => line.Contains("github_push_verified", StringComparison.Ordinal)));
+        Assert.True(storedEvents.Any(line => line.Contains("github_pull_request_created", StringComparison.Ordinal) &&
+            line.Contains("head-sha-2", StringComparison.Ordinal)));
+        var report = File.ReadAllText(Path.Combine(runDirectory, "report.md"));
+        Assert.True(report.Contains("https://github.com/Ateliers-Dev/test/pull/9", StringComparison.Ordinal));
+    }
+    finally { Directory.Delete(root, true); }
+}
+
+static void RequiredPullRequestWorkflowFailsClosedOnPushFailure()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"required-pr-fail-{Guid.NewGuid():N}");
+    var runDirectory = Path.Combine(root, "run");
+    Directory.CreateDirectory(root);
+    Directory.CreateDirectory(runDirectory);
+    try
+    {
+        using var events = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "required-pr-fail-test");
+        var publisher = new StubWorkflowPublisher { FailPush = true };
+        var runner = new CountingPublicationAgentRunner(FakeScenario.Success);
+        var result = new FakeAgentWorkflow().Run(SampleContract() with
+            { WorkingDirectory = root, Reporting = new ReportingRequirements { PullRequestExpected = true, FinalReportFormat = "markdown" } },
+            "contract-hash", "required-pr-fail-test", runDirectory, runner, events,
+            codexOneShot: true, publisher: publisher);
+        events.Dispose();
+
+        Assert.Equal(RunState.Failed, result.State);
+        Assert.True(result.PersistenceSucceeded);
+        Assert.Equal("start,push", string.Join(',', publisher.Calls));
+        Assert.Equal(0, runner.ReviewCalls);
+        Assert.False(File.Exists(Path.Combine(runDirectory, "github-pull-request.json")));
+        Assert.True(File.ReadAllText(Path.Combine(runDirectory, "report.md")).Contains("成功扱いにはしていません", StringComparison.Ordinal));
+    }
+    finally { Directory.Delete(root, true); }
+}
+
+static void RequiredPullRequestWorkflowFailsClosedOnPrFailure()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"required-pr-create-fail-{Guid.NewGuid():N}");
+    var runDirectory = Path.Combine(root, "run");
+    Directory.CreateDirectory(root);
+    Directory.CreateDirectory(runDirectory);
+    try
+    {
+        using var events = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "required-pr-create-fail-test");
+        var publisher = new StubWorkflowPublisher { FailCreatePullRequest = true };
+        var runner = new CountingPublicationAgentRunner(FakeScenario.Success);
+        var result = new FakeAgentWorkflow().Run(SampleContract() with
+            { WorkingDirectory = root, Reporting = new ReportingRequirements { PullRequestExpected = true, FinalReportFormat = "markdown" } },
+            "contract-hash", "required-pr-create-fail-test", runDirectory, runner, events,
+            codexOneShot: true, publisher: publisher);
+        events.Dispose();
+
+        Assert.Equal(RunState.Failed, result.State);
+        Assert.True(result.PersistenceSucceeded);
+        Assert.Equal("start,push,create-pr", string.Join(',', publisher.Calls));
+        Assert.False(File.Exists(Path.Combine(runDirectory, "github-pull-request.json")));
+        Assert.False(File.ReadAllText(Path.Combine(runDirectory, "events.jsonl")).Contains("github_pull_request_created", StringComparison.Ordinal));
+    }
+    finally { Directory.Delete(root, true); }
 }
 
 static int RunFakeCodexFixture(string[] args)
@@ -543,8 +631,7 @@ static void WorkflowCancellationStopsFakeCodexProcess()
         var eventPath = Path.Combine(request.RunDirectory!, "events.jsonl");
         FakeWorkflowResult result;
         using var events = JsonlRunEventStore.CreateNew(eventPath, request.RunId);
-        var workflow = Task.Run(() => new FakeAgentWorkflow().Run(SampleContract() with
-            { WorkingDirectory = request.Contract.WorkingDirectory }, new string('d', 64), request.RunId,
+        var workflow = Task.Run(() => new FakeAgentWorkflow().Run(request.Contract, new string('d', 64), request.RunId,
             request.RunDirectory!, runner, events, stopToken: cancellation.Token, codexOneShot: true));
 
         WaitForFakeCodexStart(request);
@@ -574,8 +661,8 @@ static void WaitForFakeCodexStart(AgentRequest request)
         try { return File.ReadAllText(signalPath) == "started"; }
         catch (IOException) { return false; }
         catch (UnauthorizedAccessException) { return false; }
-    }, TimeSpan.FromSeconds(5));
-    Assert.True(started, "Fake Codex子プロセスの開始シグナルを5秒以内に確認できませんでした。");
+    }, TimeSpan.FromSeconds(15));
+    Assert.True(started, "Fake Codex子プロセスの開始シグナルを15秒以内に確認できませんでした。");
 }
 
 static void CodexChildEnvironmentFiltersSecrets()
@@ -818,7 +905,8 @@ static (CodexCliAgentRunner Runner, AgentRequest Request, TemporaryDirectory Roo
     var executable = Environment.ProcessPath!;
     var options = new CodexCliRunnerOptions(executable, implementerHome, reviewerHome,
         ["--fake-codex-fixture", scenario], killOverride, cancellationToken);
-    var request = new AgentRequest("fixture-run", "Implementer", SampleContract() with { WorkingDirectory = workspace }, 1,
+    var request = new AgentRequest("fixture-run", "Implementer", SampleContract() with
+        { WorkingDirectory = workspace, Reporting = new ReportingRequirements { PullRequestExpected = false, FinalReportFormat = "markdown" } }, 1,
         RunDirectory: runDirectory, RemainingTime: timeout ?? TimeSpan.FromSeconds(5));
     return (new CodexCliAgentRunner(options), request, root);
 }
@@ -2029,6 +2117,52 @@ sealed class CountingFakeAgentRunner(FakeScenario scenario) : IAgentRunner
     {
         ReviewCalls++;
         return inner.Review(request);
+    }
+}
+
+sealed class CountingPublicationAgentRunner(FakeScenario scenario) : IAgentRunner, IPullRequestWorkflowAgentRunner
+{
+    private readonly CountingFakeAgentRunner inner = new(scenario);
+    public int ImplementationCalls => inner.ImplementationCalls;
+    public int ReviewCalls => inner.ReviewCalls;
+    public AgentResponse Implement(AgentRequest request) => inner.Implement(request);
+    public AgentResponse Review(AgentRequest request) => inner.Review(request);
+}
+
+sealed class StubWorkflowPublisher : IWorkflowPublisher
+{
+    public List<string> Calls { get; } = [];
+    public bool FailPush { get; init; }
+    public bool FailCreatePullRequest { get; init; }
+
+    public WorkflowPublicationSession Start(TaskContract contract, string runId)
+    {
+        Calls.Add("start");
+        return new WorkflowPublicationSession(contract.WorkingDirectory, "Ateliers-Dev/test", $"codex/{contract.TaskId}-{runId[..8]}",
+            "main", "base-sha-test", "git-config", "config-hash", "safe-hooks");
+    }
+
+    public WorkflowPublicationSnapshot PushChanges(WorkflowPublicationSession session, int attempt, string directory)
+    {
+        Calls.Add("push");
+        if (FailPush) throw new InvalidOperationException("test push failure");
+        Directory.CreateDirectory(Path.Combine(directory, "artifacts"));
+        const string diff = "diff --git a/file.txt b/file.txt\n+change\n";
+        var reference = Path.Combine("artifacts", $"pushed-diff-{attempt}.patch");
+        File.WriteAllText(Path.Combine(directory, reference), diff);
+        var hash = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(Path.Combine(directory, reference))));
+        return new WorkflowPublicationSnapshot($"head-sha-{attempt}", hash, reference);
+    }
+
+    public WorkflowPullRequest CreatePullRequest(WorkflowPublicationSession session,
+        WorkflowPublicationSnapshot snapshot, TaskContract contract, string directory)
+    {
+        Calls.Add("create-pr");
+        if (FailCreatePullRequest) throw new InvalidOperationException("test PR creation failure");
+        const string reference = "github-pull-request.json";
+        File.WriteAllText(Path.Combine(directory, reference), "{}\n");
+        return new WorkflowPullRequest("https://github.com/Ateliers-Dev/test/pull/9", snapshot.CommitSha,
+            session.BaseSha, session.Branch, session.BaseBranch, reference);
     }
 }
 

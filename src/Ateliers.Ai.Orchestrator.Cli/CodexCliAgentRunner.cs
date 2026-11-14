@@ -6,7 +6,7 @@ using System.Collections.Concurrent;
 using Ateliers.Ai.Orchestrator.Core;
 
 /// <summary>Codex CLIのJSONL実行をCoreのAgentRunner境界へ接続します。</summary>
-internal sealed class CodexCliAgentRunner : IAgentRunner
+internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAgentRunner
 {
     private const string ScopeBoundaryInstruction = "作業範囲はAgentへの指示であり、OSレベルで範囲外アクセスを完全に防ぐ保証ではありません。";
     private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
@@ -347,7 +347,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
             if (!string.Equals(actualArtifactSha256, request.ArtifactSha256, StringComparison.Ordinal))
                 throw new InvalidOperationException("Reviewerへ渡す固定成果物のSHA-256が一致しません。");
             var artifact = StrictUtf8.GetString(artifactBytes);
-            return $"ROLE=REVIEWER\nREVIEW_ATTEMPT: {request.Attempt}\nあなたは独立したReviewerです。実装者の会話・自己評価は受け取っていません。以下の固定成果物をレビューしてください。レビュー対象のソースコードや設計書は変更せず、必要な分析資料・提案などがあれば任意の形式・ファイル名で作業ディレクトリに保存できます。最終応答や保存ファイルに特定の成果物形式を求めません。契約に記された作業範囲と許可操作を守ってください。{ScopeBoundaryInstruction}\n任意成果物の保存先: {Path.Combine(request.RunDirectory!, "exchanges", $"reviewer-{request.Attempt}", "workspace", "artifacts")}\n対象SHA-256: {request.ArtifactSha256}\n\n契約:\n{contract}\n\n固定成果物:\n{artifact}";
+            return $"ROLE=REVIEWER\nREVIEW_ATTEMPT: {request.Attempt}\nあなたは独立したReviewerです。実装者の会話・自己評価は受け取っていません。以下の固定成果物を契約要件・受け入れ条件に照らしてレビューしてください。応答の最初の行は、承認する場合は `レビュー合格:`、修正が必要な場合は `指摘:`、人間の判断が必要な場合は `要件に判断が必要です:` で始め、具体的な根拠を続けてください。明確な根拠なしに承認しないでください。レビュー対象のソースコードや設計書は変更せず、必要な分析資料・提案などがあれば任意の形式・ファイル名で作業ディレクトリに保存できます。保存ファイルの形式は問いません。契約に記された作業範囲と許可操作を守ってください。{ScopeBoundaryInstruction}\n任意成果物の保存先: {Path.Combine(request.RunDirectory!, "exchanges", $"reviewer-{request.Attempt}", "workspace", "artifacts")}\n対象SHA-256: {request.ArtifactSha256}\n\n契約:\n{contract}\n\n固定成果物:\n{artifact}";
         }
         var revision = request.ReviewFinding is null ? "" : $"\n前回レビュー指摘:\n{request.ReviewFinding}\n";
         return $"ROLE=IMPLEMENTER\nあなたはImplementerです。契約に記された作業領域と許可操作の範囲内でのみ作業し、外部書込・削除・マージを行わず、変更後の unified diff とテスト結果を最終応答に含めてください。{ScopeBoundaryInstruction}\n\n契約:\n{contract}{revision}";

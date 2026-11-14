@@ -1,19 +1,21 @@
 # Ateliers AI オーケストレーター
 
-.NET 10 のローカルCLIです。バージョン付きJSON契約の検証、状態遷移モデル、JSONL実行記録に加え、Fake AgentまたはCodex CLI子プロセスによるワークフローを実行できます。GitHubへの書込とmergeは行いません。
+.NET 10 のローカルCLIです。バージョン付きJSON契約の検証、状態遷移モデル、JSONL実行記録に加え、Fake AgentまたはCodex CLI子プロセスによるワークフローを実行できます。契約がPRを要求するCodex実行では、専用ブランチへのpushとGitHub PR作成を必須ゲートとして扱います。mergeは行いません。
 
 
 ## 今回のPoC完了地点
 
-今回のPoCの完了地点は、**Codex Implementer → Codex Reviewer → 結果集約 → 停止**です。実行結果とレビュー結果を記録した後、人間の判断待ちで止まります。
+Codex実行の完了地点は、契約の`reporting.pullRequestExpected`に従います。`true`では**Implementer → 専用ブランチへcommit・push → push済み固定差分を独立Reviewerが確認 → 指摘時はboundedな修正・再push・再レビュー → PR作成・SHA照合 → 人間判断待ち**へ進みます。
 
-Codex経路はImplementerを最大1回、独立Reviewerを最大1回だけ起動し、成果物SHA-256、応答、停止理由を記録して `NeedsHumanInput` で停止します。Implementer/Reviewerの失敗、レビュー指摘、レビュー合格のいずれの場合も、自動修正・再レビュー・再試行やPR作成へ進みません。Fake経路の既存反復シナリオは維持します。
+`pullRequestExpected=true`の実Codex経路は、実行前にcleanなGit checkout、`origin`、GitHub既定ブランチの最新SHA、GitHub CLI認証とpush権限を確認します。Implementer後に専用ブランチへ変更をcommitしpushし、リモートrefのSHAとローカルHEADを照合した後、そのcommitから作成した固定diffをReviewerへ渡します。Reviewerの指摘では契約上限内で修正・再pushして再レビューします。合格後にPRを作成し、PR URL、head/base SHA、branch、diff hashを実行記録へ保存します。これらが完了するまで正常な`NeedsHumanInput`へ進みません。認証・push・PR・証跡照合の失敗は`Failed`となり成功扱いしません。
+
+`pullRequestExpected=false`では自動push/PRを行わず、従来どおりCodexを一回ずつ実行して停止します。Fake実行も外部GitHub操作をしません。人間によるPR最終確認とmergeの責務を維持し、自動mergeは行いません。
 
 実Codex CLIによる受入は未実施であり、実証済み・運用可能とはみなしません。通常のビルドとUnit/Fakeテストは実Codex CLIやモデル通信を起動しません。実Codex IntegrationTestsは、`ATELIERS_RUN_CODEX_INTEGRATION_TESTS=1` とCodex CLIの絶対パスが指定された場合だけ起動します。
 
 オーケストレーターは、Agentの実行条件と制御を保証する。Agentの判断結果および実行環境に残るリスクは、利用者の責任範囲とする。
 
-ここでいう実行条件と制御には、契約で指定した作業領域と操作範囲をAgentへ伝えること、実行時のsandboxモード設定、ImplementerとReviewerを各1回までに制限すること、時間上限を適用すること、終了後は人間判断待ちで停止することを含みます。Agentへの指示やworkspace sandboxは、OSレベルで指定範囲外へのアクセスが完全に不可能であることを保証しません。ローカル実行に残るリスクは利用者が受容する前提です。
+ここでいう実行条件と制御には、契約で指定した作業領域と操作範囲をAgentへ伝えること、実行時のsandboxモード設定、契約の修正・再試行上限を守ること、時間上限を適用すること、PR必須経路では提出後に人間判断待ちで停止することを含みます。Agentへの指示やworkspace sandboxは、OSレベルで指定範囲外へのアクセスが完全に不可能であることを保証しません。ローカル実行に残るリスクは利用者が受容する前提です。
 
 ### 後続で必須の安全機能・実行条件
 
@@ -31,6 +33,7 @@ Phase 1のCore、CLI、通常テストはDockerプロジェクトに依存しま
 ## 必要環境
 
 - .NET SDK 10
+- PR必須のCodex実行ではGit、GitHub CLI (`gh`)、GitHub認証、対象リポジトリへのbranch push/PR作成権限
 
 追加NuGetパッケージはありません。
 
@@ -82,9 +85,11 @@ dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- run examples/task-contr
   --runs ./.ateliers-orchestrator/runs
 ```
 
-Implementerは契約の作業領域で `workspace-write`、Reviewerは固定成果物を入力として受け取り、実際のcheckoutから分離した `exchanges/reviewer-N/workspace` にある専用Git作業領域から実行します。この作業領域の `artifacts` サブディレクトリが任意成果物の保存先です。実行前に固定成果物のSHA-256を照合し、Reviewerへ渡す内容が固定時のバイト列と一致することを確認します。Reviewer起動時はCodex CLIの `--config sandbox_workspace_write.writable_roots=[]` で、既存のユーザー・プロジェクト設定による追加書込ルートを無効にします。Reviewerにはレビュー対象のソースコード・設計書を変更しないよう指示し、必要な成果物を任意のファイル名・形式で保存できます。生成ファイルは `artifactReferences` として実行イベントに記録されます。Reviewerへ直接渡すのは契約と固定差分で、元のcheckoutは複製しません。契約にはcheckoutのパスが含まれるため、Reviewerがその中のファイルを読み取れるかはCodex sandboxの実効権限に従います。workspace-writeはOSレベルの完全な隔離ではなく、範囲外の読み書きを完全に防ぐ保証ではありません。Agentの処理状態と成果物参照は分けて扱い、成果物の種類やファイル形式は定めません。Codex CLIを各役割につき1回だけ起動し、失敗時の再試行、自動修正、自動マージは行わず、人間判断待ちで停止します。子プロセスには許可した環境変数だけを渡し、APIキー等の認証環境変数は渡しませんが、HTTP(S)プロキシ変数は接続に必要なため引き継ぎます。既知のHTTP(S)・ALL_PROXY URLとuser-info内の認証情報は、CLIの標準出力・標準エラーを実行記録へ保存する前にマスキングします。これは既知の値と認証部分に限る保護であり、未知の秘密値、CLI側で変形・分割された断片、別形式で出力された値の完全な秘匿は保証しません。生ログと応答はこの範囲外の秘密情報を含む可能性があるため、実行ディレクトリのアクセスと保持を管理してください。`--config approval_policy="never"` を指定するため、非対話run中に承認待ち画面は出ません。Codexのsandboxモード設定は行いますが、OS全体の隔離境界としては扱いません。拒否された操作はAgent失敗として記録します。子Agent/再委譲を無効化できることは実証していないため、完全に記録できたとは扱いません。timeoutとCtrl+C停止要求を区別し、kill結果、終了確認、stream切断を分けて保存します。killはCodex turn中断の保証ではありません。Unattended `codex exec` の例は[OpenAI Cookbook](https://developers.openai.com/cookbook/examples/codex/build_iterative_repair_loops_with_codex)を参照しています。
+契約の`reporting.pullRequestExpected`が`true`なら、`workingDirectory`はGitHubリポジトリのルートを指定し、開始時点で作業ツリーがcleanで、ローカルHEADがGitHub既定ブランチの最新SHAと一致している必要があります。`gh auth status`でGitHub CLI認証が確認でき、Gitのcredential helper等でも`origin`へpushできるようにしてください。実行は`codex/<taskId>-<runId>`ブランチを作り、実装変更だけをstageします。実行記録フォルダーがcheckout内にある場合はcommit対象から除外します。Git hookは公開処理中に無効化し、実行開始後の`.git/config`変更やsystem/global/local Git filter設定を検出した場合は停止します。変更対象に秘密情報らしいファイル名や既知形式のtoken/private keyが見つかった場合はpush前に停止します。この確認は限定的なパターン検出であり、秘密情報スキャナーではありません。push後もPR作成に失敗した場合はリモートブランチが残ることがあります。記録された失敗とブランチを確認してから再実行してください。
 
-実行ごとにCLI JSONL、stderr、最終応答、process/thread識別子、terminal event、終了コード、取得できたtoken usageを保存します。CLI版情報は追加プロセスを起動せず「未取得」と記録します。stderr警告単独では成功・失敗を判定しません。token数は実費・請求額・硬い予算上限ではありません。生ログと応答は秘密情報を含む可能性があるため、実行ディレクトリのアクセスと保持を管理してください。GitHub push・PR作成・mergeはこのコマンドから行わず、人間が最終PR判断を行います。
+Implementerは契約の作業領域で `workspace-write`、Reviewerは固定成果物を入力として受け取り、実際のcheckoutから分離した `exchanges/reviewer-N/workspace` にある専用Git作業領域から実行します。この作業領域の `artifacts` サブディレクトリが任意成果物の保存先です。実行前に固定成果物のSHA-256を照合し、Reviewerへ渡す内容が固定時のバイト列と一致することを確認します。Reviewer起動時はCodex CLIの `--config sandbox_workspace_write.writable_roots=[]` で、既存のユーザー・プロジェクト設定による追加書込ルートを無効にします。Reviewerにはレビュー対象のソースコード・設計書を変更しないよう指示し、必要な成果物を任意のファイル名・形式で保存できます。生成ファイルは `artifactReferences` として実行イベントに記録されます。Reviewerへ直接渡すのは契約と固定差分で、元のcheckoutは複製しません。契約にはcheckoutのパスが含まれるため、Reviewerがその中のファイルを読み取れるかはCodex sandboxの実効権限に従います。workspace-writeはOSレベルの完全な隔離ではなく、範囲外の読み書きを完全に防ぐ保証ではありません。Agentの処理状態と成果物参照は分けて扱い、成果物の種類やファイル形式は定めません。PR必須経路は契約で定めた修正・再試行上限内で再レビューします。それ以外のCodex経路は各役割を一回ずつ実行します。自動mergeは行わず、人間が最終PR判断を行います。子プロセスには許可した環境変数だけを渡し、APIキー等の認証環境変数は渡しませんが、HTTP(S)プロキシ変数は接続に必要なため引き継ぎます。既知のHTTP(S)・ALL_PROXY URLとuser-info内の認証情報は、CLIの標準出力・標準エラーを実行記録へ保存する前にマスキングします。これは既知の値と認証部分に限る保護であり、未知の秘密値、CLI側で変形・分割された断片、別形式で出力された値の完全な秘匿は保証しません。生ログと応答はこの範囲外の秘密情報を含む可能性があるため、実行ディレクトリのアクセスと保持を管理してください。`--config approval_policy="never"` を指定するため、非対話run中に承認待ち画面は出ません。Codexのsandboxモード設定は行いますが、OS全体の隔離境界としては扱いません。拒否された操作はAgent失敗として記録します。子Agent/再委譲を無効化できることは実証していないため、完全に記録できたとは扱いません。timeoutとCtrl+C停止要求を区別し、kill結果、終了確認、stream切断を分けて保存します。killはCodex turn中断の保証ではありません。Unattended `codex exec` の例は[OpenAI Cookbook](https://developers.openai.com/cookbook/examples/codex/build_iterative_repair_loops_with_codex)を参照しています。
+
+実行ごとにCLI JSONL、stderr、最終応答、process/thread識別子、terminal event、終了コード、取得できたtoken usageを保存します。CLI版情報は追加プロセスを起動せず「未取得」と記録します。stderr警告単独では成功・失敗を判定しません。token数は実費・請求額・硬い予算上限ではありません。生ログと応答は秘密情報を含む可能性があるため、実行ディレクトリのアクセスと保持を管理してください。PR必須のCodex実行ではpushとPR作成を行います。mergeは行わず、人間が最終PR判断を行います。
 
 Fake Agentは実行ごとに同じ入力へ同じ応答を返します。成果物は版ごとに別ファイルへ保存し、保存後の同じバイト列のSHA-256をReviewer要求とイベントに記録します。役割別の要求・応答、試行数、状態遷移、最終報告は実行ディレクトリへ保存されます。初回Reviewer入力にはImplementerの自己評価を含めません。
 
@@ -94,7 +99,7 @@ Fake Agentは実行ごとに同じ入力へ同じ応答を返します。成果�
 
 ## 状態と実行記録
 
-状態は `Prepared → Implementing → Reviewing → Revising → Implementing ...` の流れと、`ReadyForHumanReview`、`NeedsHumanInput`、`Failed` の終端状態を定義しています。禁止遷移は拒否されます。`ReadyForHumanReview` への遷移には、固定成果物ハッシュと一致する独立レビュー記録、タスクの全受け入れ条件の検証記録、GitHub PR URLと作成操作記録が必要です。3種類の記録ファイルを読み、種別と内容を照合します。Fakeモードは実PRや受け入れ結果を作らないため、証跡が別途与えられない限り `NeedsHumanInput` で停止します。Agentの自己申告だけで遷移する経路はありません。人間によるマージ状態はモデルに含まず、CLIからマージする機能もありません。
+状態は `Prepared → Implementing → Reviewing → Revising → Implementing ...` の流れと、`ReadyForHumanReview`、`NeedsHumanInput`、`Failed` の終端状態を定義しています。禁止遷移は拒否されます。`ReadyForHumanReview` への遷移には、固定成果物ハッシュと一致する独立レビュー記録、タスクの全受け入れ条件の検証記録、GitHub PR URLと作成操作記録が必要です。PR必須のCodex経路は、PR作成とpush済みhead/base SHAの照合を完了した後に`NeedsHumanInput`へ進み、PR証跡と固定差分を保存します。3種類の記録ファイルを読み、種別と内容を照合します。Fakeモードは実PRや受け入れ結果を作らないため、証跡が別途与えられない限り `NeedsHumanInput` で停止します。Agentの自己申告だけで遷移する経路はありません。人間によるマージ状態はモデルに含まず、CLIからマージする機能もありません。
 
 `--review-evidence` を使う場合は、`HumanReviewEvidence` のJSONと、それが参照する3記録を指定します。レビュー記録は `evidenceKind=independent-review`、対象成果物・レビュー入力のハッシュ、異なる実装・レビュー担当ID、`selfAssessmentExcluded=true`、`verdict=approve` を含めます。受け入れ記録は `evidenceKind=acceptance-verification`、契約の受け入れ条件一覧ハッシュ、全条件数と合格数を含めます。PR操作記録は `evidenceKind=github-pull-request-created`、実PR URL、操作IDを含めます。CLIは記録内容と相互参照を検査して、参照先と記録ファイルのSHA-256を実行イベントへ残します。タイムアウトシナリオはFake応答による再現です。記録の発行元を暗号学的に認証する仕組みはなく、実GitHub操作を行う機能でもありません。
 

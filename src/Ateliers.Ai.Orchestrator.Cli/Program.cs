@@ -80,9 +80,11 @@ internal static class OrchestratorCli
                 using var eventStore = JsonlRunEventStore.CreateNew(Path.Combine(fakeRunDirectory, "events.jsonl"), fakeRunId);
                 using var lifecycleWriter = new LifecycleNotificationEventWriter(lifecycleLogPath, notificationsDisabled, useSlackTestChannel);
                 IAgentRunner runner = agentKind == "codex" ? new CodexCliAgentRunner(codexOptions!) : new FakeAgentRunner(scenario);
+                IWorkflowPublisher? publisher = agentKind == "codex" && contract.Reporting.PullRequestExpected
+                    ? new GitHubWorkflowPublisher() : null;
                 var result = new FakeAgentWorkflow().Run(contract, contractHash, fakeRunId, fakeRunDirectory,
                     runner, eventStore, evidence, stopToken: stopSource.Token,
-                    codexOneShot: agentKind == "codex", lifecycleEvents: lifecycleWriter);
+                    codexOneShot: agentKind == "codex", lifecycleEvents: lifecycleWriter, publisher: publisher);
                 await lifecycleWriter.FlushSlackNotificationsAsync(stopSource.Token);
                 if (lifecycleWriter.FailedWrites > 0)
                     Console.Error.WriteLine($"警告: ライフサイクルJSONLへの書き込みに{lifecycleWriter.FailedWrites}件失敗しました。実行結果は継続しています。");
