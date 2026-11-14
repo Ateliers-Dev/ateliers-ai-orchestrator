@@ -11,6 +11,8 @@ namespace Ateliers.Ai.Orchestrator.Cli;
 public sealed class GitHubWorkflowPublisher : IWorkflowPublisher
 {
     private readonly string _safeHooksPath = CreateSafeHooksPath();
+    private string? _isolatedGitConfigPath;
+    private string? _isolatedGitConfigSha256;
     private static readonly Regex SecretPath = new(
         @"(^|/)(\.env($|\.)|\.ssh/|id_rsa($|\.)|id_ed25519($|\.)|secrets?([._-]|$)|credentials?([._-]|$)|.*\.(pem|p12|pfx|key)$)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
@@ -21,6 +23,8 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher
     /// <inheritdoc />
     public WorkflowPublicationSession Start(TaskContract contract, string runId)
     {
+        _isolatedGitConfigPath = CreateIsolatedGitConfig(contract.WorkingDirectory);
+        _isolatedGitConfigSha256 = HashFile(_isolatedGitConfigPath);
         var root = Git(contract.WorkingDirectory, "rev-parse", "--show-toplevel").Output.Trim();
         if (!Path.GetFullPath(root).Equals(Path.GetFullPath(contract.WorkingDirectory), PathComparison))
             throw new InvalidOperationException("workingDirectory はGitリポジトリのルートを指定してください。");
@@ -33,6 +37,11 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher
             if (configuredFilters.ExitCode == 0)
                 throw new InvalidOperationException("Git設定に外部filterがあります。安全な専用checkoutで再実行してください。");
         }
+        var unsafeLocalConfig = Run("git", root, ["config", "--local", "--get-regexp",
+                "^(include|filter\\.|credential\\.helper$|core\\.(sshCommand|fsmonitor)$|url\\..*\\.(insteadOf|pushInsteadOf)$)"],
+            allowExitCodeOne: true, isolatedGitConfigPath: _isolatedGitConfigPath);
+        if (!string.IsNullOrWhiteSpace(unsafeLocalConfig.Output))
+            throw new InvalidOperationException("実行前のローカルGit設定に外部コマンドや設定includeがあります。安全な専用checkoutで再実行してください。");
 
         // gh handles API authentication; Git push uses the configured credential helper. Neither output is persisted.
         Gh(root, "auth", "status", "--hostname", "github.com");
@@ -43,7 +52,8 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher
         var repository = repo[0];
         var baseBranch = repo[1];
         var remoteUrl = Git(root, "remote", "get-url", "origin").Output.Trim();
-        if (!RemoteMatches(remoteUrl, repository))
+        var pushRemoteUrl = Git(root, "remote", "get-url", "--push", "origin").Output.Trim();
+        if (!RemoteMatches(remoteUrl, repository) || !RemoteMatches(pushRemoteUrl, repository))
             throw new InvalidOperationException("originがGitHub CLIで特定したリポジトリと一致しません。");
 
         Git(root, "fetch", "--no-tags", "origin", $"+refs/heads/{baseBranch}:refs/remotes/origin/{baseBranch}");
@@ -92,9 +102,9 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher
         if (SecretContent.IsMatch(stagedDiff))
             throw new InvalidOperationException("差分に既知形式の秘密情報らしい値を検出しました。内容を確認し、秘密情報を除去してください。");
         Git(root, "diff", "--cached", "--check");
-        Git(root, "-c", "core.quotePath=false", "commit", "-m", $"{session.Branch} の成果物 {attempt}");
+        Git(root, "-c", "core.quotePath=false", "commit", "--no-verify", "-m", $"{session.Branch} の成果物 {attempt}");
         var commitSha = Git(root, "rev-parse", "HEAD").Output.Trim();
-        Git(root, "push", "--porcelain", "origin", $"HEAD:refs/heads/{session.Branch}");
+        Git(root, "push", "--no-verify", "--porcelain", "origin", $"HEAD:refs/heads/{session.Branch}");
         var remoteLine = Git(root, "ls-remote", "origin", $"refs/heads/{session.Branch}").Output.Trim();
         var remoteSha = remoteLine.Split('\t')[0];
         if (!remoteSha.Equals(commitSha, StringComparison.OrdinalIgnoreCase))
@@ -212,8 +222,13 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher
         return paths;
     }
 
-    private ProcessResult Git(string cwd, params string[] args) => Run("git", cwd,
-        ["-c", $"core.hooksPath={_safeHooksPath}", "-c", "commit.gpgsign=false", .. args]);
+    private ProcessResult Git(string cwd, params string[] args)
+    {
+        EnsureSafeGitExecutionContext();
+        return Run("git", cwd,
+            ["-c", $"core.hooksPath={_safeHooksPath}", "-c", "commit.gpgsign=false", .. args],
+            isolatedGitConfigPath: _isolatedGitConfigPath);
+    }
     private static ProcessResult Gh(string cwd, params string[] args) => Run("gh", cwd, args);
 
     private static string CreateSafeHooksPath()
@@ -223,7 +238,30 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher
         return path;
     }
 
+    private static string CreateIsolatedGitConfig(string cwd)
+    {
+        var helperResult = Run("git", cwd,
+            ["config", "--global", "--null", "--get-all", "credential.helper"], allowExitCodeOne: true);
+        var helpers = helperResult.Output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+        var directory = Path.Combine(Path.GetTempPath(), $"ateliers-orchestrator-gitconfig-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var configPath = Path.Combine(directory, "config");
+        File.WriteAllText(configPath, string.Empty, new UTF8Encoding(false));
+        foreach (var helper in helpers)
+            Run("git", cwd, ["config", "--file", configPath, "--add", "credential.helper", helper]);
+        return configPath;
+    }
+
     private static string HashFile(string path) => Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)));
+
+    private void EnsureSafeGitExecutionContext()
+    {
+        if (_isolatedGitConfigPath is null || _isolatedGitConfigSha256 is null ||
+            !File.Exists(_isolatedGitConfigPath) ||
+            !HashFile(_isolatedGitConfigPath).Equals(_isolatedGitConfigSha256, StringComparison.Ordinal) ||
+            !Directory.Exists(_safeHooksPath) || Directory.EnumerateFileSystemEntries(_safeHooksPath).Any())
+            throw new InvalidOperationException("隔離したGit設定またはhook無効化領域が変更されています。公開処理を停止しました。");
+    }
 
     private static void EnsureTrustedGitConfig(WorkflowPublicationSession session)
     {
@@ -232,10 +270,22 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher
             throw new InvalidOperationException("Implementer実行後にローカルGit設定が変更されました。安全のため公開処理を停止しました。");
     }
 
-    private static ProcessResult Run(string executable, string cwd, IReadOnlyList<string> args, bool allowExitCodeOne = false)
+    private static ProcessResult Run(string executable, string cwd, IReadOnlyList<string> args,
+        bool allowExitCodeOne = false, string? isolatedGitConfigPath = null)
     {
         var info = new ProcessStartInfo(executable) { WorkingDirectory = cwd, UseShellExecute = false,
             RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        if (isolatedGitConfigPath is not null)
+        {
+            info.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
+            info.Environment["GIT_CONFIG_GLOBAL"] = isolatedGitConfigPath;
+            foreach (var variable in info.Environment.Keys.Where(key => key.StartsWith("GIT_CONFIG_KEY_", StringComparison.OrdinalIgnoreCase) ||
+                         key.StartsWith("GIT_CONFIG_VALUE_", StringComparison.OrdinalIgnoreCase)).ToArray())
+                info.Environment.Remove(variable);
+            info.Environment.Remove("GIT_CONFIG_COUNT");
+            info.Environment.Remove("GIT_CONFIG_PARAMETERS");
+            info.Environment.Remove("GIT_CONFIG_SYSTEM");
+        }
         foreach (var arg in args) info.ArgumentList.Add(arg);
         using var process = new Process { StartInfo = info };
         try
