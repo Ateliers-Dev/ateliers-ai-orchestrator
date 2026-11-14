@@ -122,6 +122,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
             await process.StandardInput.BaseStream.WriteAsync(promptBytes);
             await process.StandardInput.BaseStream.FlushAsync();
             process.StandardInput.Close();
+            options.BeforeTimeoutForTesting?.Invoke(stdoutPath);
             var timeout = request.RemainingTime is { } remaining && remaining < TimeSpan.FromMinutes(request.Contract.Limits.MaxDurationMinutes)
                 ? remaining : TimeSpan.FromMinutes(request.Contract.Limits.MaxDurationMinutes);
             var exitTask = process.WaitForExitAsync();
@@ -549,7 +550,8 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
 /// <param name="PrefixArguments">ラッパー実行ファイルを使う場合の先行引数です。</param>
 internal sealed record CodexCliRunnerOptions(string ExecutablePath, string ImplementerCodexHome,
     string ReviewerCodexHome, IReadOnlyList<string>? PrefixArguments = null,
-    Action<Process>? KillProcessForTesting = null, CancellationToken CancellationToken = default)
+    Action<Process>? KillProcessForTesting = null, CancellationToken CancellationToken = default,
+    Action<string>? BeforeTimeoutForTesting = null)
 {
     /// <summary>CLIと、指定または既定のCODEX_HOMEを検証します。</summary>
     /// <returns>検証済み設定です。</returns>

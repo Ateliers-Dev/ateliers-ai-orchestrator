@@ -127,21 +127,32 @@ static void PublisherPersistsVerifiedPrEvidenceBeforeRemovingPending()
         Assert.True(saved.RootElement.GetProperty("verified").GetBoolean());
     }
     finally { Directory.Delete(root, true); }
+
 }
 
 static void ReviewCommentIsStructuredAndIdempotent()
 {
-    const string marker = "<!-- ateliers-review-result run=run-1 head=0123456789012345678901234567890123456789 -->";
-    var approval = GitHubWorkflowPublisher.FormatReviewComment(new WorkflowReviewResult("run-1", "reviewer-1",
-        "0123456789012345678901234567890123456789", "approve", "レビュー合格: 指摘なし。条件を満たしています。"), marker);
+    const string prUrl = "https://github.com/Ateliers-Dev/test/pull/9";
+    const string headSha = "0123456789012345678901234567890123456789";
+    const string baseSha = "1123456789012345678901234567890123456789";
+    const string diffSha = "2123456789012345678901234567890123456789";
+    const string baseBranch = "main";
+    const string marker = "<!-- ateliers-review-result run=run-1 head=0123456789012345678901234567890123456789 base=1123456789012345678901234567890123456789 diff=2123456789012345678901234567890123456789 -->";
+    var reviewResult = new WorkflowReviewResult("run-1", "reviewer-1", prUrl, headSha, baseSha, baseBranch,
+        diffSha, "approve", "レビュー合格: 指摘なし。条件を満たしています。");
+    var approval = GitHubWorkflowPublisher.FormatReviewComment(reviewResult, marker);
     Assert.True(approval.Contains("判定: 指摘なし", StringComparison.Ordinal));
     Assert.True(approval.Contains("Run ID: `run-1`", StringComparison.Ordinal));
     Assert.True(approval.Contains("Reviewer: `reviewer-1`", StringComparison.Ordinal));
-    Assert.True(approval.Contains("レビュー対象 head SHA:", StringComparison.Ordinal));
+    Assert.True(approval.Contains($"PR: {prUrl}", StringComparison.Ordinal));
+    Assert.True(approval.Contains($"レビュー対象 head SHA: `{headSha}`", StringComparison.Ordinal));
+    Assert.True(approval.Contains($"レビュー対象 base: `{baseBranch}` (`{baseSha}`)", StringComparison.Ordinal));
+    Assert.True(approval.Contains($"レビュー差分 SHA-256: `{diffSha}`", StringComparison.Ordinal));
 
-    var findings = GitHubWorkflowPublisher.FormatReviewComment(new WorkflowReviewResult("run-1", "reviewer-1",
-        "0123456789012345678901234567890123456789", "approve",
-        "レビュー合格: 指摘あり\n重要度: P2\n対象: src/File.cs\n根拠: null入力時に例外となる\n改善案: 入力検証を追加する"), marker);
+    var findings = GitHubWorkflowPublisher.FormatReviewComment(reviewResult with
+    {
+        Summary = "レビュー合格: 指摘あり\n重要度: P2\n対象: src/File.cs\n根拠: null入力時に例外となる\n改善案: 入力検証を追加する"
+    }, marker);
     Assert.True(findings.Contains("判定: 指摘あり", StringComparison.Ordinal));
     Assert.True(findings.Contains("重要度: P2", StringComparison.Ordinal));
     Assert.True(findings.Contains("対象: src/File.cs", StringComparison.Ordinal));
@@ -154,8 +165,52 @@ static void ReviewCommentIsStructuredAndIdempotent()
     Assert.Throws<InvalidOperationException>(() => GitHubWorkflowPublisher.FindExistingReviewComment(duplicateBody, marker, approval));
     var conflictingBody = JsonSerializer.Serialize(new[] { new { id = 10, body = approval + "modified" } });
     Assert.Throws<InvalidOperationException>(() => GitHubWorkflowPublisher.FindExistingReviewComment(conflictingBody, marker, approval));
-    Assert.Throws<InvalidOperationException>(() => GitHubWorkflowPublisher.FormatReviewComment(new WorkflowReviewResult("run-1",
-        "reviewer-1", "0123456789012345678901234567890123456789", "approve", "レビュー合格: 根拠は十分です"), marker));
+    Assert.Throws<System.Text.Json.JsonException>(() => GitHubWorkflowPublisher.FindExistingReviewComment("{invalid-json", marker, approval));
+    var session = new WorkflowPublicationSession(".", "Ateliers-Dev/test", "codex/run-1", baseBranch, baseSha,
+        "git-config", "config-hash", "safe-hooks");
+    var snapshot = new WorkflowPublicationSnapshot(headSha, diffSha, "artifacts/diff.patch");
+    var pullRequest = new WorkflowPullRequest(prUrl, headSha, baseSha, "codex/run-1", baseBranch, "github-pull-request.json");
+    Assert.Throws<InvalidOperationException>(() => GitHubWorkflowPublisher.EnsurePullRequestTargetsReview(
+        [headSha, new string('f', 40), "codex/run-1", baseBranch, "OPEN"], session, snapshot, pullRequest));
+    Assert.Throws<InvalidOperationException>(() => GitHubWorkflowPublisher.EnsurePullRequestTargetsReview(
+        [headSha, baseSha, "codex/run-1", "release", "OPEN"], session, snapshot, pullRequest));
+    Assert.Throws<InvalidOperationException>(() => GitHubWorkflowPublisher.FormatReviewComment(
+        reviewResult with { Summary = "レビュー合格: 根拠は十分です" }, marker));
+
+    var evidenceRoot = Path.Combine(Path.GetTempPath(), $"review-comment-evidence-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(evidenceRoot);
+    try
+    {
+        var expectedCommentUrl = prUrl + "#issuecomment-10";
+        var pendingPath = Path.Combine(evidenceRoot, "github-review-comment-pending.json");
+        File.WriteAllText(pendingPath, "pending");
+        var validEvidence = new
+        {
+            evidenceKind = "github-review-result-comment-posted", url = expectedCommentUrl, commentId = 10L,
+            runId = reviewResult.RunId, reviewerId = reviewResult.ReviewerId, headSha = reviewResult.ReviewedHeadSha,
+            pullRequestUrl = reviewResult.PullRequestUrl, baseSha = reviewResult.ReviewedBaseSha,
+            baseBranch = reviewResult.ReviewedBaseBranch, reviewDiffSha256 = reviewResult.ReviewDiffSha256,
+            verdict = reviewResult.Verdict, verified = true
+        };
+        GitHubWorkflowPublisher.PersistReviewCommentEvidence(evidenceRoot, validEvidence, 10, expectedCommentUrl,
+            reviewResult, headSha);
+        Assert.False(File.Exists(pendingPath));
+
+        var alteredRoot = Path.Combine(evidenceRoot, "altered");
+        Directory.CreateDirectory(alteredRoot);
+        File.WriteAllText(Path.Combine(alteredRoot, "github-review-comment-pending.json"), "pending");
+        var alteredEvidence = new
+        {
+            validEvidence.evidenceKind, validEvidence.url, validEvidence.commentId, validEvidence.runId,
+            validEvidence.reviewerId, validEvidence.headSha, validEvidence.pullRequestUrl, validEvidence.baseSha,
+            validEvidence.baseBranch, reviewDiffSha256 = new string('f', 40), validEvidence.verdict, validEvidence.verified
+        };
+        Assert.Throws<InvalidOperationException>(() => GitHubWorkflowPublisher.PersistReviewCommentEvidence(
+            alteredRoot, alteredEvidence, 10, expectedCommentUrl, reviewResult, headSha));
+        Assert.True(File.Exists(Path.Combine(alteredRoot, "github-review-comment-pending.json")),
+            "証跡不一致時にpending証跡を削除しました。");
+    }
+    finally { Directory.Delete(evidenceRoot, true); }
 }
 
 static void RequiredPullRequestWorkflowPushesReviewsAndCreatesPr()
@@ -209,31 +264,36 @@ static void RequiredPullRequestWorkflowPushesReviewsAndCreatesPr()
 
 static void RequiredPullRequestWorkflowFailsClosedOnReviewCommentFailure()
 {
-    var root = Path.Combine(Path.GetTempPath(), $"required-pr-comment-fail-{Guid.NewGuid():N}");
-    var runDirectory = Path.Combine(root, "run");
-    Directory.CreateDirectory(root);
-    Directory.CreateDirectory(runDirectory);
-    try
+    foreach (var malformedResponse in new[] { false, true })
     {
-        using var events = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "required-pr-comment-fail");
-        var publisher = new StubWorkflowPublisher { FailReviewComment = true };
-        var runner = new CountingPublicationAgentRunner(FakeScenario.Success);
-        var result = new FakeAgentWorkflow().Run(SampleContract() with
-            { WorkingDirectory = root, Reporting = new ReportingRequirements { PullRequestExpected = true, FinalReportFormat = "markdown" } },
-            "contract-hash", "required-pr-comment-fail", runDirectory, runner, events,
-            codexOneShot: true, publisher: publisher);
-        events.Dispose();
+        var runId = malformedResponse ? "required-pr-comment-json-fail" : "required-pr-comment-fail";
+        var root = Path.Combine(Path.GetTempPath(), $"{runId}-{Guid.NewGuid():N}");
+        var runDirectory = Path.Combine(root, "run");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(runDirectory);
+        try
+        {
+            using var events = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), runId);
+            var publisher = new StubWorkflowPublisher
+                { FailReviewComment = true, FailReviewCommentWithJson = malformedResponse };
+            var runner = new CountingPublicationAgentRunner(FakeScenario.Success);
+            var result = new FakeAgentWorkflow().Run(SampleContract() with
+                { WorkingDirectory = root, Reporting = new ReportingRequirements { PullRequestExpected = true, FinalReportFormat = "markdown" } },
+                "contract-hash", runId, runDirectory, runner, events,
+                codexOneShot: true, publisher: publisher);
+            events.Dispose();
 
-        Assert.Equal(RunState.Failed, result.State);
-        Assert.True(result.PersistenceSucceeded);
-        var storedEvents = File.ReadAllText(Path.Combine(runDirectory, "events.jsonl"));
-        Assert.True(storedEvents.Contains("github_review_result_comment_failed", StringComparison.Ordinal));
-        Assert.True(storedEvents.Contains("expectedHeadSha=head-sha-1", StringComparison.Ordinal));
-        Assert.False(storedEvents.Contains("github_review_result_comment_posted", StringComparison.Ordinal));
-        Assert.True(File.Exists(Path.Combine(runDirectory, "github-review-comment-pending.json")));
-        Assert.True(File.ReadAllText(Path.Combine(runDirectory, "report.md")).Contains("成功扱いにはしていません", StringComparison.Ordinal));
+            Assert.Equal(RunState.Failed, result.State);
+            Assert.True(result.PersistenceSucceeded);
+            var storedEvents = File.ReadAllText(Path.Combine(runDirectory, "events.jsonl"));
+            Assert.True(storedEvents.Contains("github_review_result_comment_failed", StringComparison.Ordinal));
+            Assert.True(storedEvents.Contains("expectedHeadSha=head-sha-1", StringComparison.Ordinal));
+            Assert.False(storedEvents.Contains("github_review_result_comment_posted", StringComparison.Ordinal));
+            Assert.True(File.Exists(Path.Combine(runDirectory, "github-review-comment-pending.json")));
+            Assert.True(File.ReadAllText(Path.Combine(runDirectory, "report.md")).Contains("成功扱いにはしていません", StringComparison.Ordinal));
+        }
+        finally { Directory.Delete(root, true); }
     }
-    finally { Directory.Delete(root, true); }
 }
 
 static void RequiredPullRequestWorkflowRequiresPersistedEvidence()
@@ -258,6 +318,29 @@ static void RequiredPullRequestWorkflowRequiresPersistedEvidence()
         Assert.True(File.ReadAllText(Path.Combine(runDirectory, "events.jsonl")).Contains("github_publication_failed", StringComparison.Ordinal));
     }
     finally { Directory.Delete(root, true); }
+
+    var tamperedRoot = Path.Combine(Path.GetTempPath(), $"required-pr-tampered-comment-{Guid.NewGuid():N}");
+    var tamperedRunDirectory = Path.Combine(tamperedRoot, "run");
+    Directory.CreateDirectory(tamperedRoot);
+    Directory.CreateDirectory(tamperedRunDirectory);
+    try
+    {
+        using var events = JsonlRunEventStore.CreateNew(Path.Combine(tamperedRunDirectory, "events.jsonl"), "required-pr-tampered-comment");
+        var publisher = new StubWorkflowPublisher { TamperReviewCommentEvidence = true };
+        var runner = new CountingPublicationAgentRunner(FakeScenario.Success);
+        var result = new FakeAgentWorkflow().Run(SampleContract() with
+            { WorkingDirectory = tamperedRoot, Reporting = new ReportingRequirements { PullRequestExpected = true, FinalReportFormat = "markdown" } },
+            "contract-hash", "required-pr-tampered-comment", tamperedRunDirectory, runner, events,
+            codexOneShot: true, publisher: publisher);
+        events.Dispose();
+
+        Assert.Equal(RunState.Failed, result.State);
+        var log = File.ReadAllText(Path.Combine(tamperedRunDirectory, "events.jsonl"));
+        Assert.True(log.Contains("github_review_result_comment_failed", StringComparison.Ordinal));
+        Assert.False(log.Contains("github_review_result_comment_posted", StringComparison.Ordinal));
+        Assert.True(File.Exists(Path.Combine(tamperedRunDirectory, "github-review-comment.json")));
+    }
+    finally { Directory.Delete(tamperedRoot, true); }
 }
 
 static void RequiredPullRequestWorkflowStopsDuringPush()
@@ -827,14 +910,21 @@ static void CodexTimeoutKillIsReportedSeparately()
 
 static void CodexTimeoutStopsFakeChildProcess()
 {
-    var (runner, request, root) = CreateCodexFixture("timeout-with-child", TimeSpan.FromMilliseconds(200));
+    var (runner, request, root) = CreateCodexFixture("timeout-with-child", TimeSpan.FromMilliseconds(200),
+        beforeTimeoutForTesting: path =>
+        {
+            var started = SpinWait.SpinUntil(() => File.Exists(path) &&
+                ReadSharedLines(path).Any(line => line.Contains("fixture.child", StringComparison.Ordinal)), TimeSpan.FromSeconds(15));
+            if (!started) throw new InvalidOperationException("Fake child processの起動証跡がtimeout開始前に届きませんでした。");
+        });
     using (root)
     {
         var response = runner.Implement(request);
-        Assert.False(response.Succeeded);
-        Assert.True(response.ExecutionEvidence!.TimedOut);
-        Assert.True(response.ExecutionEvidence.KillAttempted);
-        Assert.True(response.ExecutionEvidence.ProcessExitObserved == true);
+        Assert.False(response.Succeeded, "Fake親プロセスの子起動前timeoutを成功扱いしました。");
+        Assert.True(response.ExecutionEvidence!.TimedOut,
+            $"Fake child起動後にtimeoutとして記録されませんでした: terminal={response.ExecutionEvidence.TerminalEvent}, exit={response.ExecutionEvidence.ExitCode}, error={response.ExecutionEvidence.Error}, stop={response.ExecutionEvidence.StopReason}");
+        Assert.True(response.ExecutionEvidence.KillAttempted, "timeout後の停止要求が記録されませんでした。");
+        Assert.True(response.ExecutionEvidence.ProcessExitObserved == true, "timeout後に親プロセスの終了が確認されませんでした。");
         var stdoutPath = Path.Combine(request.RunDirectory!, response.ExecutionEvidence.StandardOutputReference!);
         var childLine = File.ReadLines(stdoutPath).FirstOrDefault(line => line.Contains("fixture.child", StringComparison.Ordinal));
         Assert.True(childLine is not null, "Fake child processのPID証跡がありません。");
@@ -848,6 +938,13 @@ static void CodexTimeoutStopsFakeChildProcess()
         }, TimeSpan.FromSeconds(5));
         Assert.True(exited, $"timeout後もFake child process {childId}の終了を確認できませんでした。");
     }
+}
+
+static string[] ReadSharedLines(string path)
+{
+    using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+    using var reader = new StreamReader(stream, Encoding.UTF8);
+    return reader.ReadToEnd().Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries);
 }
 
 static void CodexKillFailureIsNotReportedAsSuccess()
@@ -1148,7 +1245,8 @@ static Dictionary<string, string> ReadFakeEnvironmentPaths(string stdoutPath)
 }
 
 static (CodexCliAgentRunner Runner, AgentRequest Request, TemporaryDirectory Root) CreateCodexFixture(
-    string scenario, TimeSpan? timeout = null, Action<Process>? killOverride = null, CancellationToken cancellationToken = default)
+    string scenario, TimeSpan? timeout = null, Action<Process>? killOverride = null, CancellationToken cancellationToken = default,
+    Action<string>? beforeTimeoutForTesting = null)
 {
     var root = new TemporaryDirectory();
     var runDirectory = Path.Combine(root.Path, "run");
@@ -1166,7 +1264,7 @@ static (CodexCliAgentRunner Runner, AgentRequest Request, TemporaryDirectory Roo
         Directory.CreateDirectory(home);
     var executable = Environment.ProcessPath!;
     var options = new CodexCliRunnerOptions(executable, implementerHome, reviewerHome,
-        ["--fake-codex-fixture", scenario], killOverride, cancellationToken);
+        ["--fake-codex-fixture", scenario], killOverride, cancellationToken, beforeTimeoutForTesting);
     var request = new AgentRequest("fixture-run", "Implementer", SampleContract() with
         { WorkingDirectory = workspace, Reporting = new ReportingRequirements { PullRequestExpected = false, FinalReportFormat = "markdown" } }, 1,
         RunDirectory: runDirectory, RemainingTime: timeout ?? TimeSpan.FromSeconds(5));
@@ -2400,6 +2498,8 @@ sealed class StubWorkflowPublisher : IWorkflowPublisher
     public bool FailPush { get; init; }
     public bool FailCreatePullRequest { get; init; }
     public bool FailReviewComment { get; init; }
+    public bool FailReviewCommentWithJson { get; init; }
+    public bool TamperReviewCommentEvidence { get; init; }
     public bool OmitPrEvidence { get; init; }
     public CancellationTokenSource? CancelDuringPush { get; init; }
     public CancellationTokenSource? CancelAfterPush { get; init; }
@@ -2475,16 +2575,30 @@ sealed class StubWorkflowPublisher : IWorkflowPublisher
         {
             File.WriteAllText(Path.Combine(runDirectory, "github-review-comment-pending.json"),
                 JsonSerializer.Serialize(new { evidenceKind = "github-review-result-comment-pending", runId = reviewResult.RunId,
-                    reviewerId = reviewResult.ReviewerId, expectedHeadSha = snapshot.CommitSha, verified = false }));
+                    reviewerId = reviewResult.ReviewerId, pullRequestUrl = pullRequest.Url, expectedHeadSha = snapshot.CommitSha,
+                    baseSha = reviewResult.ReviewedBaseSha, baseBranch = reviewResult.ReviewedBaseBranch,
+                    reviewDiffSha256 = snapshot.DiffSha256, verified = false }));
+            if (FailReviewCommentWithJson) throw new JsonException("test malformed comment response");
             throw new IOException("test review comment failure");
         }
         const string reference = "github-review-comment.json";
         var evidence = new { evidenceKind = "github-review-result-comment-posted", repository = session.Repository,
             pullRequestUrl = pullRequest.Url, url = "https://github.com/Ateliers-Dev/test/pull/9#issuecomment-10", commentId = 10L,
             runId = reviewResult.RunId, reviewerId = reviewResult.ReviewerId, headSha = snapshot.CommitSha,
+            baseSha = reviewResult.ReviewedBaseSha, baseBranch = reviewResult.ReviewedBaseBranch,
             reviewDiffSha256 = snapshot.DiffSha256, verdict = reviewResult.Verdict, commentBodySha256 = "hash",
             verified = true, verifiedAtUtc = DateTimeOffset.UtcNow };
         File.WriteAllText(Path.Combine(runDirectory, reference), JsonSerializer.Serialize(evidence));
+        if (TamperReviewCommentEvidence)
+        {
+            var tamperedEvidence = new { evidenceKind = evidence.evidenceKind, repository = evidence.repository,
+                pullRequestUrl = evidence.pullRequestUrl, url = evidence.url, commentId = evidence.commentId,
+                runId = evidence.runId, reviewerId = evidence.reviewerId, headSha = evidence.headSha,
+                baseSha = new string('f', 40), baseBranch = evidence.baseBranch,
+                reviewDiffSha256 = evidence.reviewDiffSha256, verdict = evidence.verdict,
+                commentBodySha256 = evidence.commentBodySha256, verified = evidence.verified, verifiedAtUtc = evidence.verifiedAtUtc };
+            File.WriteAllText(Path.Combine(runDirectory, reference), JsonSerializer.Serialize(tamperedEvidence));
+        }
         return new WorkflowReviewComment("https://github.com/Ateliers-Dev/test/pull/9#issuecomment-10", 10,
             snapshot.CommitSha, reference);
     }

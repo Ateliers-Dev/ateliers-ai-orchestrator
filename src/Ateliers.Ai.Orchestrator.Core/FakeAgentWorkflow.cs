@@ -454,26 +454,29 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                                     detail: $"PRとレビュー済みhead/base SHAを照合しました。url={publishedPullRequest.Url}; branch={publishedPullRequest.Branch}; base={publishedPullRequest.BaseBranch}; baseSha={publishedPullRequest.BaseSha}",
                                     outputReference: publishedPullRequest.EvidenceReference, targetCommitSha: publishedPullRequest.HeadSha,
                                     diffSha256: publicationSnapshot.DiffSha256, role: "Orchestrator");
-                                var reviewResult = new WorkflowReviewResult(runId, reviewerId, publicationSnapshot.CommitSha,
-                                    "approve", reviewResponse.Content);
+                                var reviewResult = new WorkflowReviewResult(runId, reviewerId, publishedPullRequest.Url,
+                                    publicationSnapshot.CommitSha, publishedPullRequest.BaseSha, publishedPullRequest.BaseBranch,
+                                    publicationSnapshot.DiffSha256, "approve", reviewResponse.Content);
                                 publishedReviewComment = publisher.PostReviewResultComment(publicationSession, publicationSnapshot,
                                     publishedPullRequest, reviewResult, runDirectory, stopToken);
-                                VerifyPostedReviewCommentEvidence(runDirectory, publishedReviewComment, reviewResult, publishedPullRequest);
+                                VerifyPostedReviewCommentEvidence(runDirectory, publishedReviewComment, reviewResult,
+                                    publishedPullRequest, publicationSnapshot);
                                 if (StopWasRequested(stopToken))
                                     throw new OperationCanceledException("レビュー結果コメント投稿後に停止要求を受け付けました。投稿結果を成功扱いしません。", stopToken);
                                 eventWriter.Append("github_review_result_comment_posted", "accepted", from: run.State, to: run.State,
-                                    detail: $"独立レビュー結果をPR全体コメントとして投稿・照合しました。commentId={publishedReviewComment.CommentId}; headSha={publishedReviewComment.HeadSha}; reviewer={reviewerId}",
+                                    detail: $"独立レビュー結果をPR全体コメントとして投稿・照合しました。commentId={publishedReviewComment.CommentId}; pr={publishedPullRequest.Url}; headSha={publishedReviewComment.HeadSha}; baseSha={publishedPullRequest.BaseSha}; diffSha256={publicationSnapshot.DiffSha256}; reviewer={reviewerId}",
                                     outputReference: publishedReviewComment.EvidenceReference, targetCommitSha: publishedReviewComment.HeadSha,
                                     diffSha256: publicationSnapshot.DiffSha256, role: "Orchestrator");
                                 failure = $"独立Reviewerが承認し、push済みの同一head SHAをGitHub PRとレビュー結果コメントで確認しました。人間による最終確認・マージ待ちです: {publishedPullRequest.Url}";
                                 run.Transition(RunState.NeedsHumanInput);
                             }
-                            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
+                            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or
+                                System.ComponentModel.Win32Exception or System.Text.Json.JsonException or KeyNotFoundException or FormatException)
                             {
                                 failure = $"必須GitHub PR作成または証跡照合に失敗しました。成功扱いにはしていません。 ({exception.GetType().Name})";
                                 if (publishedPullRequest is not null)
                                     eventWriter.Append("github_review_result_comment_failed", "failed", from: run.State, to: run.State,
-                                        detail: $"PR全体への必須レビュー結果コメントを検証できませんでした。runId={runId}; reviewer={reviewerId}; expectedHeadSha={publicationSnapshot.CommitSha}; 結果不明の場合はpending証跡を確認してください。",
+                                        detail: $"PR全体への必須レビュー結果コメントを検証できませんでした。runId={runId}; reviewer={reviewerId}; pr={publishedPullRequest.Url}; expectedHeadSha={publicationSnapshot.CommitSha}; expectedBaseSha={publishedPullRequest.BaseSha}; expectedDiffSha256={publicationSnapshot.DiffSha256}; 結果不明の場合はpending証跡を確認してください。",
                                         error: failure, outputReference: File.Exists(Path.Combine(runDirectory, "github-review-comment-pending.json"))
                                             ? "github-review-comment-pending.json" : null,
                                         targetCommitSha: publicationSnapshot.CommitSha, diffSha256: publicationSnapshot.DiffSha256,
@@ -748,7 +751,7 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
     }
 
     private static void VerifyPostedReviewCommentEvidence(string runDirectory, WorkflowReviewComment comment,
-        WorkflowReviewResult result, WorkflowPullRequest pullRequest)
+        WorkflowReviewResult result, WorkflowPullRequest pullRequest, WorkflowPublicationSnapshot snapshot)
     {
         if (Path.IsPathRooted(comment.EvidenceReference) ||
             comment.EvidenceReference.Split(['/', '\\']).Any(part => part is "" or "." or ".."))
@@ -767,11 +770,20 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                 evidence.GetProperty("commentId").GetInt64() != comment.CommentId ||
                 evidence.GetProperty("url").GetString() != comment.Url ||
                 evidence.GetProperty("headSha").GetString() != result.ReviewedHeadSha ||
+                evidence.GetProperty("pullRequestUrl").GetString() != result.PullRequestUrl ||
+                evidence.GetProperty("baseSha").GetString() != result.ReviewedBaseSha ||
+                evidence.GetProperty("baseBranch").GetString() != result.ReviewedBaseBranch ||
+                evidence.GetProperty("reviewDiffSha256").GetString() != result.ReviewDiffSha256 ||
                 evidence.GetProperty("runId").GetString() != result.RunId ||
                 evidence.GetProperty("reviewerId").GetString() != result.ReviewerId ||
                 evidence.GetProperty("verdict").GetString() != result.Verdict ||
                 !comment.HeadSha.Equals(result.ReviewedHeadSha, StringComparison.OrdinalIgnoreCase) ||
-                !pullRequest.HeadSha.Equals(result.ReviewedHeadSha, StringComparison.OrdinalIgnoreCase))
+                !pullRequest.Url.Equals(result.PullRequestUrl, StringComparison.Ordinal) ||
+                !pullRequest.HeadSha.Equals(result.ReviewedHeadSha, StringComparison.OrdinalIgnoreCase) ||
+                !pullRequest.BaseSha.Equals(result.ReviewedBaseSha, StringComparison.OrdinalIgnoreCase) ||
+                !pullRequest.BaseBranch.Equals(result.ReviewedBaseBranch, StringComparison.Ordinal) ||
+                !snapshot.CommitSha.Equals(result.ReviewedHeadSha, StringComparison.OrdinalIgnoreCase) ||
+                !snapshot.DiffSha256.Equals(result.ReviewDiffSha256, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("保存済みレビュー結果コメント証跡が投稿結果と一致しません。");
         }
         catch (JsonException exception)

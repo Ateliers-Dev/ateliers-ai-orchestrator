@@ -14,9 +14,9 @@ public sealed record WorkflowPublicationSnapshot(string CommitSha, string DiffSh
 public sealed record WorkflowPullRequest(string Url, string HeadSha, string BaseSha, string Branch, string BaseBranch,
     string EvidenceReference);
 
-/// <summary>PR全体コメントとして記録する独立レビュー結果です。</summary>
-public sealed record WorkflowReviewResult(string RunId, string ReviewerId, string ReviewedHeadSha, string Verdict,
-    string Summary);
+/// <summary>PR全体コメントとして記録する独立レビュー結果とレビュー対象の同一性情報です。</summary>
+public sealed record WorkflowReviewResult(string RunId, string ReviewerId, string PullRequestUrl, string ReviewedHeadSha,
+    string ReviewedBaseSha, string ReviewedBaseBranch, string ReviewDiffSha256, string Verdict, string Summary);
 
 /// <summary>GitHubへ投稿・照合したレビュー結果コメントです。</summary>
 public sealed record WorkflowReviewComment(string Url, long CommentId, string HeadSha, string EvidenceReference);

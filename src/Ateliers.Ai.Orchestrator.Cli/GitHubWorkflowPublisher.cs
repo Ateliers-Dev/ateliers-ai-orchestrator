@@ -269,19 +269,24 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         EnsureTrustedGitConfig(session);
         if (!Regex.IsMatch(reviewResult.RunId, "^[A-Za-z0-9._-]{1,128}$", RegexOptions.CultureInvariant) ||
             !Regex.IsMatch(reviewResult.ReviewerId, "^[A-Za-z0-9._:-]{1,256}$", RegexOptions.CultureInvariant) ||
+            !reviewResult.PullRequestUrl.Equals(pullRequest.Url, StringComparison.Ordinal) ||
             !reviewResult.ReviewedHeadSha.Equals(snapshot.CommitSha, StringComparison.OrdinalIgnoreCase) ||
+            !reviewResult.ReviewedBaseSha.Equals(session.BaseSha, StringComparison.OrdinalIgnoreCase) ||
+            !reviewResult.ReviewedBaseBranch.Equals(session.BaseBranch, StringComparison.Ordinal) ||
+            !reviewResult.ReviewDiffSha256.Equals(snapshot.DiffSha256, StringComparison.OrdinalIgnoreCase) ||
             !pullRequest.HeadSha.Equals(snapshot.CommitSha, StringComparison.OrdinalIgnoreCase) ||
-            !RemoteHeadMatches(session, snapshot.CommitSha))
-            throw new InvalidOperationException("レビュー結果のrun IDまたは対象head SHAを検証できません。コメントは投稿しません。");
+            !pullRequest.BaseSha.Equals(session.BaseSha, StringComparison.OrdinalIgnoreCase) ||
+            !pullRequest.BaseBranch.Equals(session.BaseBranch, StringComparison.Ordinal) ||
+            !RemoteHeadMatches(session, snapshot.CommitSha) || !RemoteBaseMatches(session, session.BaseSha))
+            throw new InvalidOperationException("レビュー結果のPR URL、head/base SHA、branch、diff hashを検証できません。コメントは投稿しません。");
 
         var prNumber = ParsePullRequestNumber(pullRequest.Url, session.Repository);
         var prDetails = Gh(session.WorkingDirectory, "pr", "view", pullRequest.Url, "--repo", session.Repository,
-            "--json", "headRefOid,state", "--template", "{{.headRefOid}}\t{{.state}}").Output.Trim().Split('\t');
-        if (prDetails.Length != 2 || prDetails[1] != "OPEN" ||
-            !prDetails[0].Equals(snapshot.CommitSha, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("レビュー対象head SHAとPRの最新head SHAが一致しません。コメントは投稿しません。");
+            "--json", "headRefOid,baseRefOid,headRefName,baseRefName,state", "--template",
+            "{{.headRefOid}}\t{{.baseRefOid}}\t{{.headRefName}}\t{{.baseRefName}}\t{{.state}}").Output.Trim().Split('\t');
+        EnsurePullRequestTargetsReview(prDetails, session, snapshot, pullRequest);
 
-        var marker = $"<!-- ateliers-review-result run={reviewResult.RunId} head={snapshot.CommitSha} -->";
+        var marker = $"<!-- ateliers-review-result run={reviewResult.RunId} head={snapshot.CommitSha} base={session.BaseSha} diff={snapshot.DiffSha256} -->";
         var body = FormatReviewComment(reviewResult, marker);
         if (SecretContent.IsMatch(body))
             throw new InvalidOperationException("レビュー結果コメントに既知形式の秘密情報らしい値を検出しました。投稿を停止しました。");
@@ -315,16 +320,18 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
                 commentUri.Scheme != Uri.UriSchemeHttps || commentUri.Host != "github.com" || postedBody != body)
                 throw new InvalidOperationException("GitHubから返されたレビュー結果コメントを照合できません。");
             var finalPrDetails = Gh(session.WorkingDirectory, "pr", "view", pullRequest.Url, "--repo", session.Repository,
-                "--json", "headRefOid,state", "--template", "{{.headRefOid}}\t{{.state}}").Output.Trim().Split('\t');
-            if (finalPrDetails.Length != 2 || finalPrDetails[1] != "OPEN" ||
-                !finalPrDetails[0].Equals(snapshot.CommitSha, StringComparison.OrdinalIgnoreCase) ||
-                !RemoteHeadMatches(session, snapshot.CommitSha))
-                throw new InvalidOperationException("コメント投稿後にPR head SHAがレビュー対象から変化しました。投稿成功扱いしません。");
+                "--json", "headRefOid,baseRefOid,headRefName,baseRefName,state", "--template",
+                "{{.headRefOid}}\t{{.baseRefOid}}\t{{.headRefName}}\t{{.baseRefName}}\t{{.state}}").Output.Trim().Split('\t');
+            EnsurePullRequestTargetsReview(finalPrDetails, session, snapshot, pullRequest);
+            if (!RemoteHeadMatches(session, snapshot.CommitSha) || !RemoteBaseMatches(session, session.BaseSha))
+                throw new InvalidOperationException("コメント投稿後にPRのremote head/base SHAがレビュー対象から変化しました。投稿成功扱いしません。");
             var evidence = new
             {
                 evidenceKind = "github-review-result-comment-posted",
                 repository = session.Repository,
                 pullRequestUrl = pullRequest.Url,
+                baseBranch = session.BaseBranch,
+                baseSha = session.BaseSha,
                 url = commentUrl,
                 commentId,
                 runId = reviewResult.RunId,
@@ -344,7 +351,8 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
             WriteReviewCommentPending(pendingPath, session, pullRequest, reviewResult, snapshot, "post-interrupted-or-unknown");
             throw;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception or System.Text.Json.JsonException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or
+            System.ComponentModel.Win32Exception or System.Text.Json.JsonException or KeyNotFoundException or FormatException)
         {
             WriteReviewCommentPending(pendingPath, session, pullRequest, reviewResult, snapshot, $"post-failed-{exception.GetType().Name}");
             throw;
@@ -368,7 +376,10 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
                 if (!summary.Contains(field, StringComparison.Ordinal))
                     throw new InvalidOperationException($"レビュー指摘をPR全体コメントへ記録するための項目 {field} がありません。");
         }
-        return $"{marker}\n## 独立レビュー結果\n\n- 判定: {verdict}\n- Run ID: `{result.RunId}`\n- Reviewer: `{result.ReviewerId.Replace("`", "'")}`\n- レビュー対象 head SHA: `{result.ReviewedHeadSha}`\n\n### レビュー内容\n\n{summary}\n";
+        if (!Uri.TryCreate(result.PullRequestUrl, UriKind.Absolute, out var pullRequestUri) ||
+            pullRequestUri.Scheme != Uri.UriSchemeHttps || pullRequestUri.Host != "github.com")
+            throw new InvalidOperationException("コメント本文に記録するPR URLがGitHub URLではありません。");
+        return $"{marker}\n## 独立レビュー結果\n\n- PR: {result.PullRequestUrl}\n- 判定: {verdict}\n- Run ID: `{result.RunId}`\n- Reviewer: `{result.ReviewerId.Replace("`", "'")}`\n- レビュー対象 head SHA: `{result.ReviewedHeadSha}`\n- レビュー対象 base: `{result.ReviewedBaseBranch}` (`{result.ReviewedBaseSha}`)\n- レビュー差分 SHA-256: `{result.ReviewDiffSha256}`\n\n### レビュー内容\n\n{summary}\n";
     }
 
     private static int ParsePullRequestNumber(string url, string repository)
@@ -386,8 +397,29 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
 
     private bool RemoteHeadMatches(WorkflowPublicationSession session, string expectedSha)
     {
-        var line = Git(session.WorkingDirectory, "ls-remote", "origin", $"refs/heads/{session.Branch}").Output.Trim();
+        return RemoteRefMatches(session, session.Branch, expectedSha);
+    }
+
+    private bool RemoteBaseMatches(WorkflowPublicationSession session, string expectedSha) =>
+        RemoteRefMatches(session, session.BaseBranch, expectedSha);
+
+    private bool RemoteRefMatches(WorkflowPublicationSession session, string branch, string expectedSha)
+    {
+        var line = Git(session.WorkingDirectory, "ls-remote", "origin", $"refs/heads/{branch}").Output.Trim();
         return line.Split('\t')[0].Equals(expectedSha, StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static void EnsurePullRequestTargetsReview(string[] details, WorkflowPublicationSession session,
+        WorkflowPublicationSnapshot snapshot, WorkflowPullRequest pullRequest)
+    {
+        if (details.Length != 5 || details[4] != "OPEN" ||
+            !details[0].Equals(snapshot.CommitSha, StringComparison.OrdinalIgnoreCase) ||
+            !details[1].Equals(session.BaseSha, StringComparison.OrdinalIgnoreCase) ||
+            details[2] != session.Branch || details[3] != session.BaseBranch ||
+            !pullRequest.HeadSha.Equals(snapshot.CommitSha, StringComparison.OrdinalIgnoreCase) ||
+            !pullRequest.BaseSha.Equals(session.BaseSha, StringComparison.OrdinalIgnoreCase) ||
+            pullRequest.Branch != session.Branch || pullRequest.BaseBranch != session.BaseBranch)
+            throw new InvalidOperationException("PRの最新head/base SHAまたはbranchが固定済みレビュー対象と一致しません。");
     }
 
     internal static JsonElement? FindExistingReviewComment(string json, string marker, string expectedBody)
@@ -453,6 +485,10 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
                 root.GetProperty("verified").ValueKind != JsonValueKind.True || root.GetProperty("commentId").GetInt64() != expectedId ||
                 root.GetProperty("url").GetString() != expectedUrl || root.GetProperty("runId").GetString() != result.RunId ||
                 root.GetProperty("reviewerId").GetString() != result.ReviewerId || root.GetProperty("headSha").GetString() != expectedHeadSha ||
+                root.GetProperty("pullRequestUrl").GetString() != result.PullRequestUrl ||
+                root.GetProperty("baseSha").GetString() != result.ReviewedBaseSha ||
+                root.GetProperty("baseBranch").GetString() != result.ReviewedBaseBranch ||
+                root.GetProperty("reviewDiffSha256").GetString() != result.ReviewDiffSha256 ||
                 !result.ReviewedHeadSha.Equals(expectedHeadSha, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("保存後のレビュー結果コメント証跡を照合できません。");
             if (File.Exists(pending)) File.Delete(pending);
