@@ -3,6 +3,14 @@ namespace Ateliers.Ai.Orchestrator.Core;
 /// <summary>必須PR公開ゲートを使う実Agentランナーを示す識別境界です。</summary>
 public interface IPullRequestWorkflowAgentRunner { }
 
+/// <summary>GitHub提出開始前の失敗を、秘密情報を含まない段階・分類で示します。</summary>
+public sealed class WorkflowPreflightException(string stage, string reason)
+    : InvalidOperationException($"preflight:stage={stage};reason={reason}")
+{
+    public string Stage { get; } = stage;
+    public string Reason { get; } = reason;
+}
+
 /// <summary>GitHub提出を行う一実行の固定情報です。</summary>
 public sealed record WorkflowPublicationSession(string WorkingDirectory, string Repository, string Branch, string BaseBranch, string BaseSha,
     string GitConfigPath, string GitConfigSha256, string SafeHooksPath);

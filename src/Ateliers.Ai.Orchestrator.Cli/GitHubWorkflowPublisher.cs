@@ -27,53 +27,75 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
     {
         _activeStopToken = stopToken;
         stopToken.ThrowIfCancellationRequested();
-        _isolatedGitConfigPath = CreateIsolatedGitConfig(contract.WorkingDirectory, stopToken);
-        _isolatedGitConfigSha256 = HashFile(_isolatedGitConfigPath);
-        var root = Git(contract.WorkingDirectory, "rev-parse", "--show-toplevel").Output.Trim();
-        if (!Path.GetFullPath(root).Equals(Path.GetFullPath(contract.WorkingDirectory), PathComparison))
-            throw new InvalidOperationException("workingDirectory はGitリポジトリのルートを指定してください。");
-        if (!string.IsNullOrWhiteSpace(Git(root, "status", "--porcelain=v1", "--untracked-files=all").Output))
-            throw new InvalidOperationException("開始時点で作業ツリーに変更があります。cleanな専用checkoutを用意してください。");
-        var configPath = Path.GetFullPath(Git(root, "rev-parse", "--git-path", "config").Output.Trim(), root);
-        foreach (var scope in new[] { "--system", "--global", "--local" })
+        var stage = "git-isolation";
+        try
         {
-            var configuredFilters = Run("git", root, ["config", scope, "--get-regexp", "^filter\\."],
-                allowExitCodeOne: true, stopToken: stopToken);
-            if (configuredFilters.ExitCode == 0)
-                throw new InvalidOperationException("Git設定に外部filterがあります。安全な専用checkoutで再実行してください。");
+            _isolatedGitConfigPath = CreateIsolatedGitConfig(contract.WorkingDirectory, stopToken);
+            _isolatedGitConfigSha256 = HashFile(_isolatedGitConfigPath);
+            stage = "repository-root";
+            var root = Git(contract.WorkingDirectory, "rev-parse", "--show-toplevel").Output.Trim();
+            if (!Path.GetFullPath(root).Equals(Path.GetFullPath(contract.WorkingDirectory), PathComparison))
+                throw new InvalidOperationException("workingDirectory はGitリポジトリのルートを指定してください。");
+            stage = "local-git-config-safety";
+            if (HasUnsafeEffectiveGitConfig(root, _isolatedGitConfigPath!, stopToken))
+                throw new WorkflowPreflightException(stage, "unsafe-local-config-key-present");
+            stage = "git-filter-policy";
+            var trackedPaths = Git(root, "ls-files", "-z").Output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+            if (HasActiveGitFilterPaths(root, trackedPaths, _isolatedGitConfigPath!, stopToken))
+                throw new WorkflowPreflightException(stage, "filter-attributed-paths-unsupported-under-isolation");
+            var configPath = Path.GetFullPath(Git(root, "rev-parse", "--git-path", "config").Output.Trim(), root);
+            stage = "clean-checkout";
+            if (!string.IsNullOrWhiteSpace(Git(root, "status", "--porcelain=v1", "--untracked-files=all").Output))
+                throw new InvalidOperationException("開始時点で作業ツリーに変更があります。cleanな専用checkoutを用意してください。");
+
+            // gh handles API authentication; Git push uses the configured credential helper. Neither output is persisted.
+            stage = "github-authentication";
+            Gh(root, "auth", "status", "--hostname", "github.com");
+            stage = "github-repository-identity";
+            var repo = Gh(root, "repo", "view", "--json", "nameWithOwner,defaultBranchRef",
+                "--template", "{{.nameWithOwner}}\t{{.defaultBranchRef.name}}").Output.Trim().Split('\t');
+            if (repo.Length != 2 || string.IsNullOrWhiteSpace(repo[0]) || string.IsNullOrWhiteSpace(repo[1]))
+                throw new InvalidOperationException("GitHubリポジトリまたは既定ブランチを特定できません。");
+            var repository = repo[0];
+            var baseBranch = repo[1];
+            stage = "remote-validation";
+            var remoteUrl = Git(root, "remote", "get-url", "origin").Output.Trim();
+            var pushRemoteUrl = Git(root, "remote", "get-url", "--push", "origin").Output.Trim();
+            if (!RemoteMatches(remoteUrl, repository) || !RemoteMatches(pushRemoteUrl, repository))
+                throw new InvalidOperationException("originがGitHub CLIで特定したリポジトリと一致しません。");
+
+            stage = "default-branch-refresh";
+            Git(root, "fetch", "--no-tags", "origin", $"+refs/heads/{baseBranch}:refs/remotes/origin/{baseBranch}");
+            var baseSha = Git(root, "rev-parse", $"refs/remotes/origin/{baseBranch}").Output.Trim();
+            var headSha = Git(root, "rev-parse", "HEAD").Output.Trim();
+            if (!headSha.Equals(baseSha, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("checkoutのHEADがGitHub既定ブランチの最新SHAと一致しません。最新の既定ブランチから再実行してください。");
+
+            var safeTaskId = Regex.Replace(contract.TaskId, "[^A-Za-z0-9._-]", "-");
+            var branch = $"codex/{safeTaskId}-{runId[..Math.Min(8, runId.Length)]}";
+            stage = "branch-availability";
+            if (!string.IsNullOrWhiteSpace(Git(root, "ls-remote", "--heads", "origin", $"refs/heads/{branch}").Output))
+                throw new InvalidOperationException("実行用ブランチが既にリモートに存在します。別のrunIdで再実行してください。");
+            stage = "branch-creation";
+            Git(root, "switch", "--create", branch, baseSha);
+            return new WorkflowPublicationSession(root, repository, branch, baseBranch, baseSha,
+                configPath, HashFile(configPath), _safeHooksPath);
         }
-        var unsafeLocalConfig = Run("git", root, ["config", "--local", "--get-regexp",
-                "^(include|filter\\.|credential\\.helper$|core\\.(sshCommand|fsmonitor)$|url\\..*\\.(insteadOf|pushInsteadOf)$)"],
-            allowExitCodeOne: true, isolatedGitConfigPath: _isolatedGitConfigPath, stopToken: stopToken);
-        if (!string.IsNullOrWhiteSpace(unsafeLocalConfig.Output))
-            throw new InvalidOperationException("実行前のローカルGit設定に外部コマンドや設定includeがあります。安全な専用checkoutで再実行してください。");
-
-        // gh handles API authentication; Git push uses the configured credential helper. Neither output is persisted.
-        Gh(root, "auth", "status", "--hostname", "github.com");
-        var repo = Gh(root, "repo", "view", "--json", "nameWithOwner,defaultBranchRef",
-            "--template", "{{.nameWithOwner}}\t{{.defaultBranchRef.name}}").Output.Trim().Split('\t');
-        if (repo.Length != 2 || string.IsNullOrWhiteSpace(repo[0]) || string.IsNullOrWhiteSpace(repo[1]))
-            throw new InvalidOperationException("GitHubリポジトリまたは既定ブランチを特定できません。");
-        var repository = repo[0];
-        var baseBranch = repo[1];
-        var remoteUrl = Git(root, "remote", "get-url", "origin").Output.Trim();
-        var pushRemoteUrl = Git(root, "remote", "get-url", "--push", "origin").Output.Trim();
-        if (!RemoteMatches(remoteUrl, repository) || !RemoteMatches(pushRemoteUrl, repository))
-            throw new InvalidOperationException("originがGitHub CLIで特定したリポジトリと一致しません。");
-
-        Git(root, "fetch", "--no-tags", "origin", $"+refs/heads/{baseBranch}:refs/remotes/origin/{baseBranch}");
-        var baseSha = Git(root, "rev-parse", $"refs/remotes/origin/{baseBranch}").Output.Trim();
-        var headSha = Git(root, "rev-parse", "HEAD").Output.Trim();
-        if (!headSha.Equals(baseSha, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("checkoutのHEADがGitHub既定ブランチの最新SHAと一致しません。最新の既定ブランチから再実行してください。");
-
-        var safeTaskId = Regex.Replace(contract.TaskId, "[^A-Za-z0-9._-]", "-");
-        var branch = $"codex/{safeTaskId}-{runId[..Math.Min(8, runId.Length)]}";
-        if (!string.IsNullOrWhiteSpace(Git(root, "ls-remote", "--heads", "origin", $"refs/heads/{branch}").Output))
-            throw new InvalidOperationException("実行用ブランチが既にリモートに存在します。別のrunIdで再実行してください。");
-        Git(root, "switch", "--create", branch, baseSha);
-        return new WorkflowPublicationSession(root, repository, branch, baseBranch, baseSha,
-            configPath, HashFile(configPath), _safeHooksPath);
+        catch (OperationCanceledException) { throw; }
+        catch (WorkflowPreflightException) { throw; }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException or
+            InvalidOperationException or ArgumentException or NotSupportedException or System.ComponentModel.Win32Exception)
+        {
+            var reason = exception switch
+            {
+                InvalidOperationException => "validation-or-command-failed",
+                UnauthorizedAccessException or System.Security.SecurityException => "access-denied",
+                ArgumentException or NotSupportedException => "invalid-path-or-argument",
+                System.ComponentModel.Win32Exception => "process-start-failed",
+                _ => "io-failed"
+            };
+            throw new WorkflowPreflightException(stage, reason);
+        }
     }
 
     /// <inheritdoc />
@@ -95,6 +117,8 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         var paths = snapshot.Entries.Select(entry => ValidateSnapshotPath(root, entry.Path)).ToArray();
         if (paths.Distinct(StringComparer.Ordinal).Count() != paths.Length)
             throw new InvalidOperationException("Implementer workspace snapshotに重複パスがあります。");
+        if (HasActiveGitFilterPaths(root, snapshot.Entries.Select(entry => entry.Path).ToArray(), _isolatedGitConfigPath!, stopToken))
+            throw new WorkflowPreflightException("git-filter-policy", "filter-attributed-snapshot-path");
         var currentPaths = CaptureChangedPaths(root, snapshot.BaseSha);
         if (!currentPaths.Order(StringComparer.Ordinal).SequenceEqual(snapshot.Entries.Select(entry => entry.Path).Order(StringComparer.Ordinal), StringComparer.Ordinal))
             throw new InvalidOperationException("Implementer終了後にworkspaceの変更パスが変化しました。固定snapshotと一致しません。");
@@ -527,6 +551,28 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
     }
 
     private static StringComparison PathComparison => OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+    internal static bool HasUnsafeEffectiveGitConfig(string workingDirectory, string isolatedGitConfigPath, CancellationToken stopToken)
+    {
+        var unsafeConfig = Run("git", workingDirectory, ["config", "--name-only", "--get-regexp",
+                "^(include|filter\\.|credential\\.helper$|credential\\..*\\.helper$|core\\.(sshCommand|fsmonitor)$|extensions\\.worktreeconfig$|url\\..*\\.(insteadOf|pushInsteadOf)$)"],
+            allowExitCodeOne: true, isolatedGitConfigPath: isolatedGitConfigPath, stopToken: stopToken);
+        return !string.IsNullOrWhiteSpace(unsafeConfig.Output);
+    }
+
+    internal static bool HasActiveGitFilterPaths(string workingDirectory, IReadOnlyList<string> paths,
+        string isolatedGitConfigPath, CancellationToken stopToken)
+    {
+        if (paths.Count == 0) return false;
+        var pathInput = Encoding.UTF8.GetBytes(string.Join('\0', paths) + '\0');
+        var attributes = Run("git", workingDirectory, ["check-attr", "-z", "--stdin", "filter"],
+            isolatedGitConfigPath: isolatedGitConfigPath, stopToken: stopToken, standardInput: pathInput).Output;
+        var fields = attributes.Split('\0');
+        for (var index = 0; index + 2 < fields.Length; index += 3)
+            // Git reports both '-filter' and a literal 'filter=unset' as "unset". Treat it as active to fail closed.
+            if (fields[index + 1] == "filter" && fields[index + 2] is not ("unspecified" or "")) return true;
+        return false;
+    }
 
     internal static bool RemoteMatches(string remote, string repository)
     {

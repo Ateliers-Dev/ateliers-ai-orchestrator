@@ -15,19 +15,32 @@ internal static class OrchestratorCli
     /// <returns>成功時は0、入力不備は2、実行記録の失敗は3です。</returns>
     public static async Task<int> RunAsync(string[] args)
     {
+        if (args.Length == 0 || args[0] is "--help" or "-h")
+        {
+            PrintUsage(Console.Out);
+            return 0;
+        }
+
+        if (args[0] is "validate" or "start" or "run" && args.Skip(1).Any(argument => argument is "--help" or "-h"))
+        {
+            PrintUsage(Console.Out, args[0]);
+            return 0;
+        }
+
         if (args.Length < 2 || args[0] is not ("validate" or "start" or "run") ||
             (args[0] == "validate" && args.Length != 2) ||
             (args[0] == "start" && args.Length is not (2 or 4)) ||
             (args[0] == "run" && (args.Length < 2 || args.Length % 2 != 0)))
         {
-            PrintUsage();
+            Console.Error.WriteLine("コマンドまたは引数が不足しているか、不正です。");
+            PrintUsage(Console.Error);
             return 2;
         }
 
         if (!TryResolveFullPath(args[1], "契約ファイル", out var contractPath, out var pathError))
         {
             Console.Error.WriteLine(pathError);
-            PrintUsage();
+            PrintUsage(Console.Error);
             return 2;
         }
         var read = TaskContractReader.Read(contractPath);
@@ -52,14 +65,14 @@ internal static class OrchestratorCli
                 out var codexOptions, out var notificationsDisabled, out var useSlackTestChannel, out var optionError))
             {
                 Console.Error.WriteLine(optionError);
-                PrintUsage();
+                PrintUsage(Console.Error, "run");
                 return 2;
             }
 
             if (!TryReadReviewEvidence(evidencePath, out var evidence, out var evidenceError))
             {
                 Console.Error.WriteLine(evidenceError);
-                PrintUsage();
+                PrintUsage(Console.Error, "run");
                 return 2;
             }
 
@@ -132,7 +145,7 @@ internal static class OrchestratorCli
         if (!TryGetRunsDirectory(args, out runsDirectory, out var runsPathError))
         {
             Console.Error.WriteLine(runsPathError);
-            PrintUsage();
+            PrintUsage(Console.Error, "start");
             return 2;
         }
 
@@ -362,13 +375,20 @@ internal static class OrchestratorCli
         }
     }
 
-    /// <summary>利用できるコマンド形式を標準エラーへ表示します。</summary>
-    private static void PrintUsage()
+    /// <summary>利用できるコマンド形式を指定された出力先へ表示します。</summary>
+    private static void PrintUsage(TextWriter writer, string? command = null)
     {
-        Console.Error.WriteLine("使用方法:");
-        Console.Error.WriteLine("  ateliers-orchestrator validate <contract.json>");
-        Console.Error.WriteLine("  ateliers-orchestrator start <contract.json> [--runs <ディレクトリ>]");
-        Console.Error.WriteLine("  ateliers-orchestrator run <contract.json> [--agent fake|codex] [--scenario <FakeScenario>] [--codex-exe <絶対パス>] [--implementer-codex-home <絶対パス>] [--reviewer-codex-home <絶対パス>] [--runs <ディレクトリ>] [--lifecycle-log <JSONL>] [--review-evidence <証跡.json>] [--slack-notifications auto|disabled|test]");
+        writer.WriteLine(command switch
+        {
+            "validate" => "使用方法: ateliers-orchestrator validate <contract.json>",
+            "start" => "使用方法: ateliers-orchestrator start <contract.json> [--runs <ディレクトリ>]",
+            "run" => "使用方法: ateliers-orchestrator run <contract.json> [--agent fake|codex] [--scenario <FakeScenario>] [--codex-exe <絶対パス>] [--implementer-codex-home <絶対パス>] [--reviewer-codex-home <絶対パス>] [--runs <ディレクトリ>] [--lifecycle-log <JSONL>] [--review-evidence <証跡.json>] [--slack-notifications auto|disabled|test]",
+            _ => "使用方法:"
+        });
+        if (command is not null) return;
+        writer.WriteLine("  ateliers-orchestrator validate <contract.json>");
+        writer.WriteLine("  ateliers-orchestrator start <contract.json> [--runs <ディレクトリ>]");
+        writer.WriteLine("  ateliers-orchestrator run <contract.json> [--agent fake|codex] [--scenario <FakeScenario>] [--codex-exe <絶対パス>] [--implementer-codex-home <絶対パス>] [--reviewer-codex-home <絶対パス>] [--runs <ディレクトリ>] [--lifecycle-log <JSONL>] [--review-evidence <証跡.json>] [--slack-notifications auto|disabled|test]");
     }
 }
 
