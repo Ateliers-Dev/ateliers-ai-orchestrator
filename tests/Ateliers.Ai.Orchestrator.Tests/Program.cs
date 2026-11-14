@@ -67,6 +67,8 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("kill失敗を記録しプロセス終了未確認を成功扱いしない", CodexKillFailureIsNotReportedAsSuccess);
     suite.Add("Ctrl+C停止要求とtimeoutを区別しkill・終了・stream結果を記録する", CodexCancellationIsDistinctFromTimeout);
     suite.Add("Codex子プロセスへ親のAPI secret環境変数を渡さない", CodexChildEnvironmentFiltersSecrets);
+    suite.Add("Codex子プロセスへSystemDriveを渡す", CodexChildInheritsSystemDrive);
+    suite.Add("Fake Codexが生成した未追跡バイナリを差分固定時に拒否する", CodexRejectsUntrackedBinaryChanges);
     suite.Add("既存CODEX_HOMEと通常のユーザープロファイルを使える", CodexExistingProfilesAreAccepted);
     suite.Add("Codex Fakeプロセスで独立レビューまで縦断し固定hashを引き継ぐ", CodexFakeProcessesCompleteIndependentReviewSlice);
     suite.Add("Codex一回モードは成功・指摘・失敗を記録し追加起動せず人間判断待ちで止まる", CodexOneShotStopsWithoutRetries);
@@ -124,6 +126,8 @@ static int RunFakeCodexFixture(string[] args)
     if (mode == "cancel") { Thread.Sleep(5_000); return 0; }
     if (mode == "kill-failure") { Thread.Sleep(500); return 0; }
     if (prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal)) File.WriteAllText("example.txt", "fixture change\n");
+    if (mode == "untracked-binary" && prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal))
+        File.WriteAllBytes("fixture-cache.db", [0x43, 0x56, 0x45, 0x52, 0x53, 0x49, 0x4f, 0x4e, 0x53, 0x00, 0x01]);
     if (prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal) && mode is "workflow" or "artifact-only")
     {
         Directory.CreateDirectory("artifacts");
@@ -142,7 +146,8 @@ static int RunFakeCodexFixture(string[] args)
         ["LOCALAPPDATA"] = Environment.GetEnvironmentVariable("LOCALAPPDATA"),
         ["TEMP"] = Environment.GetEnvironmentVariable("TEMP"),
         ["TMP"] = Environment.GetEnvironmentVariable("TMP"),
-        ["TMPDIR"] = Environment.GetEnvironmentVariable("TMPDIR")
+        ["TMPDIR"] = Environment.GetEnvironmentVariable("TMPDIR"),
+        ["SystemDrive"] = Environment.GetEnvironmentVariable("SystemDrive")
     };
     Console.WriteLine($"{{\"type\":\"fixture.environment_paths\",\"paths\":{JsonSerializer.Serialize(environmentPaths)}}}");
     if (prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal))
@@ -528,6 +533,46 @@ static void CodexChildEnvironmentFiltersSecrets()
     {
         Environment.SetEnvironmentVariable("OPENAI_API_KEY", original);
         Environment.SetEnvironmentVariable("HTTPS_PROXY", originalProxy);
+    }
+}
+
+static void CodexChildInheritsSystemDrive()
+{
+    var original = Environment.GetEnvironmentVariable("SystemDrive");
+    var expected = original;
+    if (!OperatingSystem.IsWindows())
+    {
+        expected = "fixture-system-drive";
+        Environment.SetEnvironmentVariable("SystemDrive", expected);
+    }
+
+    try
+    {
+        if (OperatingSystem.IsWindows())
+            Assert.True(!string.IsNullOrWhiteSpace(expected), "Windows親プロセスにSystemDriveが設定されていません。");
+        var (runner, request, root) = CreateCodexFixture("success");
+        using (root)
+        {
+            var response = runner.Implement(request);
+            Assert.True(response.Succeeded, "SystemDrive付きのFake Codex実行が失敗しました。");
+            var paths = ReadFakeEnvironmentPaths(Path.Combine(request.RunDirectory!, response.ExecutionEvidence!.StandardOutputReference!));
+            Assert.Equal(expected, paths["SystemDrive"], "親のSystemDriveがCodex子プロセスへ引き継がれませんでした。");
+        }
+    }
+    finally { Environment.SetEnvironmentVariable("SystemDrive", original); }
+}
+
+static void CodexRejectsUntrackedBinaryChanges()
+{
+    var (runner, request, root) = CreateCodexFixture("untracked-binary");
+    using (root)
+    {
+        var response = runner.Implement(request);
+        Assert.False(response.Succeeded, "未追跡バイナリがレビュー用差分として受理されました。");
+        Assert.True(response.ExecutionEvidence!.Error?.Contains("未追跡ファイルはテキスト差分として安全にレビューできません", StringComparison.Ordinal) == true,
+            "未追跡バイナリの安全拒否理由が記録されませんでした。");
+        Assert.True(File.Exists(Path.Combine(request.Contract.WorkingDirectory, "fixture-cache.db")),
+            "拒否した未追跡バイナリの証拠ファイルがありません。");
     }
 }
 
