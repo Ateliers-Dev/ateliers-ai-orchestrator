@@ -186,11 +186,12 @@ internal sealed class CodexCliAgentRunner : IAgentRunner
         var succeeded = !stopRequested && !timedOut && error is null && terminalEvent == "turn.completed" && exitCode == 0 &&
             (role == "reviewer" ? hasResponse || hasArtifacts : hasResponse);
         if (!succeeded && error is null)
-            error = exitCode is { } failedExitCode && failedExitCode != 0
+            error = stopReason == "caller-cancellation" ? "利用者の停止要求を受け付けました。" : timedOut ? "実行時間上限に到達しました。" :
+                exitCode is { } failedExitCode && failedExitCode != 0
                 ? BuildCliFailureDiagnostic(failedExitCode, terminalEvent,
                     Path.GetRelativePath(request.RunDirectory!, stderrPath).Replace('\\', '/'))
-                : role == "reviewer" && !hasResponse && !hasArtifacts ? "Reviewerは本文も任意成果物も返しませんでした。" :
-                stopReason == "caller-cancellation" ? "利用者の停止要求を受け付けました。" : timedOut ? "実行時間上限に到達しました。" :
+                : role == "reviewer" && terminalEvent == "turn.completed" && exitCode == 0 && !hasResponse && !hasArtifacts
+                    ? "Reviewerは本文も任意成果物も返しませんでした。" :
                 $"完了条件不一致: terminal={terminalEvent ?? "未取得"}, exit={exitCode?.ToString() ?? "未取得"}, response={(string.IsNullOrWhiteSpace(response.ToString()) ? "空" : "取得済み")}";
         var content = response.ToString();
         string? selfAssessment = null;

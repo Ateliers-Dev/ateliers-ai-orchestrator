@@ -431,6 +431,8 @@ static void CodexMalformedAndEmptyResponsesFail()
                     { Role = "Reviewer", ArtifactReference = "fixture-artifact.md", ArtifactSha256 = artifactSha256 });
                 Assert.False(reviewerResponse.Succeeded, "本文・成果物ともに空のReviewerを成功扱いしました。");
                 Assert.True(reviewerResponse.ExecutionEvidence!.Error!.Contains("本文も任意成果物も返しませんでした", StringComparison.Ordinal));
+                Assert.Equal("turn.completed", reviewerResponse.ExecutionEvidence.TerminalEvent);
+                Assert.Equal(0, reviewerResponse.ExecutionEvidence.ExitCode);
             }
         }
     }
@@ -472,6 +474,22 @@ static void CodexTimeoutKillIsReportedSeparately()
         Assert.True(response.ExecutionEvidence!.KillAttempted);
         Assert.True(response.ExecutionEvidence.ProcessExitObserved == true);
         Assert.True(response.ExecutionEvidence.StreamsClosed == true);
+    }
+
+    var (reviewerRunner, reviewerRequest, reviewerRoot) = CreateCodexFixture("timeout", TimeSpan.FromMilliseconds(100));
+    using (reviewerRoot)
+    {
+        var artifactPath = Path.Combine(reviewerRequest.RunDirectory!, "fixture-artifact.md");
+        File.WriteAllText(artifactPath, "fixed reviewer input");
+        var artifactSha256 = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(artifactPath)));
+        var response = reviewerRunner.Review(reviewerRequest with
+            { Role = "Reviewer", ArtifactReference = "fixture-artifact.md", ArtifactSha256 = artifactSha256 });
+        Assert.False(response.Succeeded);
+        Assert.True(response.ExecutionEvidence!.TimedOut);
+        Assert.True(response.ExecutionEvidence.Error!.Contains("実行時間上限に到達しました。", StringComparison.Ordinal),
+            "Reviewerのタイムアウト原因が実行証跡の診断に記録されていません。");
+        Assert.False(response.ExecutionEvidence.Error.Contains("本文も任意成果物も返しませんでした", StringComparison.Ordinal),
+            "Reviewerのタイムアウトが空出力として記録されました。");
     }
 }
 
@@ -531,6 +549,27 @@ static void CodexCancellationIsDistinctFromTimeout()
         Assert.True(response.ExecutionEvidence.KillAttempted);
         Assert.True(response.ExecutionEvidence.ProcessExitObserved == true);
         Assert.True(response.ExecutionEvidence.StreamsClosed == true);
+    }
+
+    using var reviewerCancellation = new CancellationTokenSource();
+    var (reviewerRunner, reviewerRequest, reviewerRoot) = CreateCodexFixture("cancel", cancellationToken: reviewerCancellation.Token);
+    using (reviewerRoot)
+    {
+        var artifactPath = Path.Combine(reviewerRequest.RunDirectory!, "fixture-artifact.md");
+        File.WriteAllText(artifactPath, "fixed reviewer input");
+        var artifactSha256 = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(artifactPath)));
+        var task = Task.Run(() => reviewerRunner.Review(reviewerRequest with
+            { Role = "Reviewer", ArtifactReference = "fixture-artifact.md", ArtifactSha256 = artifactSha256 }));
+        WaitForFakeCodexStart(reviewerRequest);
+        reviewerCancellation.Cancel();
+        var response = task.GetAwaiter().GetResult();
+        Assert.False(response.Succeeded);
+        Assert.True(response.StopRequested);
+        Assert.Equal("caller-cancellation", response.ExecutionEvidence!.StopReason);
+        Assert.True(response.ExecutionEvidence.Error!.Contains("利用者の停止要求を受け付けました。", StringComparison.Ordinal),
+            "Reviewerの停止要求原因が実行証跡の診断に記録されていません。");
+        Assert.False(response.ExecutionEvidence.Error.Contains("本文も任意成果物も返しませんでした", StringComparison.Ordinal),
+            "Reviewerの停止要求が空出力として記録されました。");
     }
 }
 
