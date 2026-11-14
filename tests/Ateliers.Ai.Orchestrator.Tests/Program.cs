@@ -29,6 +29,7 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("確認待ちはIssue #3では到達不能", ReviewReadyIsUnavailableUntilEvidenceIntegration);
     suite.Add("origin URL検証はGitHubホストとrepository pathを厳密に照合する", GitHubRemoteUrlRequiresExactHostAndPath);
     suite.Add("PublisherはPR証跡の保存確認後にpendingだけを削除する", PublisherPersistsVerifiedPrEvidenceBeforeRemovingPending);
+    suite.Add("PRレビューコメントは判定・指摘項目を記録し同一Run/SHAの再投稿を防ぐ", ReviewCommentIsStructuredAndIdempotent);
     suite.Add("JSONLイベントに連番とUTC時刻を記録する", EventLogIsSequencedAndUtc);
     suite.Add("ライフサイクルJSONLは順序・再読込・秘匿・fixture削除後の保存を満たす", LifecycleEventsArePersistedSafely);
     suite.Add("複数プロセスからの同時追記で全JSONL行を保持する", LifecycleJsonlSerializesConcurrentProcesses);
@@ -40,6 +41,7 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("禁止遷移は状態と記録を変えない", RejectedTransitionDoesNotMutate);
     suite.Add("Fake正常系は成果物固定後にレビューし証跡不足で停止する", FakeSuccessKeepsReviewAndReadyEvidenceSeparate);
     suite.Add("PR必須Codex経路はpush済み差分をレビューしPR証跡後に人間待ちへ進む", RequiredPullRequestWorkflowPushesReviewsAndCreatesPr);
+    suite.Add("PR全体レビュー結果コメントの投稿失敗を成功扱いしない", RequiredPullRequestWorkflowFailsClosedOnReviewCommentFailure);
     suite.Add("PR必須Codex経路はpush失敗を成功扱いせずReviewerを起動しない", RequiredPullRequestWorkflowFailsClosedOnPushFailure);
     suite.Add("PR必須Codex経路はPR作成失敗を成功扱いしない", RequiredPullRequestWorkflowFailsClosedOnPrFailure);
     suite.Add("PR証跡ファイルがない場合は人間確認待ちへ進まない", RequiredPullRequestWorkflowRequiresPersistedEvidence);
@@ -127,6 +129,35 @@ static void PublisherPersistsVerifiedPrEvidenceBeforeRemovingPending()
     finally { Directory.Delete(root, true); }
 }
 
+static void ReviewCommentIsStructuredAndIdempotent()
+{
+    const string marker = "<!-- ateliers-review-result run=run-1 head=0123456789012345678901234567890123456789 -->";
+    var approval = GitHubWorkflowPublisher.FormatReviewComment(new WorkflowReviewResult("run-1", "reviewer-1",
+        "0123456789012345678901234567890123456789", "approve", "レビュー合格: 指摘なし。条件を満たしています。"), marker);
+    Assert.True(approval.Contains("判定: 指摘なし", StringComparison.Ordinal));
+    Assert.True(approval.Contains("Run ID: `run-1`", StringComparison.Ordinal));
+    Assert.True(approval.Contains("Reviewer: `reviewer-1`", StringComparison.Ordinal));
+    Assert.True(approval.Contains("レビュー対象 head SHA:", StringComparison.Ordinal));
+
+    var findings = GitHubWorkflowPublisher.FormatReviewComment(new WorkflowReviewResult("run-1", "reviewer-1",
+        "0123456789012345678901234567890123456789", "approve",
+        "レビュー合格: 指摘あり\n重要度: P2\n対象: src/File.cs\n根拠: null入力時に例外となる\n改善案: 入力検証を追加する"), marker);
+    Assert.True(findings.Contains("判定: 指摘あり", StringComparison.Ordinal));
+    Assert.True(findings.Contains("重要度: P2", StringComparison.Ordinal));
+    Assert.True(findings.Contains("対象: src/File.cs", StringComparison.Ordinal));
+    Assert.True(findings.Contains("根拠:", StringComparison.Ordinal));
+    Assert.True(findings.Contains("改善案:", StringComparison.Ordinal));
+
+    var matchingBody = JsonSerializer.Serialize(new[] { new { id = 10, body = approval, html_url = "https://github.com/Ateliers-Dev/test/pull/9#issuecomment-10" } });
+    Assert.True(GitHubWorkflowPublisher.FindExistingReviewComment(matchingBody, marker, approval) is not null);
+    var duplicateBody = JsonSerializer.Serialize(new[] { new { id = 10, body = approval }, new { id = 11, body = approval } });
+    Assert.Throws<InvalidOperationException>(() => GitHubWorkflowPublisher.FindExistingReviewComment(duplicateBody, marker, approval));
+    var conflictingBody = JsonSerializer.Serialize(new[] { new { id = 10, body = approval + "modified" } });
+    Assert.Throws<InvalidOperationException>(() => GitHubWorkflowPublisher.FindExistingReviewComment(conflictingBody, marker, approval));
+    Assert.Throws<InvalidOperationException>(() => GitHubWorkflowPublisher.FormatReviewComment(new WorkflowReviewResult("run-1",
+        "reviewer-1", "0123456789012345678901234567890123456789", "approve", "レビュー合格: 根拠は十分です"), marker));
+}
+
 static void RequiredPullRequestWorkflowPushesReviewsAndCreatesPr()
 {
     var root = Path.Combine(Path.GetTempPath(), $"required-pr-workflow-{Guid.NewGuid():N}");
@@ -146,7 +177,7 @@ static void RequiredPullRequestWorkflowPushesReviewsAndCreatesPr()
 
         Assert.Equal(RunState.NeedsHumanInput, result.State);
         Assert.True(result.PersistenceSucceeded);
-        Assert.Equal("start,push,push,create-pr", string.Join(',', publisher.Calls));
+        Assert.Equal("start,push,push,create-pr,post-review-comment", string.Join(',', publisher.Calls));
         Assert.Equal(2, runner.ImplementationCalls);
         Assert.Equal(2, runner.ReviewCalls);
         Assert.Equal("artifacts/implementer-snapshot-test.json", publisher.SnapshotReferences.First());
@@ -155,13 +186,52 @@ static void RequiredPullRequestWorkflowPushesReviewsAndCreatesPr()
         Assert.True(storedEvents.Any(line => line.Contains("github_push_verified", StringComparison.Ordinal)));
         Assert.True(storedEvents.Any(line => line.Contains("github_pull_request_created", StringComparison.Ordinal) &&
             line.Contains("head-sha-2", StringComparison.Ordinal)));
+        Assert.True(storedEvents.Any(line => line.Contains("github_review_result_comment_posted", StringComparison.Ordinal) &&
+            line.Contains("head-sha-2", StringComparison.Ordinal)));
         var evidencePath = Path.Combine(runDirectory, "github-pull-request.json");
         Assert.True(File.Exists(evidencePath), "成功したPRの検証済み証跡が実行記録に残っていません。");
         Assert.False(File.Exists(Path.Combine(runDirectory, "github-pull-request-pending.json")));
         using (var savedEvidence = JsonDocument.Parse(File.ReadAllBytes(evidencePath)))
             Assert.True(savedEvidence.RootElement.GetProperty("verified").GetBoolean());
+        var commentEvidencePath = Path.Combine(runDirectory, "github-review-comment.json");
+        Assert.True(File.Exists(commentEvidencePath), "必須レビュー結果コメントの証跡が保存されていません。");
+        using (var commentEvidence = JsonDocument.Parse(File.ReadAllBytes(commentEvidencePath)))
+        {
+            Assert.Equal("required-pr-test", commentEvidence.RootElement.GetProperty("runId").GetString());
+            Assert.Equal("codex-cli-reviewer", commentEvidence.RootElement.GetProperty("reviewerId").GetString());
+            Assert.Equal("head-sha-2", commentEvidence.RootElement.GetProperty("headSha").GetString());
+        }
         var report = File.ReadAllText(Path.Combine(runDirectory, "report.md"));
         Assert.True(report.Contains("https://github.com/Ateliers-Dev/test/pull/9", StringComparison.Ordinal));
+    }
+    finally { Directory.Delete(root, true); }
+}
+
+static void RequiredPullRequestWorkflowFailsClosedOnReviewCommentFailure()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"required-pr-comment-fail-{Guid.NewGuid():N}");
+    var runDirectory = Path.Combine(root, "run");
+    Directory.CreateDirectory(root);
+    Directory.CreateDirectory(runDirectory);
+    try
+    {
+        using var events = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "required-pr-comment-fail");
+        var publisher = new StubWorkflowPublisher { FailReviewComment = true };
+        var runner = new CountingPublicationAgentRunner(FakeScenario.Success);
+        var result = new FakeAgentWorkflow().Run(SampleContract() with
+            { WorkingDirectory = root, Reporting = new ReportingRequirements { PullRequestExpected = true, FinalReportFormat = "markdown" } },
+            "contract-hash", "required-pr-comment-fail", runDirectory, runner, events,
+            codexOneShot: true, publisher: publisher);
+        events.Dispose();
+
+        Assert.Equal(RunState.Failed, result.State);
+        Assert.True(result.PersistenceSucceeded);
+        var storedEvents = File.ReadAllText(Path.Combine(runDirectory, "events.jsonl"));
+        Assert.True(storedEvents.Contains("github_review_result_comment_failed", StringComparison.Ordinal));
+        Assert.True(storedEvents.Contains("expectedHeadSha=head-sha-1", StringComparison.Ordinal));
+        Assert.False(storedEvents.Contains("github_review_result_comment_posted", StringComparison.Ordinal));
+        Assert.True(File.Exists(Path.Combine(runDirectory, "github-review-comment-pending.json")));
+        Assert.True(File.ReadAllText(Path.Combine(runDirectory, "report.md")).Contains("成功扱いにはしていません", StringComparison.Ordinal));
     }
     finally { Directory.Delete(root, true); }
 }
@@ -436,7 +506,7 @@ static int RunFakeCodexFixture(string[] args)
             ? "レビュー合格: proxy credentials split-proxy-user / split-proxy-password"
             : mode == "proxy-output" ? "proxy credentials split-proxy-user / split-proxy-password"
             : mode == "workflow" && prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal)
-            ? prompt.Contains("REVIEW_ATTEMPT: 1", StringComparison.Ordinal) ? "指摘: テスト結果を明記してください。" : "レビュー合格: fixture reviewed fixed artifact"
+            ? prompt.Contains("REVIEW_ATTEMPT: 1", StringComparison.Ordinal) ? "指摘: テスト結果を明記してください。" : "レビュー合格: 指摘なし。fixture reviewed fixed artifact"
             : (mode is "workflow" or "artifact-only") && prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal)
                 ? "IMPLEMENTER-SELF-ASSESSMENT-SECRET" : "fixture response";
         var serializedMessage = JsonSerializer.Serialize(message);
@@ -2329,6 +2399,7 @@ sealed class StubWorkflowPublisher : IWorkflowPublisher
     public List<string> SnapshotHashes { get; } = [];
     public bool FailPush { get; init; }
     public bool FailCreatePullRequest { get; init; }
+    public bool FailReviewComment { get; init; }
     public bool OmitPrEvidence { get; init; }
     public CancellationTokenSource? CancelDuringPush { get; init; }
     public CancellationTokenSource? CancelAfterPush { get; init; }
@@ -2394,6 +2465,28 @@ sealed class StubWorkflowPublisher : IWorkflowPublisher
         }
         return new WorkflowPullRequest("https://github.com/Ateliers-Dev/test/pull/9", snapshot.CommitSha,
             session.BaseSha, session.Branch, session.BaseBranch, reference);
+    }
+
+    public WorkflowReviewComment PostReviewResultComment(WorkflowPublicationSession session, WorkflowPublicationSnapshot snapshot,
+        WorkflowPullRequest pullRequest, WorkflowReviewResult reviewResult, string runDirectory, CancellationToken stopToken)
+    {
+        Calls.Add("post-review-comment");
+        if (FailReviewComment)
+        {
+            File.WriteAllText(Path.Combine(runDirectory, "github-review-comment-pending.json"),
+                JsonSerializer.Serialize(new { evidenceKind = "github-review-result-comment-pending", runId = reviewResult.RunId,
+                    reviewerId = reviewResult.ReviewerId, expectedHeadSha = snapshot.CommitSha, verified = false }));
+            throw new IOException("test review comment failure");
+        }
+        const string reference = "github-review-comment.json";
+        var evidence = new { evidenceKind = "github-review-result-comment-posted", repository = session.Repository,
+            pullRequestUrl = pullRequest.Url, url = "https://github.com/Ateliers-Dev/test/pull/9#issuecomment-10", commentId = 10L,
+            runId = reviewResult.RunId, reviewerId = reviewResult.ReviewerId, headSha = snapshot.CommitSha,
+            reviewDiffSha256 = snapshot.DiffSha256, verdict = reviewResult.Verdict, commentBodySha256 = "hash",
+            verified = true, verifiedAtUtc = DateTimeOffset.UtcNow };
+        File.WriteAllText(Path.Combine(runDirectory, reference), JsonSerializer.Serialize(evidence));
+        return new WorkflowReviewComment("https://github.com/Ateliers-Dev/test/pull/9#issuecomment-10", 10,
+            snapshot.CommitSha, reference);
     }
 }
 

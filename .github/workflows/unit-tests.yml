@@ -46,7 +46,7 @@ jobs:
             '未検証: PR不要のCodex実行では実行bit変更を許容する: Unixの実行属性を確認するテストはWindowsでは実行できません。',
             '未検証: PR必須Codex snapshotは新規実行ファイルのmodeを保持する: Unix mode付きファイルのsnapshot検証はUnix runnerで実行します。'
           )
-          $expectedSummary = '結果: 60成功, 2未検証, 0失敗 / 62項目'
+          $expectedSummary = '結果: 62成功, 2未検証, 0失敗 / 64項目'
           $summaryLines = @($outputLines | Where-Object { $_.StartsWith('結果:') })
           $skipLines = @($outputLines | Where-Object { $_.StartsWith('未検証:') })
           $missingExpectedSkips = @($expectedSkips | Where-Object { $skipLines -cnotcontains $_ })

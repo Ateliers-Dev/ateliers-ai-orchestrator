@@ -261,6 +261,205 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         return new WorkflowPullRequest(details[0], details[1], details[2], details[3], details[4], "github-pull-request.json");
     }
 
+    /// <inheritdoc />
+    public WorkflowReviewComment PostReviewResultComment(WorkflowPublicationSession session, WorkflowPublicationSnapshot snapshot,
+        WorkflowPullRequest pullRequest, WorkflowReviewResult reviewResult, string runDirectory, CancellationToken stopToken)
+    {
+        _activeStopToken = stopToken;
+        EnsureTrustedGitConfig(session);
+        if (!Regex.IsMatch(reviewResult.RunId, "^[A-Za-z0-9._-]{1,128}$", RegexOptions.CultureInvariant) ||
+            !Regex.IsMatch(reviewResult.ReviewerId, "^[A-Za-z0-9._:-]{1,256}$", RegexOptions.CultureInvariant) ||
+            !reviewResult.ReviewedHeadSha.Equals(snapshot.CommitSha, StringComparison.OrdinalIgnoreCase) ||
+            !pullRequest.HeadSha.Equals(snapshot.CommitSha, StringComparison.OrdinalIgnoreCase) ||
+            !RemoteHeadMatches(session, snapshot.CommitSha))
+            throw new InvalidOperationException("レビュー結果のrun IDまたは対象head SHAを検証できません。コメントは投稿しません。");
+
+        var prNumber = ParsePullRequestNumber(pullRequest.Url, session.Repository);
+        var prDetails = Gh(session.WorkingDirectory, "pr", "view", pullRequest.Url, "--repo", session.Repository,
+            "--json", "headRefOid,state", "--template", "{{.headRefOid}}\t{{.state}}").Output.Trim().Split('\t');
+        if (prDetails.Length != 2 || prDetails[1] != "OPEN" ||
+            !prDetails[0].Equals(snapshot.CommitSha, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("レビュー対象head SHAとPRの最新head SHAが一致しません。コメントは投稿しません。");
+
+        var marker = $"<!-- ateliers-review-result run={reviewResult.RunId} head={snapshot.CommitSha} -->";
+        var body = FormatReviewComment(reviewResult, marker);
+        if (SecretContent.IsMatch(body))
+            throw new InvalidOperationException("レビュー結果コメントに既知形式の秘密情報らしい値を検出しました。投稿を停止しました。");
+        var pendingPath = Path.Combine(runDirectory, "github-review-comment-pending.json");
+        var evidencePath = Path.Combine(runDirectory, "github-review-comment.json");
+        if (File.Exists(evidencePath))
+            throw new InvalidOperationException("レビュー結果コメント証跡が既にあります。上書きせず停止しました。");
+        WriteReviewCommentPending(pendingPath, session, pullRequest, reviewResult, snapshot, "post-request-started");
+
+        try
+        {
+            var existing = FetchReviewComments(session.WorkingDirectory, session.Repository, prNumber);
+            var existingComment = FindExistingReviewComment(existing, marker, body);
+            JsonElement posted;
+            if (existingComment is { } found)
+            {
+                posted = found;
+            }
+            else
+            {
+                var payload = JsonSerializer.SerializeToUtf8Bytes(new { body });
+                var create = Gh(session.WorkingDirectory, payload, "api", "--method", "POST",
+                    $"repos/{session.Repository}/issues/{prNumber}/comments", "--input", "-").Output;
+                using var createdDocument = JsonDocument.Parse(create);
+                posted = createdDocument.RootElement.Clone();
+            }
+            var commentId = posted.GetProperty("id").GetInt64();
+            var commentUrl = posted.GetProperty("html_url").GetString();
+            var postedBody = posted.GetProperty("body").GetString();
+            if (commentId <= 0 || !Uri.TryCreate(commentUrl, UriKind.Absolute, out var commentUri) ||
+                commentUri.Scheme != Uri.UriSchemeHttps || commentUri.Host != "github.com" || postedBody != body)
+                throw new InvalidOperationException("GitHubから返されたレビュー結果コメントを照合できません。");
+            var finalPrDetails = Gh(session.WorkingDirectory, "pr", "view", pullRequest.Url, "--repo", session.Repository,
+                "--json", "headRefOid,state", "--template", "{{.headRefOid}}\t{{.state}}").Output.Trim().Split('\t');
+            if (finalPrDetails.Length != 2 || finalPrDetails[1] != "OPEN" ||
+                !finalPrDetails[0].Equals(snapshot.CommitSha, StringComparison.OrdinalIgnoreCase) ||
+                !RemoteHeadMatches(session, snapshot.CommitSha))
+                throw new InvalidOperationException("コメント投稿後にPR head SHAがレビュー対象から変化しました。投稿成功扱いしません。");
+            var evidence = new
+            {
+                evidenceKind = "github-review-result-comment-posted",
+                repository = session.Repository,
+                pullRequestUrl = pullRequest.Url,
+                url = commentUrl,
+                commentId,
+                runId = reviewResult.RunId,
+                reviewerId = reviewResult.ReviewerId,
+                headSha = snapshot.CommitSha,
+                reviewDiffSha256 = snapshot.DiffSha256,
+                verdict = reviewResult.Verdict,
+                commentBodySha256 = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(body))),
+                verified = true,
+                verifiedAtUtc = DateTimeOffset.UtcNow
+            };
+            PersistReviewCommentEvidence(runDirectory, evidence, commentId, commentUrl, reviewResult, snapshot.CommitSha);
+            return new WorkflowReviewComment(commentUrl, commentId, snapshot.CommitSha, "github-review-comment.json");
+        }
+        catch (OperationCanceledException)
+        {
+            WriteReviewCommentPending(pendingPath, session, pullRequest, reviewResult, snapshot, "post-interrupted-or-unknown");
+            throw;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception or System.Text.Json.JsonException)
+        {
+            WriteReviewCommentPending(pendingPath, session, pullRequest, reviewResult, snapshot, $"post-failed-{exception.GetType().Name}");
+            throw;
+        }
+    }
+
+    internal static string FormatReviewComment(WorkflowReviewResult result, string marker)
+    {
+        var summary = result.Summary.Trim();
+        var separator = summary.IndexOf(':');
+        if (separator >= 0) summary = summary[(separator + 1)..].Trim();
+        if (summary.Length > 16000) summary = summary[..16000] + "\n\n（長さ上限により後続を省略）";
+        var saysFindings = summary.Contains("指摘あり", StringComparison.Ordinal);
+        var saysNoFindings = summary.Contains("指摘なし", StringComparison.Ordinal);
+        if (saysFindings == saysNoFindings)
+            throw new InvalidOperationException("Reviewer応答に『指摘あり』または『指摘なし』の明確な判定がありません。");
+        var verdict = saysFindings ? "指摘あり" : "指摘なし";
+        if (saysFindings)
+        {
+            foreach (var field in new[] { "重要度:", "対象:", "根拠:", "改善案:" })
+                if (!summary.Contains(field, StringComparison.Ordinal))
+                    throw new InvalidOperationException($"レビュー指摘をPR全体コメントへ記録するための項目 {field} がありません。");
+        }
+        return $"{marker}\n## 独立レビュー結果\n\n- 判定: {verdict}\n- Run ID: `{result.RunId}`\n- Reviewer: `{result.ReviewerId.Replace("`", "'")}`\n- レビュー対象 head SHA: `{result.ReviewedHeadSha}`\n\n### レビュー内容\n\n{summary}\n";
+    }
+
+    private static int ParsePullRequestNumber(string url, string repository)
+    {
+        var expectedPath = $"/{repository}/pull/";
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps || uri.Host != "github.com" ||
+            !uri.AbsolutePath.StartsWith(expectedPath, StringComparison.OrdinalIgnoreCase) ||
+            !Regex.IsMatch(uri.AbsolutePath, $"^{Regex.Escape(expectedPath)}\\d+/?$", RegexOptions.CultureInvariant))
+            throw new InvalidOperationException("GitHub PR URLが対象リポジトリのURLではありません。");
+        var segment = uri.AbsolutePath[expectedPath.Length..].TrimEnd('/');
+        if (!int.TryParse(segment, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var number) || number <= 0)
+            throw new InvalidOperationException("GitHub PR番号が正の整数ではありません。");
+        return number;
+    }
+
+    private bool RemoteHeadMatches(WorkflowPublicationSession session, string expectedSha)
+    {
+        var line = Git(session.WorkingDirectory, "ls-remote", "origin", $"refs/heads/{session.Branch}").Output.Trim();
+        return line.Split('\t')[0].Equals(expectedSha, StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static JsonElement? FindExistingReviewComment(string json, string marker, string expectedBody)
+    {
+        using var document = JsonDocument.Parse(json);
+        var found = new List<JsonElement>();
+        void Scan(JsonElement node)
+        {
+            if (node.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in node.EnumerateArray()) Scan(item);
+            }
+            else if (node.ValueKind == JsonValueKind.Object && node.TryGetProperty("body", out var body) &&
+                     body.ValueKind == JsonValueKind.String && body.GetString()?.Contains(marker, StringComparison.Ordinal) == true)
+                found.Add(node.Clone());
+        }
+        Scan(document.RootElement);
+        if (found.Count > 1 || (found.Count == 1 && found[0].GetProperty("body").GetString() != expectedBody))
+            throw new InvalidOperationException("同じrun IDとレビュー対象SHAの既存コメントが一意に照合できません。再投稿しません。");
+        return found.Count == 1 ? found[0] : null;
+    }
+
+    private string FetchReviewComments(string cwd, string repository, int prNumber)
+    {
+        var comments = new List<JsonElement>();
+        for (var page = 1; page <= 100; page++)
+        {
+            var path = $"repos/{repository}/issues/{prNumber}/comments?per_page=100&page={page}";
+            using var document = JsonDocument.Parse(Gh(cwd, "api", path).Output);
+            if (document.RootElement.ValueKind != JsonValueKind.Array)
+                throw new InvalidOperationException("PRコメント一覧の応答形式を確認できません。");
+            var pageItems = document.RootElement.EnumerateArray().ToArray();
+            comments.AddRange(pageItems.Select(item => item.Clone()));
+            if (pageItems.Length < 100) return JsonSerializer.Serialize(comments);
+        }
+        throw new InvalidOperationException("PRコメント一覧がページ上限を超えました。重複投稿を避けるため停止しました。");
+    }
+
+    private static void WriteReviewCommentPending(string path, WorkflowPublicationSession session, WorkflowPullRequest pullRequest,
+        WorkflowReviewResult result, WorkflowPublicationSnapshot snapshot, string outcome)
+    {
+        var evidence = new { evidenceKind = "github-review-result-comment-pending", repository = session.Repository,
+            pullRequestUrl = pullRequest.Url, runId = result.RunId, reviewerId = result.ReviewerId,
+            expectedHeadSha = snapshot.CommitSha, reviewDiffSha256 = snapshot.DiffSha256,
+            outcome, verified = false, recordedAtUtc = DateTimeOffset.UtcNow };
+        File.WriteAllText(path, JsonSerializer.Serialize(evidence, new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
+    }
+
+    internal static void PersistReviewCommentEvidence(string runDirectory, object evidence, long expectedId,
+        string expectedUrl, WorkflowReviewResult result, string expectedHeadSha)
+    {
+        var pending = Path.Combine(runDirectory, "github-review-comment-pending.json");
+        var verified = Path.Combine(runDirectory, "github-review-comment.json");
+        if (File.Exists(verified)) throw new InvalidOperationException("レビュー結果コメント証跡を上書きしません。");
+        var temp = verified + $".{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(temp, JsonSerializer.Serialize(evidence, new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
+            File.Move(temp, verified);
+            using var saved = JsonDocument.Parse(File.ReadAllBytes(verified));
+            var root = saved.RootElement;
+            if (root.GetProperty("evidenceKind").GetString() != "github-review-result-comment-posted" ||
+                root.GetProperty("verified").ValueKind != JsonValueKind.True || root.GetProperty("commentId").GetInt64() != expectedId ||
+                root.GetProperty("url").GetString() != expectedUrl || root.GetProperty("runId").GetString() != result.RunId ||
+                root.GetProperty("reviewerId").GetString() != result.ReviewerId || root.GetProperty("headSha").GetString() != expectedHeadSha ||
+                !result.ReviewedHeadSha.Equals(expectedHeadSha, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("保存後のレビュー結果コメント証跡を照合できません。");
+            if (File.Exists(pending)) File.Delete(pending);
+        }
+        finally { if (File.Exists(temp)) File.Delete(temp); }
+    }
+
     internal static void PersistVerifiedPullRequestEvidence(string runDirectory, object evidence,
         string expectedUrl, string expectedHeadSha, string expectedBaseSha)
     {
@@ -490,6 +689,8 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
             isolatedGitIndexPath: indexFile);
     }
     private ProcessResult Gh(string cwd, params string[] args) => Run("gh", cwd, args, stopToken: _activeStopToken);
+    private ProcessResult Gh(string cwd, byte[] standardInput, params string[] args) =>
+        Run("gh", cwd, args, stopToken: _activeStopToken, standardInput: standardInput);
     private static ProcessResult Gh(string cwd, string[] args, CancellationToken stopToken) => Run("gh", cwd, args, stopToken: stopToken);
 
     private static string CreateSafeHooksPath()

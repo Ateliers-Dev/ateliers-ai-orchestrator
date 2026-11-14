@@ -5,9 +5,9 @@
 
 ## 今回のPoC完了地点
 
-Codex実行の完了地点は、契約の`reporting.pullRequestExpected`に従います。`true`では**Implementer → 専用ブランチへcommit・push → push済み固定差分を独立Reviewerが確認 → 指摘時はboundedな修正・再push・再レビュー → PR作成・SHA照合 → 人間判断待ち**へ進みます。
+Codex実行の完了地点は、契約の`reporting.pullRequestExpected`に従います。`true`では**Implementer → 専用ブランチへcommit・push → push済み固定差分を独立Reviewerが確認 → 指摘時はboundedな修正・再push・再レビュー → PR作成・SHA照合 → レビュー結果をPR全体コメントへ投稿・照合 → 人間判断待ち**へ進みます。
 
-`pullRequestExpected=true`の実Codex経路は、実行前にcleanなGit checkout、`origin`、GitHub既定ブランチの最新SHA、GitHub CLI認証とpush権限を確認します。Implementer後に専用ブランチへ変更をcommitしpushし、リモートrefのSHAとローカルHEADを照合した後、そのcommitから作成した固定diffをReviewerへ渡します。Reviewerの指摘では契約上限内で修正・再pushして再レビューします。合格後にPRを作成し、PR URL、head/base SHA、branch、diff hashを実行記録へ保存します。これらが完了するまで正常な`NeedsHumanInput`へ進みません。認証・push・PR・証跡照合の失敗は`Failed`となり成功扱いしません。
+`pullRequestExpected=true`の実Codex経路は、実行前にcleanなGit checkout、`origin`、GitHub既定ブランチの最新SHA、GitHub CLI認証とpush権限を確認します。Implementer後に専用ブランチへ変更をcommitしpushし、リモートrefのSHAとローカルHEADを照合した後、そのcommitから作成した固定diffをReviewerへ渡します。Reviewerの指摘では契約上限内で修正・再pushして再レビューします。合格後にPRを作成し、PR URL、head/base SHA、branch、diff hashを実行記録へ保存します。続けてPRの最新head SHAがレビュー対象SHAと一致することを再確認し、Run ID、Reviewer識別子、判定、レビュー内容をPR全体コメントとして投稿・照合します。承認時も「指摘なし」を明記し、指摘ありの結果には重要度・対象・根拠・改善案を含めます。投稿ID/URL、対象SHAと内容hashを証跡に保存します。同じRun IDとhead SHAの投稿を再実行する場合は既存コメントを照合し、重複投稿を避けます。投稿結果が不明または失敗した場合はpending証跡を残し、`Failed`として停止します。PR作成とコメント投稿の両方が完了するまで正常な`NeedsHumanInput`へ進みません。認証・push・PR・コメント・証跡照合の失敗は成功扱いしません。
 
 `pullRequestExpected=false`では自動push/PRを行わず、従来どおりCodexを一回ずつ実行して停止します。Fake実行も外部GitHub操作をしません。人間によるPR最終確認とmergeの責務を維持し、自動mergeは行いません。
 
@@ -99,7 +99,7 @@ Fake Agentは実行ごとに同じ入力へ同じ応答を返します。成果�
 
 ## 状態と実行記録
 
-状態は `Prepared → Implementing → Reviewing → Revising → Implementing ...` の流れと、`ReadyForHumanReview`、`NeedsHumanInput`、`Failed` の終端状態を定義しています。禁止遷移は拒否されます。`ReadyForHumanReview` への遷移には、固定成果物ハッシュと一致する独立レビュー記録、タスクの全受け入れ条件の検証記録、GitHub PR URLと作成操作記録が必要です。PR必須のCodex経路は、PR作成とpush済みhead/base SHAの照合を完了した後に`NeedsHumanInput`へ進み、検証済みPR証跡を`github-pull-request.json`へ保存・再読込確認した後にpending記録を削除します。Coreも証跡ファイルの存在と内容を照合します。証跡が欠ける場合は`Failed`となり、成功扱いしません。Fakeモードは実PRや受け入れ結果を作らないため、証跡が別途与えられない限り `NeedsHumanInput` で停止します。Agentの自己申告だけで遷移する経路はありません。人間によるマージ状態はモデルに含まず、CLIからマージする機能もありません。
+状態は `Prepared → Implementing → Reviewing → Revising → Implementing ...` の流れと、`ReadyForHumanReview`、`NeedsHumanInput`、`Failed` の終端状態を定義しています。禁止遷移は拒否されます。`ReadyForHumanReview` への遷移には、固定成果物ハッシュと一致する独立レビュー記録、タスクの全受け入れ条件の検証記録、GitHub PR URLと作成操作記録が必要です。PR必須のCodex経路は、PR作成・head/base SHA照合・レビュー結果コメントの投稿と証跡再読込を終えてから`NeedsHumanInput`へ進みます。PR証跡は`github-pull-request.json`、コメント証跡は`github-review-comment.json`へ保存し、成功後に各pending記録を削除します。投稿成否が不明な場合は`github-review-comment-pending.json`を残します。Run IDとhead SHAを含むコメント目印で既存投稿を検索し、同一内容だけを再利用します。コメント本文は既知形式の秘密値パターンを検査しますが、完全なsecret scannerではありません。Coreも証跡ファイルの存在と内容を照合します。証跡が欠ける場合は`Failed`となり、成功扱いしません。Fakeモードは実PRや受け入れ結果を作らないため、証跡が別途与えられない限り `NeedsHumanInput` で停止します。Agentの自己申告だけで遷移する経路はありません。人間によるマージ状態はモデルに含まず、CLIからマージする機能もありません。
 
 `--review-evidence` を使う場合は、`HumanReviewEvidence` のJSONと、それが参照する3記録を指定します。レビュー記録は `evidenceKind=independent-review`、対象成果物・レビュー入力のハッシュ、異なる実装・レビュー担当ID、`selfAssessmentExcluded=true`、`verdict=approve` を含めます。受け入れ記録は `evidenceKind=acceptance-verification`、契約の受け入れ条件一覧ハッシュ、全条件数と合格数を含めます。PR操作記録は `evidenceKind=github-pull-request-created`、実PR URL、操作IDを含めます。CLIは記録内容と相互参照を検査して、参照先と記録ファイルのSHA-256を実行イベントへ残します。タイムアウトシナリオはFake応答による再現です。記録の発行元を暗号学的に認証する仕組みはなく、実GitHub操作を行う機能でもありません。
 
