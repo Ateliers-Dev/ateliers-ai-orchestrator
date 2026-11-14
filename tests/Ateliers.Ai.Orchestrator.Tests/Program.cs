@@ -71,6 +71,7 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("Codex子プロセスへSystemDriveを渡す", CodexChildInheritsSystemDrive);
     suite.Add("Fake Codexが生成した未追跡バイナリを差分固定時に拒否する", CodexRejectsUntrackedBinaryChanges);
     suite.Add("既存CODEX_HOMEと通常のユーザープロファイルを使える", CodexExistingProfilesAreAccepted);
+    suite.Add("再実装プロンプトの契約範囲をFake Codexが読み取る", CodexFakeParsesScopeBeforeRevisionFinding);
     suite.Add("Codex Fakeプロセスで独立レビューまで縦断し固定hashを引き継ぐ", CodexFakeProcessesCompleteIndependentReviewSlice);
     suite.Add("Codex一回モードは成功・指摘・失敗を記録し追加起動せず人間判断待ちで止まる", CodexOneShotStopsWithoutRetries);
 }
@@ -98,6 +99,9 @@ static int RunFakeCodexFixture(string[] args)
         if (contractStart < 0) throw new InvalidOperationException("Fake Codexプロンプトに契約JSONがありません。");
         contractStart += contractMarker.Length;
         var contractEnd = prompt.IndexOf("\n\n固定成果物:", contractStart, StringComparison.Ordinal);
+        var reviewFindingStart = prompt.IndexOf("\n前回レビュー指摘:", contractStart, StringComparison.Ordinal);
+        if (reviewFindingStart >= 0 && (contractEnd < 0 || reviewFindingStart < contractEnd))
+            contractEnd = reviewFindingStart;
         if (contractEnd < 0) contractEnd = prompt.Length;
         using var contractJson = JsonDocument.Parse(prompt[contractStart..contractEnd]);
         var scope = contractJson.RootElement.GetProperty("Scope");
@@ -657,6 +661,18 @@ static void CodexExistingProfilesAreAccepted()
         Assert.Equal(Path.GetFullPath(existingHome), CodexCliRunnerOptions.ResolveCodexHome(null));
     }
     finally { Environment.SetEnvironmentVariable("CODEX_HOME", original); }
+}
+
+static void CodexFakeParsesScopeBeforeRevisionFinding()
+{
+    var (runner, request, root) = CreateCodexFixture("success");
+    using (root)
+    {
+        var response = runner.Implement(request with { ReviewFinding = "修正後の応答に必要なテスト結果が不足しています。" });
+        Assert.True(response.Succeeded, "レビュー指摘付きの再実装プロンプトをFake Codexが処理できませんでした。");
+        var stdout = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "codex.stdout.jsonl"));
+        AssertCodexFixturePolicy(stdout, "workspace-write", "Implementer", ["src"], ["bin"]);
+    }
 }
 
 static void CodexFakeProcessesCompleteIndependentReviewSlice()
