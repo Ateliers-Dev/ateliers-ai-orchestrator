@@ -66,6 +66,7 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("timeout時にFakeプロセスの子プロセス停止も確認する", CodexTimeoutStopsFakeChildProcess);
     suite.Add("kill失敗を記録しプロセス終了未確認を成功扱いしない", CodexKillFailureIsNotReportedAsSuccess);
     suite.Add("Ctrl+C停止要求とtimeoutを区別しkill・終了・stream結果を記録する", CodexCancellationIsDistinctFromTimeout);
+    suite.Add("Workflow停止要求をCodex RunnerとFake子プロセスへ伝播する", WorkflowCancellationStopsFakeCodexProcess);
     suite.Add("Codex子プロセスへ親のAPI secret環境変数を渡さない", CodexChildEnvironmentFiltersSecrets);
     suite.Add("Codex子プロセスへSystemDriveを渡す", CodexChildInheritsSystemDrive);
     suite.Add("Fake Codexが生成した未追跡バイナリを差分固定時に拒否する", CodexRejectsUntrackedBinaryChanges);
@@ -123,7 +124,15 @@ static int RunFakeCodexFixture(string[] args)
         return 0;
     }
     if (mode == "timeout") { Thread.Sleep(5_000); return 0; }
-    if (mode == "cancel") { Thread.Sleep(5_000); return 0; }
+    if (mode == "cancel")
+    {
+        var signalPath = Path.Combine(Environment.CurrentDirectory, "fake-codex-started.signal");
+        var temporarySignalPath = signalPath + ".tmp";
+        File.WriteAllText(temporarySignalPath, "started");
+        File.Move(temporarySignalPath, signalPath);
+        Thread.Sleep(5_000);
+        return 0;
+    }
     if (mode == "kill-failure") { Thread.Sleep(500); return 0; }
     if (prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal)) File.WriteAllText("example.txt", "fixture change\n");
     if (mode == "untracked-binary" && prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal))
@@ -498,7 +507,7 @@ static void CodexCancellationIsDistinctFromTimeout()
     using (root)
     {
         var task = Task.Run(() => runner.Implement(request));
-        Thread.Sleep(150);
+        WaitForFakeCodexStart(request);
         cancellation.Cancel();
         var response = task.GetAwaiter().GetResult();
         Assert.False(response.Succeeded);
@@ -509,6 +518,50 @@ static void CodexCancellationIsDistinctFromTimeout()
         Assert.True(response.ExecutionEvidence.ProcessExitObserved == true);
         Assert.True(response.ExecutionEvidence.StreamsClosed == true);
     }
+}
+
+static void WorkflowCancellationStopsFakeCodexProcess()
+{
+    using var cancellation = new CancellationTokenSource();
+    var (runner, request, root) = CreateCodexFixture("cancel");
+    using (root)
+    {
+        var eventPath = Path.Combine(request.RunDirectory!, "events.jsonl");
+        FakeWorkflowResult result;
+        using var events = JsonlRunEventStore.CreateNew(eventPath, request.RunId);
+        var workflow = Task.Run(() => new FakeAgentWorkflow().Run(SampleContract() with
+            { WorkingDirectory = request.Contract.WorkingDirectory }, new string('d', 64), request.RunId,
+            request.RunDirectory!, runner, events, stopToken: cancellation.Token, codexOneShot: true));
+
+        WaitForFakeCodexStart(request);
+        cancellation.Cancel();
+        result = workflow.GetAwaiter().GetResult();
+
+        Assert.Equal(RunState.NeedsHumanInput, result.State);
+        Assert.Equal(1, result.ImplementationCalls);
+        Assert.Equal(0, result.ReviewCalls);
+        var evidencePath = Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "execution-evidence.json");
+        var evidence = JsonSerializer.Deserialize<AgentExecutionEvidence>(File.ReadAllText(evidencePath));
+        Assert.True(evidence is not null, "保存済み実行証跡をAgentExecutionEvidenceとして読み取れませんでした。");
+        Assert.True(evidence!.StopRequested);
+        Assert.False(evidence.TimedOut);
+        Assert.Equal("caller-cancellation", evidence.StopReason);
+        Assert.True(evidence.KillAttempted);
+        Assert.True(evidence.ProcessExitObserved == true);
+        Assert.True(evidence.StreamsClosed == true);
+    }
+}
+
+static void WaitForFakeCodexStart(AgentRequest request)
+{
+    var signalPath = Path.Combine(request.Contract.WorkingDirectory, "fake-codex-started.signal");
+    var started = SpinWait.SpinUntil(() =>
+    {
+        try { return File.ReadAllText(signalPath) == "started"; }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+    }, TimeSpan.FromSeconds(5));
+    Assert.True(started, "Fake Codex子プロセスの開始シグナルを5秒以内に確認できませんでした。");
 }
 
 static void CodexChildEnvironmentFiltersSecrets()
@@ -2014,4 +2067,5 @@ sealed class FailingEventWriter(string failureEventType, bool failReadyTransitio
 sealed class DiagnosticTestFailure(string details) : Exception(details)
 {
 }
+
 

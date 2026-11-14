@@ -81,7 +81,8 @@ internal static class OrchestratorCli
                 using var lifecycleWriter = new LifecycleNotificationEventWriter(lifecycleLogPath, notificationsDisabled, useSlackTestChannel);
                 IAgentRunner runner = agentKind == "codex" ? new CodexCliAgentRunner(codexOptions!) : new FakeAgentRunner(scenario);
                 var result = new FakeAgentWorkflow().Run(contract, contractHash, fakeRunId, fakeRunDirectory,
-                    runner, eventStore, evidence, codexOneShot: agentKind == "codex", lifecycleEvents: lifecycleWriter);
+                    runner, eventStore, evidence, stopToken: stopSource.Token,
+                    codexOneShot: agentKind == "codex", lifecycleEvents: lifecycleWriter);
                 await lifecycleWriter.FlushSlackNotificationsAsync(stopSource.Token);
                 if (lifecycleWriter.FailedWrites > 0)
                     Console.Error.WriteLine($"警告: ライフサイクルJSONLへの書き込みに{lifecycleWriter.FailedWrites}件失敗しました。実行結果は継続しています。");
@@ -368,3 +369,4 @@ internal static class OrchestratorCli
         Console.Error.WriteLine("  ateliers-orchestrator run <contract.json> [--agent fake|codex] [--scenario <FakeScenario>] [--codex-exe <絶対パス>] [--implementer-codex-home <絶対パス>] [--reviewer-codex-home <絶対パス>] [--runs <ディレクトリ>] [--lifecycle-log <JSONL>] [--review-evidence <証跡.json>] [--slack-notifications auto|disabled|test]");
     }
 }
+
