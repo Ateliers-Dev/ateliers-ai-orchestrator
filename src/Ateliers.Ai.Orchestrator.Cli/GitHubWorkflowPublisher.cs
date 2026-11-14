@@ -242,7 +242,9 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher
     {
         var helperResult = Run("git", cwd,
             ["config", "--global", "--null", "--get-all", "credential.helper"], allowExitCodeOne: true);
-        var helpers = helperResult.Output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+        string[] helpers = helperResult.Output.Length == 0 ? [] : helperResult.Output.Split('\0');
+        if (helpers.Length > 0 && helpers[^1].Length == 0)
+            Array.Resize(ref helpers, helpers.Length - 1);
         var directory = Path.Combine(Path.GetTempPath(), $"ateliers-orchestrator-gitconfig-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
         var configPath = Path.Combine(directory, "config");
