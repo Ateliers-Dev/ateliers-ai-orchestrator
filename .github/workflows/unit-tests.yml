@@ -30,8 +30,30 @@ jobs:
       - name: Build solution
         run: dotnet build Ateliers.Ai.Orchestrator.sln --configuration Release --no-restore
 
-      - name: Run Fake-only unit tests
+      - name: Run Fake-only unit tests on Unix
+        if: runner.os != 'Windows'
         run: dotnet run --project tests/Ateliers.Ai.Orchestrator.Tests/Ateliers.Ai.Orchestrator.Tests.csproj --configuration Release --no-build --no-restore -- --unit
+
+      - name: Run Fake-only unit tests on Windows (allow only Unix-mode skips)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $output = @(& dotnet run --project tests/Ateliers.Ai.Orchestrator.Tests/Ateliers.Ai.Orchestrator.Tests.csproj --configuration Release --no-build --no-restore -- --unit 2>&1)
+          $testExitCode = $LASTEXITCODE
+          $output | ForEach-Object { Write-Output $_ }
+          $log = $output -join "`n"
+          $expectedSkips = @(
+            '未検証: PR不要のCodex実行では実行bit変更を許容する: Unixの実行属性を確認するテストはWindowsでは実行できません。',
+            '未検証: PR必須Codex snapshotは新規実行ファイルのmodeを保持する: Unix mode付きファイルのsnapshot検証はUnix runnerで実行します。'
+          )
+          $expectedSummary = '結果: 60成功, 2未検証, 0失敗 / 62項目'
+          $missingExpectedSkips = @($expectedSkips | Where-Object { -not $log.Contains($_) })
+          if ($testExitCode -eq 2 -and $log.Contains($expectedSummary) -and $missingExpectedSkips.Count -eq 0) {
+            Write-Output 'Windows固有のUnix modeテスト2件のみ未検証として扱います。'
+            exit 0
+          }
+          Write-Output "Unexpected Windows unit-test result (exit=$testExitCode); expected exactly the two Unix-mode skips and no failures."
+          exit 1
 
       - name: Run Slack unit tests
         run: dotnet test tests/Ateliers.Slack.UnitTests/Ateliers.Slack.UnitTests.csproj --configuration Release --no-build --no-restore

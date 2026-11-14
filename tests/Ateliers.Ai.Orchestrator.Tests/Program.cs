@@ -448,7 +448,7 @@ static int RunFakeCodexFixture(string[] args)
 
 static void CodexNonPullRequestAllowsExecutableModeChange()
 {
-    if (OperatingSystem.IsWindows()) return;
+    if (OperatingSystem.IsWindows()) Assert.Skip("Unixの実行属性を確認するテストはWindowsでは実行できません。");
     var (runner, request, root) = CreateCodexFixture("executable-mode-change");
     using (root)
     {
@@ -461,7 +461,7 @@ static void CodexNonPullRequestAllowsExecutableModeChange()
 
 static void CodexPullRequestSnapshotPreservesNewExecutableMode()
 {
-    if (OperatingSystem.IsWindows()) return;
+    if (OperatingSystem.IsWindows()) Assert.Skip("Unix mode付きファイルのsnapshot検証はUnix runnerで実行します。");
     var (runner, request, root) = CreateCodexFixture("new-executable");
     using (root)
     {
