@@ -987,4 +987,3 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
 
     private sealed record ProcessResult(string Output, string Error, int ExitCode);
 }
-
