@@ -229,7 +229,10 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                     }
                     catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
                     {
-                        failure = $"GitHub提出の事前確認に失敗しました。認証・リモート・ブランチ・権限を確認してください。 ({exception.GetType().Name})";
+                        var diagnostic = exception is WorkflowPreflightException preflight
+                            ? $"stage={preflight.Stage};reason={preflight.Reason}"
+                            : exception.GetType().Name;
+                        failure = $"GitHub提出の事前確認に失敗しました。認証・リモート・ブランチ・権限を確認してください。 ({diagnostic})";
                         eventWriter.Append("github_publication_failed", "failed", from: run.State, to: run.State,
                             detail: "GitHub提出の事前確認に失敗しました。例外出力は秘密情報保護のため記録していません。", error: failure);
                         run.Transition(RunState.Failed);
@@ -311,7 +314,10 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                     }
                     catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
                     {
-                        failure = $"必須GitHub pushまたは差分固定に失敗しました。成功扱いにはしていません。 ({exception.GetType().Name})";
+                        var diagnostic = exception is WorkflowPreflightException preflight
+                            ? $"stage={preflight.Stage};reason={preflight.Reason}"
+                            : exception.GetType().Name;
+                        failure = $"必須GitHub pushまたは差分固定に失敗しました。成功扱いにはしていません。 ({diagnostic})";
                         eventWriter.Append("github_publication_failed", "failed", from: run.State, to: run.State,
                             detail: "必須GitHub pushまたは差分固定に失敗しました。例外出力は秘密情報保護のため記録していません。", error: failure);
                         run.Transition(RunState.Failed);

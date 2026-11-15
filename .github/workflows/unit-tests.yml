@@ -46,11 +46,17 @@ jobs:
             '未検証: PR不要のCodex実行では実行bit変更を許容する: Unixの実行属性を確認するテストはWindowsでは実行できません。',
             '未検証: PR必須Codex snapshotは新規実行ファイルのmodeを保持する: Unix mode付きファイルのsnapshot検証はUnix runnerで実行します。'
           )
-          $expectedSummary = '結果: 62成功, 2未検証, 0失敗 / 64項目'
           $summaryLines = @($outputLines | Where-Object { $_.StartsWith('結果:') })
           $skipLines = @($outputLines | Where-Object { $_.StartsWith('未検証:') })
           $missingExpectedSkips = @($expectedSkips | Where-Object { $skipLines -cnotcontains $_ })
-          if ($testExitCode -eq 2 -and $summaryLines.Count -eq 1 -and $summaryLines[0] -ceq $expectedSummary -and
+          $summaryMatch = if ($summaryLines.Count -eq 1) {
+            [regex]::Match($summaryLines[0], '^結果: (\d+)成功, (\d+)未検証, (\d+)失敗 / (\d+)項目$')
+          }
+          $hasValidSummary = $summaryMatch -and $summaryMatch.Success -and
+            [int]$summaryMatch.Groups[2].Value -eq $expectedSkips.Count -and
+            [int]$summaryMatch.Groups[3].Value -eq 0 -and
+            [int]$summaryMatch.Groups[1].Value + [int]$summaryMatch.Groups[2].Value -eq [int]$summaryMatch.Groups[4].Value
+          if ($testExitCode -eq 2 -and $hasValidSummary -and
               $skipLines.Count -eq $expectedSkips.Count -and $missingExpectedSkips.Count -eq 0) {
             Write-Output 'Windows固有のUnix modeテスト2件のみ未検証として扱います。'
             exit 0

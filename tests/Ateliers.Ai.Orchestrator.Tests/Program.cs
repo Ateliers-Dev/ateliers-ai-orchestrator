@@ -28,6 +28,8 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("すべての状態ペアを許可表どおりに判定する", AllTransitionsAreExplicit);
     suite.Add("確認待ちはIssue #3では到達不能", ReviewReadyIsUnavailableUntilEvidenceIntegration);
     suite.Add("origin URL検証はGitHubホストとrepository pathを厳密に照合する", GitHubRemoteUrlRequiresExactHostAndPath);
+    suite.Add("トップレベルと各コマンドのhelpは成功出力し入力エラーは標準エラーへ分離する", CliHelpAndInputErrorsAreSeparated);
+    suite.Add("Publisherはsystem/global Git設定を隔離しローカルfilter等を拒否する", PublisherIsolatesInheritedGitConfigAndRejectsLocalFilters);
     suite.Add("PublisherはPR証跡の保存確認後にpendingだけを削除する", PublisherPersistsVerifiedPrEvidenceBeforeRemovingPending);
     suite.Add("PRレビューコメントは判定・指摘項目を記録し同一Run/SHAの再投稿を防ぐ", ReviewCommentIsStructuredAndIdempotent);
     suite.Add("JSONLイベントに連番とUTC時刻を記録する", EventLogIsSequencedAndUtc);
@@ -97,6 +99,81 @@ static void GitHubRemoteUrlRequiresExactHostAndPath()
     Assert.False(GitHubWorkflowPublisher.RemoteMatches("https://attacker.example/path/github.com/Ateliers-Dev/ateliers-ai-orchestrator", "Ateliers-Dev/ateliers-ai-orchestrator"));
     Assert.False(GitHubWorkflowPublisher.RemoteMatches("https://github.com.attacker.example/Ateliers-Dev/ateliers-ai-orchestrator", "Ateliers-Dev/ateliers-ai-orchestrator"));
     Assert.False(GitHubWorkflowPublisher.RemoteMatches("https://github.com/Ateliers-Dev/other-repo", "Ateliers-Dev/ateliers-ai-orchestrator"));
+}
+
+static void CliHelpAndInputErrorsAreSeparated()
+{
+    var originalOut = Console.Out;
+    var originalError = Console.Error;
+    try
+    {
+        foreach (var args in new[]
+                 {
+                     Array.Empty<string>(), ["--help"], ["-h"],
+                     ["validate", "--help"], ["validate", "-h"],
+                     ["start", "--help"], ["start", "-h"],
+                     ["run", "--help"], ["run", "-h"]
+                 })
+        {
+            using var stdout = new StringWriter();
+            using var stderr = new StringWriter();
+            Console.SetOut(stdout);
+            Console.SetError(stderr);
+            var exitCode = OrchestratorCli.RunAsync(args).GetAwaiter().GetResult();
+            Assert.Equal(0, exitCode);
+            Assert.True(!string.IsNullOrWhiteSpace(stdout.ToString()));
+            Assert.Equal(string.Empty, stderr.ToString());
+        }
+
+        using var invalidOut = new StringWriter();
+        using var invalidError = new StringWriter();
+        Console.SetOut(invalidOut);
+        Console.SetError(invalidError);
+        var invalidExitCode = OrchestratorCli.RunAsync(["run"]).GetAwaiter().GetResult();
+        Assert.Equal(2, invalidExitCode);
+        Assert.Equal(string.Empty, invalidOut.ToString());
+        Assert.True(invalidError.ToString().Contains("使用方法", StringComparison.Ordinal));
+    }
+    finally
+    {
+        Console.SetOut(originalOut);
+        Console.SetError(originalError);
+    }
+}
+
+static void PublisherIsolatesInheritedGitConfigAndRejectsLocalFilters()
+{
+    using var temp = new TemporaryDirectory();
+    var repository = Path.Combine(temp.Path, "repo");
+    Directory.CreateDirectory(repository);
+    RunGitFixture(repository, "init", "-q");
+    var isolatedConfig = Path.Combine(temp.Path, "isolated-config");
+    File.WriteAllText(isolatedConfig, string.Empty);
+
+    Assert.False(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
+    RunGitFixture(repository, "config", "--local", "filter.lfs.clean", "git-lfs clean -- %f");
+    Assert.True(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
+    RunGitFixture(repository, "config", "--local", "--unset-all", "filter.lfs.clean");
+    Assert.False(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
+
+    RunGitFixture(repository, "config", "--local", "credential.https://github.com.helper", "!untrusted-helper");
+    Assert.True(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
+    RunGitFixture(repository, "config", "--local", "--unset-all", "credential.https://github.com.helper");
+    Assert.False(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
+
+    RunGitFixture(repository, "config", "--local", "core.fsmonitor", "untrusted-monitor");
+    Assert.True(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
+    RunGitFixture(repository, "config", "--local", "--unset-all", "core.fsmonitor");
+    RunGitFixture(repository, "config", "--local", "extensions.worktreeConfig", "true");
+    Assert.True(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
+
+    File.WriteAllText(Path.Combine(repository, ".gitattributes"), "*.dat filter=lfs\n");
+    Assert.True(GitHubWorkflowPublisher.HasActiveGitFilterPaths(repository, ["sample.dat"], isolatedConfig, CancellationToken.None));
+    Assert.False(GitHubWorkflowPublisher.HasActiveGitFilterPaths(repository, ["sample.txt"], isolatedConfig, CancellationToken.None));
+    File.WriteAllText(Path.Combine(repository, ".gitattributes"), "*.custom filter=custom-driver\n");
+    Assert.True(GitHubWorkflowPublisher.HasActiveGitFilterPaths(repository, ["sample.custom"], isolatedConfig, CancellationToken.None));
+    File.WriteAllText(Path.Combine(repository, ".gitattributes"), "*.disabled -filter\n");
+    Assert.True(GitHubWorkflowPublisher.HasActiveGitFilterPaths(repository, ["sample.disabled"], isolatedConfig, CancellationToken.None));
 }
 
 static void PublisherPersistsVerifiedPrEvidenceBeforeRemovingPending()
