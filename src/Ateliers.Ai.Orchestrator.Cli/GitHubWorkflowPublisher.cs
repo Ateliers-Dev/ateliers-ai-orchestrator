@@ -917,30 +917,43 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
             throw new InvalidOperationException("Implementer実行後にローカルGit設定が変更されました。安全のため公開処理を停止しました。");
     }
 
-    private static ProcessResult Run(string executable, string cwd, IReadOnlyList<string> args,
+    internal static void ConfigureIsolatedGitEnvironment(IDictionary<string, string?> environment, GitConfigOverlay? gitConfigOverlay)
+    {
+        // Git accepts environment overrides for SSH commands, repository selection, diff tools, and other
+        // execution controls. Start from a clean Git environment, then add only publisher-owned values.
+        ClearGitExecutionEnvironment(environment);
+        environment["GIT_CONFIG_NOSYSTEM"] = "1";
+        if (gitConfigOverlay is not null)
+        {
+            environment["GIT_CONFIG_GLOBAL"] = OperatingSystem.IsWindows() ? "NUL" : "/dev/null";
+            environment["GIT_CONFIG_COUNT"] = gitConfigOverlay.Entries.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            for (var index = 0; index < gitConfigOverlay.Entries.Count; index++)
+            {
+                environment[$"GIT_CONFIG_KEY_{index}"] = gitConfigOverlay.Entries[index].Key;
+                environment[$"GIT_CONFIG_VALUE_{index}"] = gitConfigOverlay.Entries[index].Value;
+            }
+        }
+        environment["GIT_TERMINAL_PROMPT"] = "0";
+    }
+
+    private static void ClearGitExecutionEnvironment(IDictionary<string, string?> environment)
+    {
+        foreach (var variable in environment.Keys.Where(key => key.StartsWith("GIT_", StringComparison.OrdinalIgnoreCase)).ToArray())
+            environment.Remove(variable);
+        environment.Remove("SSH_ASKPASS");
+        environment.Remove("SSH_ASKPASS_REQUIRE");
+    }
+
+    internal static ProcessResult Run(string executable, string cwd, IReadOnlyList<string> args,
         bool allowExitCodeOne = false, GitConfigOverlay? gitConfigOverlay = null, bool isolateGitConfig = false,
         CancellationToken stopToken = default, byte[]? standardInput = null, string? isolatedGitIndexPath = null)
     {
         var info = new ProcessStartInfo(executable) { WorkingDirectory = cwd, UseShellExecute = false,
             RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = standardInput is not null, CreateNoWindow = true };
         if (isolateGitConfig || gitConfigOverlay is not null)
-        {
-            foreach (var variable in info.Environment.Keys.Where(key => key.StartsWith("GIT_CONFIG_", StringComparison.OrdinalIgnoreCase)).ToArray())
-                info.Environment.Remove(variable);
-            info.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
-            if (gitConfigOverlay is not null)
-            {
-                info.Environment["GIT_CONFIG_GLOBAL"] = OperatingSystem.IsWindows() ? "NUL" : "/dev/null";
-                info.Environment["GIT_CONFIG_COUNT"] = gitConfigOverlay.Entries.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                for (var index = 0; index < gitConfigOverlay.Entries.Count; index++)
-                {
-                    info.Environment[$"GIT_CONFIG_KEY_{index}"] = gitConfigOverlay.Entries[index].Key;
-                    info.Environment[$"GIT_CONFIG_VALUE_{index}"] = gitConfigOverlay.Entries[index].Value;
-                }
-            }
-            info.Environment.Remove("GIT_INDEX_FILE");
-            info.Environment["GIT_TERMINAL_PROMPT"] = "0";
-        }
+            ConfigureIsolatedGitEnvironment(info.Environment, gitConfigOverlay);
+        else
+            ClearGitExecutionEnvironment(info.Environment);
         if (isolatedGitIndexPath is not null) info.Environment["GIT_INDEX_FILE"] = isolatedGitIndexPath;
         foreach (var arg in args) info.ArgumentList.Add(arg);
         stopToken.ThrowIfCancellationRequested();
@@ -982,5 +995,5 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         return new ProcessResult(stdout.Result, stderr.Result, process.ExitCode);
     }
 
-    private sealed record ProcessResult(string Output, string Error, int ExitCode);
+    internal sealed record ProcessResult(string Output, string Error, int ExitCode);
 }

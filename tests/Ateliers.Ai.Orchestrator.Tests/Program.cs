@@ -29,7 +29,7 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("確認待ちはIssue #3では到達不能", ReviewReadyIsUnavailableUntilEvidenceIntegration);
     suite.Add("origin URL検証はGitHubホストとrepository pathを厳密に照合する", GitHubRemoteUrlRequiresExactHostAndPath);
     suite.Add("トップレベルと各コマンドのhelpは成功出力し入力エラーは標準エラーへ分離する", CliHelpAndInputErrorsAreSeparated);
-    suite.Add("Publisherはsystem/global Git設定を隔離しローカルfilter等を拒否する", PublisherIsolatesInheritedGitConfigAndRejectsLocalFilters);
+    suite.Add("PublisherはGit設定・SSH実行環境を隔離しローカルfilter等を拒否する", PublisherIsolatesInheritedGitConfigAndRejectsLocalFilters);
     suite.Add("PublisherはPR証跡の保存確認後にpendingだけを削除する", PublisherPersistsVerifiedPrEvidenceBeforeRemovingPending);
     suite.Add("PRレビューコメントは判定・指摘項目を記録し同一Run/SHAの再投稿を防ぐ", ReviewCommentIsStructuredAndIdempotent);
     suite.Add("JSONLイベントに連番とUTC時刻を記録する", EventLogIsSequencedAndUtc);
@@ -151,26 +151,81 @@ static void PublisherIsolatesInheritedGitConfigAndRejectsLocalFilters()
         [new("credential.https://github.com.helper", string.Empty),
          new("credential.https://github.com.helper", "!gh auth git-credential")]);
 
+    var childEnvironment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["GIT_SSH_COMMAND"] = "untrusted-ssh-command",
+        ["GIT_SSH"] = "untrusted-ssh",
+        ["GIT_SSH_VARIANT"] = "untrusted-variant",
+        ["GIT_EXEC_PATH"] = "untrusted-exec-path",
+        ["GIT_EXTERNAL_DIFF"] = "untrusted-diff",
+        ["GIT_DIR"] = "untrusted-repository",
+        ["GIT_CONFIG_COUNT"] = "1",
+        ["GIT_CONFIG_KEY_0"] = "core.fsmonitor",
+        ["GIT_CONFIG_VALUE_0"] = "untrusted-monitor",
+        ["GIT_INDEX_FILE"] = "untrusted-index",
+        ["SSH_ASKPASS"] = "untrusted-askpass",
+        ["SSH_ASKPASS_REQUIRE"] = "force"
+    };
+    GitHubWorkflowPublisher.ConfigureIsolatedGitEnvironment(childEnvironment, isolatedConfig);
+    foreach (var key in new[] { "GIT_SSH_COMMAND", "GIT_SSH", "GIT_SSH_VARIANT", "GIT_EXEC_PATH", "GIT_EXTERNAL_DIFF", "GIT_DIR", "GIT_INDEX_FILE", "SSH_ASKPASS", "SSH_ASKPASS_REQUIRE" })
+        Assert.False(childEnvironment.ContainsKey(key), $"isolated Git child retained {key}");
+    Assert.Equal(isolatedConfig.Entries.Count.ToString(System.Globalization.CultureInfo.InvariantCulture), childEnvironment["GIT_CONFIG_COUNT"]);
+    Assert.Equal(isolatedConfig.Entries[0].Key, childEnvironment["GIT_CONFIG_KEY_0"]);
+    Assert.Equal(isolatedConfig.Entries[0].Value, childEnvironment["GIT_CONFIG_VALUE_0"]);
+
     // The publisher's fixed helper is trusted as an in-memory command-scope overlay; no config file is consulted.
     Assert.False(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
-    var inheritedGitConfig = Environment.GetEnvironmentVariables().Keys.Cast<string>()
-        .Where(key => key.StartsWith("GIT_CONFIG_", StringComparison.OrdinalIgnoreCase))
+    var inheritedGitEnvironment = Environment.GetEnvironmentVariables().Keys.Cast<string>()
+        .Where(key => key.StartsWith("GIT_", StringComparison.OrdinalIgnoreCase) ||
+                      key.Equals("SSH_ASKPASS", StringComparison.OrdinalIgnoreCase) ||
+                      key.Equals("SSH_ASKPASS_REQUIRE", StringComparison.OrdinalIgnoreCase))
         .ToDictionary(key => key, Environment.GetEnvironmentVariable, StringComparer.OrdinalIgnoreCase);
+    var sshScript = Path.Combine(temp.Path, OperatingSystem.IsWindows() ? "ssh-sentinel.cmd" : "ssh-sentinel");
+    var sshMarker = Path.Combine(temp.Path, "ssh-command-ran.txt");
+    File.WriteAllText(sshScript, OperatingSystem.IsWindows()
+        ? $"@echo off{Environment.NewLine}echo invoked>\"{sshMarker}\"{Environment.NewLine}exit /b 0{Environment.NewLine}"
+        : $"#!/bin/sh{Environment.NewLine}printf invoked > '{sshMarker}'{Environment.NewLine}exit 0{Environment.NewLine}");
+    if (!OperatingSystem.IsWindows())
+        File.SetUnixFileMode(sshScript, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
     try
     {
-        foreach (var key in inheritedGitConfig.Keys) Environment.SetEnvironmentVariable(key, null);
+        foreach (var key in inheritedGitEnvironment.Keys) Environment.SetEnvironmentVariable(key, null);
         Environment.SetEnvironmentVariable("GIT_CONFIG_COUNT", "1");
         Environment.SetEnvironmentVariable("GIT_CONFIG_KEY_0", "core.fsmonitor");
         Environment.SetEnvironmentVariable("GIT_CONFIG_VALUE_0", "!inherited-config-secret");
         Assert.False(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None),
             "inherited GIT_CONFIG_* values must not enter the isolated Git child");
+
+        Environment.SetEnvironmentVariable("GIT_CONFIG_COUNT", null);
+        Environment.SetEnvironmentVariable("GIT_CONFIG_KEY_0", null);
+        Environment.SetEnvironmentVariable("GIT_CONFIG_VALUE_0", null);
+        Environment.SetEnvironmentVariable("GIT_SSH_COMMAND", sshScript);
+        try
+        {
+            GitHubWorkflowPublisher.Run("git", repository, ["ls-remote", "ssh://127.0.0.1/Ateliers-Dev/test.git"],
+                gitConfigOverlay: isolatedConfig);
+        }
+        catch (InvalidOperationException) { }
+        Assert.False(File.Exists(sshMarker), "inherited GIT_SSH_COMMAND was executed by Git");
+
+        Environment.SetEnvironmentVariable("GIT_SSH_COMMAND", null);
+        Environment.SetEnvironmentVariable("GIT_SSH", sshScript);
+        try
+        {
+            GitHubWorkflowPublisher.Run("git", repository, ["ls-remote", "ssh://127.0.0.1/Ateliers-Dev/test.git"],
+                gitConfigOverlay: isolatedConfig);
+        }
+        catch (InvalidOperationException) { }
+        Assert.False(File.Exists(sshMarker), "inherited GIT_SSH was executed by Git");
     }
     finally
     {
         foreach (var key in Environment.GetEnvironmentVariables().Keys.Cast<string>()
-                     .Where(key => key.StartsWith("GIT_CONFIG_", StringComparison.OrdinalIgnoreCase)).ToArray())
+                     .Where(key => key.StartsWith("GIT_", StringComparison.OrdinalIgnoreCase) ||
+                                   key.Equals("SSH_ASKPASS", StringComparison.OrdinalIgnoreCase) ||
+                                   key.Equals("SSH_ASKPASS_REQUIRE", StringComparison.OrdinalIgnoreCase)).ToArray())
             Environment.SetEnvironmentVariable(key, null);
-        foreach (var (key, value) in inheritedGitConfig) Environment.SetEnvironmentVariable(key, value);
+        foreach (var (key, value) in inheritedGitEnvironment) Environment.SetEnvironmentVariable(key, value);
     }
     var alteredOverlay = new GitHubWorkflowPublisher.GitConfigOverlay(
         [new("credential.https://github.com.helper", "!unexpected-helper")]);
