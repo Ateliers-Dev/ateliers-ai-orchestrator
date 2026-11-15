@@ -6,6 +6,7 @@ using Ateliers.Ai.Orchestrator.Core;
 using Ateliers.Ai.Orchestrator.Cli;
 using Ateliers.Slack;
 
+Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 if (args.Length >= 1 && args[0] == "--fake-codex-fixture") return RunFakeCodexFixture(args);
 if (args.Length >= 1 && args[0] == "--external-process-fixture") return RunExternalProcessFixture(args);
 if (args.Length >= 1 && args[0] == "--lifecycle-writer-fixture") return RunLifecycleWriterFixture(args);
@@ -30,6 +31,7 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("origin URL検証はGitHubホストとrepository pathを厳密に照合する", GitHubRemoteUrlRequiresExactHostAndPath);
     suite.Add("トップレベルと各コマンドのhelpは成功出力し入力エラーは標準エラーへ分離する", CliHelpAndInputErrorsAreSeparated);
     suite.Add("PublisherはGit設定・SSH実行環境を隔離しローカルfilter等を拒否する", PublisherIsolatesInheritedGitConfigAndRejectsLocalFilters);
+    suite.Add("Publisher失敗は固定段階・理由コード・例外型だけを返す", PublisherFailureDiagnosticIsStructuredAndSanitized);
     suite.Add("PublisherはPR証跡の保存確認後にpendingだけを削除する", PublisherPersistsVerifiedPrEvidenceBeforeRemovingPending);
     suite.Add("PRレビューコメントは判定・指摘項目を記録し同一Run/SHAの再投稿を防ぐ", ReviewCommentIsStructuredAndIdempotent);
     suite.Add("JSONLイベントに連番とUTC時刻を記録する", EventLogIsSequencedAndUtc);
@@ -82,6 +84,7 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("Workflow停止要求をCodex RunnerとFake子プロセスへ伝播する", WorkflowCancellationStopsFakeCodexProcess);
     suite.Add("Codex子プロセスへ親のAPI secret環境変数を渡さない", CodexChildEnvironmentFiltersSecrets);
     suite.Add("Codex子プロセスへSystemDriveを渡す", CodexChildInheritsSystemDrive);
+    suite.Add("Codex実行環境のjunctionがcheckout内を指す場合は起動前に拒否する", CodexEnvironmentJunctionIntoCheckoutIsRejected);
     suite.Add("Fake Codexが生成した未追跡バイナリを差分固定時に拒否する", CodexRejectsUntrackedBinaryChanges);
     suite.Add("PR不要のCodex実行では実行bit変更を許容する", CodexNonPullRequestAllowsExecutableModeChange);
     suite.Add("PR必須Codex snapshotは新規実行ファイルのmodeを保持する", CodexPullRequestSnapshotPreservesNewExecutableMode);
@@ -284,6 +287,25 @@ static void PublisherIsolatesInheritedGitConfigAndRejectsLocalFilters()
     Assert.True(GitHubWorkflowPublisher.HasActiveGitFilterPaths(repository, ["sample.custom"], isolatedConfig, CancellationToken.None));
     File.WriteAllText(Path.Combine(repository, ".gitattributes"), "*.disabled -filter\n");
     Assert.True(GitHubWorkflowPublisher.HasActiveGitFilterPaths(repository, ["sample.disabled"], isolatedConfig, CancellationToken.None));
+}
+
+static void PublisherFailureDiagnosticIsStructuredAndSanitized()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"publisher-diagnostics-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(root);
+    try
+    {
+        using var publisher = new GitHubWorkflowPublisher();
+        var exception = Assert.Throws<WorkflowPublicationFailureException>(() =>
+            publisher.Start(SampleContract() with { WorkingDirectory = root }, "publisher-diagnostics", CancellationToken.None));
+        Assert.Equal("repository-root", exception.Diagnostic.Stage);
+        Assert.Equal("operation-rejected", exception.Diagnostic.ReasonCode);
+        Assert.Equal("InvalidOperationException", exception.Diagnostic.ExceptionType);
+        Assert.True(exception.InnerException is null, "元例外の文言が公開診断例外へ保持されています。");
+        Assert.False(exception.Message.Contains("command output", StringComparison.OrdinalIgnoreCase));
+        Assert.False(exception.ToString().Contains("exit code", StringComparison.OrdinalIgnoreCase));
+    }
+    finally { Directory.Delete(root, true); }
 }
 
 static void PublisherPersistsVerifiedPrEvidenceBeforeRemovingPending()
@@ -688,7 +710,15 @@ static void RequiredPullRequestWorkflowFailsClosedOnPushFailure()
         Assert.Equal("start,push", string.Join(',', publisher.Calls));
         Assert.Equal(0, runner.ReviewCalls);
         Assert.False(File.Exists(Path.Combine(runDirectory, "github-pull-request.json")));
-        Assert.True(File.ReadAllText(Path.Combine(runDirectory, "report.md")).Contains("成功扱いにはしていません", StringComparison.Ordinal));
+        var report = File.ReadAllText(Path.Combine(runDirectory, "report.md"));
+        var log = File.ReadAllText(Path.Combine(runDirectory, "events.jsonl"));
+        Assert.True(report.Contains("成功扱いにはしていません", StringComparison.Ordinal));
+        Assert.True(report.Contains("stage=push.changes; reason=operation-rejected; exception=InvalidOperationException", StringComparison.Ordinal));
+        Assert.True(log.Contains("\"stage\":\"push.changes\"", StringComparison.Ordinal));
+        Assert.True(log.Contains("\"reasonCode\":\"operation-rejected\"", StringComparison.Ordinal));
+        Assert.True(log.Contains("\"exceptionType\":\"InvalidOperationException\"", StringComparison.Ordinal));
+        Assert.False(report.Contains("fixture-secret-value", StringComparison.Ordinal));
+        Assert.False(log.Contains("fixture-secret-value", StringComparison.Ordinal));
     }
     finally { Directory.Delete(root, true); }
 }
@@ -817,6 +847,7 @@ static int RunFakeCodexFixture(string[] args)
         ["USERPROFILE"] = Environment.GetEnvironmentVariable("USERPROFILE"),
         ["APPDATA"] = Environment.GetEnvironmentVariable("APPDATA"),
         ["LOCALAPPDATA"] = Environment.GetEnvironmentVariable("LOCALAPPDATA"),
+        ["DOTNET_CLI_HOME"] = Environment.GetEnvironmentVariable("DOTNET_CLI_HOME"),
         ["TEMP"] = Environment.GetEnvironmentVariable("TEMP"),
         ["TMP"] = Environment.GetEnvironmentVariable("TMP"),
         ["TMPDIR"] = Environment.GetEnvironmentVariable("TMPDIR"),
@@ -1323,6 +1354,49 @@ static void CodexChildInheritsSystemDrive()
     finally { Environment.SetEnvironmentVariable("SystemDrive", original); }
 }
 
+static void CodexEnvironmentJunctionIntoCheckoutIsRejected()
+{
+    var (_, request, root) = CreateCodexFixture("success");
+    using (root)
+    {
+        var workspace = request.Contract.WorkingDirectory;
+        var target = Path.Combine(workspace, "profile-target");
+        var link = Path.Combine(workspace, "profile-link");
+        Directory.CreateDirectory(target);
+        File.WriteAllText(Path.Combine(workspace, ".gitignore"), "/profile-link\n");
+        RunGitFixture(workspace, "add", ".gitignore");
+        RunGitFixture(workspace, "-c", "user.name=Orchestrator Test", "-c", "user.email=orchestrator-test@example.invalid", "commit", "-qm", "ignore test junction");
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                var start = new ProcessStartInfo("cmd.exe") { UseShellExecute = false, CreateNoWindow = true };
+                start.ArgumentList.Add("/c");
+                start.ArgumentList.Add("mklink");
+                start.ArgumentList.Add("/J");
+                start.ArgumentList.Add(link);
+                start.ArgumentList.Add(target);
+                using var process = Process.Start(start) ?? throw new InvalidOperationException("test junction creation process did not start");
+                process.WaitForExit();
+                if (process.ExitCode != 0) Assert.Skip("Windows junction creation is unavailable in this environment.");
+            }
+            else
+            {
+                Directory.CreateSymbolicLink(link, target);
+            }
+
+            var options = new CodexCliRunnerOptions(Environment.ProcessPath!, link, Path.Combine(root.Path, "reviewer-profile"),
+                ["--fake-codex-fixture", "success"]);
+            var linkedProfileRunner = new CodexCliAgentRunner(options);
+            Assert.Throws<InvalidOperationException>(() => linkedProfileRunner.Implement(request));
+        }
+        finally
+        {
+            if (Directory.Exists(link)) Directory.Delete(link);
+        }
+    }
+}
+
 static void CodexRejectsUntrackedBinaryChanges()
 {
     var (runner, request, root) = CreateCodexFixture("untracked-binary");
@@ -1437,11 +1511,25 @@ static void CodexFakeProcessesCompleteIndependentReviewSlice()
         var reviewerPaths = ReadFakeEnvironmentPaths(firstReviewStdoutPath);
         Assert.Equal(Path.Combine(root.Path, "implementer-profile"), implementerPaths["CODEX_HOME"]);
         Assert.Equal(Path.Combine(root.Path, "reviewer-profile"), reviewerPaths["CODEX_HOME"]);
-        foreach (var name in new[] { "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "TMPDIR" })
+        var implementerRuntime = Path.Combine(request.RunDirectory!, "runtime", "implementer-1");
+        var reviewerRuntime = Path.Combine(request.RunDirectory!, "runtime", "reviewer-1");
+        foreach (var (paths, runtime, role) in new[]
         {
-            var inherited = Environment.GetEnvironmentVariable(name);
-            Assert.Equal(inherited, implementerPaths[name], $"{name}を既存ユーザー環境から変更しました。");
-            Assert.Equal(inherited, reviewerPaths[name], $"{name}を既存ユーザー環境から変更しました。");
+            (implementerPaths, implementerRuntime, "Implementer"),
+            (reviewerPaths, reviewerRuntime, "Reviewer")
+        })
+        {
+            Assert.Equal(Path.Combine(runtime, "user-profile"), paths["HOME"], $"{role}のHOMEが分離されていません。");
+            Assert.Equal(paths["HOME"], paths["USERPROFILE"], $"{role}のHOMEとUSERPROFILEが一致しません。");
+            Assert.Equal(Path.Combine(runtime, "user-profile", "AppData", "Roaming"), paths["APPDATA"]);
+            Assert.Equal(Path.Combine(runtime, "user-profile", "AppData", "Local"), paths["LOCALAPPDATA"]);
+            Assert.Equal(Path.Combine(runtime, "tmp"), paths["TEMP"]);
+            Assert.Equal(paths["TEMP"], paths["TMP"]);
+            Assert.Equal(paths["TEMP"], paths["TMPDIR"]);
+            Assert.Equal(Path.Combine(runtime, "dotnet-home"), paths["DOTNET_CLI_HOME"]);
+            var checkout = Path.GetFullPath(request.Contract.WorkingDirectory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            Assert.False(Path.GetFullPath(paths["HOME"]).StartsWith(checkout, StringComparison.OrdinalIgnoreCase), $"{role}のHOMEがcheckout内です。");
+            Assert.False(Path.GetFullPath(paths["TEMP"]).StartsWith(checkout, StringComparison.OrdinalIgnoreCase), $"{role}のTEMPがcheckout内です。");
         }
     }
 }
@@ -2783,7 +2871,7 @@ sealed class StubWorkflowPublisher : IWorkflowPublisher
             pushCancellation.Cancel();
             throw new OperationCanceledException(pushCancellation.Token);
         }
-        if (FailPush) throw new InvalidOperationException("test push failure");
+        if (FailPush) throw new InvalidOperationException("fixture-secret-value command output");
         Directory.CreateDirectory(Path.Combine(directory, "artifacts"));
         const string diff = "diff --git a/file.txt b/file.txt\n+change\n";
         var reference = Path.Combine("artifacts", $"pushed-diff-{attempt}.patch");
@@ -2898,14 +2986,16 @@ sealed class FailingEventWriter(string failureEventType, bool failReadyTransitio
         string? outputReference = null, string? targetCommitSha = null, string? diffSha256 = null,
         long? elapsedMilliseconds = null, IReadOnlyList<string>? unknownInformation = null,
         IReadOnlyList<string>? artifactReferences = null,
-        string role = "Orchestrator")
+        string role = "Orchestrator", string? stage = null, string? reasonCode = null,
+        string? exceptionType = null)
     {
         if (to == RunState.ReadyForHumanReview) ReadyTransitions++;
         if (eventType == failureEventType || (failReadyTransition && to == RunState.ReadyForHumanReview))
             throw new IOException("テスト用の記録失敗です。");
         if (innerWriter is not null)
             return innerWriter.Append(eventType, result, from, to, detail, error, inputReference, outputReference,
-                targetCommitSha, diffSha256, elapsedMilliseconds, unknownInformation, artifactReferences, role);
+                targetCommitSha, diffSha256, elapsedMilliseconds, unknownInformation, artifactReferences, role,
+                stage, reasonCode, exceptionType);
         return new RunEvent
         {
             RunId = "test",
@@ -2918,6 +3008,9 @@ sealed class FailingEventWriter(string failureEventType, bool failReadyTransitio
             ToState = to,
             Detail = detail,
             Error = error,
+            Stage = stage,
+            ReasonCode = reasonCode,
+            ExceptionType = exceptionType,
             ArtifactReferences = artifactReferences ?? [],
             InputReference = inputReference,
             OutputReference = outputReference,

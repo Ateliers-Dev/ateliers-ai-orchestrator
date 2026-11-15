@@ -1,14 +1,27 @@
 namespace Ateliers.Ai.Orchestrator.Core;
 
+/// <summary>公開処理の失敗時に記録できる、秘密情報を含まない固定診断です。</summary>
+public sealed record WorkflowPublicationDiagnostic(string Stage, string ReasonCode, string ExceptionType);
+
+/// <summary>公開処理の失敗を安全な診断情報とともに伝えます。</summary>
+public sealed class WorkflowPublicationFailureException : InvalidOperationException
+{
+    public WorkflowPublicationFailureException(WorkflowPublicationDiagnostic diagnostic)
+        : base("GitHub公開処理に失敗しました。詳細出力は記録していません。") => Diagnostic = diagnostic;
+
+    public WorkflowPublicationDiagnostic Diagnostic { get; }
+}
+
 /// <summary>必須PR公開ゲートを使う実Agentランナーを示す識別境界です。</summary>
 public interface IPullRequestWorkflowAgentRunner { }
 
 /// <summary>GitHub提出開始前の失敗を、秘密情報を含まない段階・分類で示します。</summary>
-public sealed class WorkflowPreflightException(string stage, string reason)
-    : InvalidOperationException($"preflight:stage={stage};reason={reason}")
+public sealed class WorkflowPreflightException(string stage, string reason, string exceptionType = "WorkflowPreflightException")
+    : InvalidOperationException("GitHub公開の事前確認に失敗しました。詳細出力は記録していません。")
 {
     public string Stage { get; } = stage;
     public string Reason { get; } = reason;
+    public string ExceptionType { get; } = exceptionType;
 }
 
 /// <summary>GitHub提出を行う一実行の固定情報です。</summary>

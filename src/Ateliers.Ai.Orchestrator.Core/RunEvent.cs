@@ -38,6 +38,12 @@ public sealed record RunEvent
     public string? Detail { get; init; }
     /// <summary>失敗時のエラー情報です。</summary>
     public string? Error { get; init; }
+    /// <summary>失敗した公開処理の段階です。例外メッセージやコマンド出力は含みません。</summary>
+    public string? Stage { get; init; }
+    /// <summary>固定語彙の失敗理由コードです。</summary>
+    public string? ReasonCode { get; init; }
+    /// <summary>失敗した例外の型名です。</summary>
+    public string? ExceptionType { get; init; }
     /// <summary>この実行では取得できていない情報です。</summary>
     public IReadOnlyList<string> UnknownInformation { get; init; } = [];
 }
@@ -66,7 +72,8 @@ public interface IRunEventWriter
         string? outputReference = null, string? targetCommitSha = null, string? diffSha256 = null,
         long? elapsedMilliseconds = null, IReadOnlyList<string>? unknownInformation = null,
         IReadOnlyList<string>? artifactReferences = null,
-        string role = "Orchestrator");
+        string role = "Orchestrator", string? stage = null, string? reasonCode = null,
+        string? exceptionType = null);
 }
 
 /// <summary>新規JSONLイベント記録を作成し、順序付きイベントをディスクへ追記します。</summary>
@@ -125,7 +132,10 @@ public sealed class JsonlRunEventStore : IRunEventWriter, IDisposable
         long? elapsedMilliseconds = null,
         IReadOnlyList<string>? unknownInformation = null,
         IReadOnlyList<string>? artifactReferences = null,
-        string role = "Orchestrator")
+        string role = "Orchestrator",
+        string? stage = null,
+        string? reasonCode = null,
+        string? exceptionType = null)
     {
         var nextSequence = sequence + 1;
         var item = new RunEvent
@@ -145,6 +155,9 @@ public sealed class JsonlRunEventStore : IRunEventWriter, IDisposable
             ElapsedMilliseconds = elapsedMilliseconds,
             Detail = detail,
             Error = error,
+            Stage = stage,
+            ReasonCode = reasonCode,
+            ExceptionType = exceptionType,
             UnknownInformation = unknownInformation ?? [],
             ArtifactReferences = artifactReferences ?? []
         };
