@@ -1,1624 +1,21 @@
-using System.Text;
-using System.Text.Json;
-using System.Security.Cryptography;
-using System.Diagnostics;
-using Ateliers.Ai.Orchestrator.Core;
-using Ateliers.Ai.Orchestrator.Cli;
-using Ateliers.Slack;
-
-if (args.Length >= 1 && args[0] == "--fake-codex-fixture") return RunFakeCodexFixture(args);
-if (args.Length >= 1 && args[0] == "--external-process-fixture") return RunExternalProcessFixture(args);
-if (args.Length >= 1 && args[0] == "--lifecycle-writer-fixture") return RunLifecycleWriterFixture(args);
-if (args.Length > 1 || (args.Length == 1 && args[0] != "--unit"))
-{
-    Console.Error.WriteLine("ä½¿ç”¨æ–¹æ³•: Ateliers.Ai.Orchestrator.Tests [--unit]");
-    return 2;
-}
-
-var suite = new TestSuite();
-AddUnitTests(suite);
-return suite.Run().ExitCode;
-
-static void AddUnitTests(TestSuite suite)
-{
-    // CI invokes this explicit Fake/fixture-only set. External-service and Docker tests do not belong here.
-    suite.Add("ãƒ†ã‚¹ãƒˆé›†ã®ä»¶æ•°ãƒ»ãƒ­ã‚°ãƒ»çµ‚äº†ã‚³ãƒ¼ãƒ‰ãŒPass/Fail/æœªæ¤œè¨¼ã§ä¸€è‡´ã™ã‚‹", TestSuiteOutcomeContractIsConsistent);
-    suite.Add("æœ‰åŠ¹ãªå¥‘ç´„ã‚’æ¤œè¨¼ã§ãã‚‹", ValidContractIsAccepted);
-    suite.Add("å¥‘ç´„ã®ä¸è¶³ãƒ»çŸ›ç›¾ãƒ»æœªçŸ¥é …ç›®ã‚’æ‹’å¦ã™ã‚‹", InvalidContractsAreRejected);
-    suite.Add("ã™ã¹ã¦ã®çŠ¶æ…‹ãƒšã‚¢ã‚’è¨±å¯è¡¨ã©ãŠã‚Šã«åˆ¤å®šã™ã‚‹", AllTransitionsAreExplicit);
-    suite.Add("ç¢ºèªå¾…ã¡ã¯Issue #3ã§ã¯åˆ°é”ä¸èƒ½", ReviewReadyIsUnavailableUntilEvidenceIntegration);
-    suite.Add("origin URLæ¤œè¨¼ã¯GitHubãƒ›ã‚¹ãƒˆã¨repository pathã‚’å³å¯†ã«ç…§åˆã™ã‚‹", GitHubRemoteUrlRequiresExactHostAndPath);
-    suite.Add("ãƒˆãƒƒãƒ—ãƒ¬ãƒ™ãƒ«ã¨å„ã‚³ãƒãƒ³ãƒ‰ã®helpã¯æˆåŠŸå‡ºåŠ›ã—å…¥åŠ›ã‚¨ãƒ©ãƒ¼ã¯æ¨™æº–ã‚¨ãƒ©ãƒ¼ã¸åˆ†é›¢ã™ã‚‹", CliHelpAndInputErrorsAreSeparated);
-    suite.Add("Publisherã¯system/global Gitè¨­å®šã‚’éš”é›¢ã—ãƒ­ãƒ¼ã‚«ãƒ«filterç­‰ã‚’æ‹’å¦ã™ã‚‹", PublisherIsolatesInheritedGitConfigAndRejectsLocalFilters);
-    suite.Add("Publisherã¯PRè¨¼è·¡ã®ä¿å­˜ç¢ºèªå¾Œã«pendingã ã‘ã‚’å‰Šé™¤ã™ã‚‹", PublisherPersistsVerifiedPrEvidenceBeforeRemovingPending);
-    suite.Add("PRãƒ¬ãƒ“ãƒ¥ãƒ¼ã‚³ãƒ¡ãƒ³ãƒˆã¯åˆ¤å®šãƒ»æŒ‡æ‘˜é …ç›®ã‚’è¨˜éŒ²ã—åŒä¸€Run/SHAã®å†æŠ•ç¨¿ã‚’é˜²ã", ReviewCommentIsStructuredAndIdempotent);
-    suite.Add("JSONLã‚¤ãƒ™ãƒ³ãƒˆã«é€£ç•ªã¨UTCæ™‚åˆ»ã‚’è¨˜éŒ²ã™ã‚‹", EventLogIsSequencedAndUtc);
-    suite.Add("ãƒ©ã‚¤ãƒ•ã‚µã‚¤ã‚¯ãƒ«JSONLã¯é †åºãƒ»å†èª­è¾¼ãƒ»ç§˜åŒ¿ãƒ»fixtureå‰Šé™¤å¾Œã®ä¿å­˜ã‚’æº€ãŸã™", LifecycleEventsArePersistedSafely);
-    suite.Add("è¤‡æ•°ãƒ—ãƒ­ã‚»ã‚¹ã‹ã‚‰ã®åŒæ™‚è¿½è¨˜ã§å…¨JSONLè¡Œã‚’ä¿æŒã™ã‚‹", LifecycleJsonlSerializesConcurrentProcesses);
-    suite.Add("Reviewerå¤±æ•—ãƒ»åœæ­¢è¦æ±‚ãƒ»å†ãƒ¬ãƒ“ãƒ¥ãƒ¼ã‚’ãƒ©ã‚¤ãƒ•ã‚µã‚¤ã‚¯ãƒ«ã¸æ­£ã—ã„é †åºã§è¨˜éŒ²ã™ã‚‹", LifecycleEventsCoverFailureStopAndRevision);
-    suite.Add("ãƒ©ã‚¤ãƒ•ã‚µã‚¤ã‚¯ãƒ«è¨˜éŒ²å¤±æ•—ã¯å®Ÿè¡Œçµæœã‚’éš ã•ãªã„", LifecycleWriteFailureDoesNotHideWorkflowResult);
-    suite.Add("Slackè¨­å®šä¸å‚™ã‚’è­¦å‘Šã—ã¦é€šçŸ¥ã‚’ã‚¹ã‚­ãƒƒãƒ—ã—Fakeå®Ÿè¡Œã¨JSONLã‚’ç¶­æŒã™ã‚‹", InvalidSlackSettingsDoNotAffectFakeRunOrJsonl);
-    suite.Add("NeedsHumanInputçµ‚ç«¯ã‚¤ãƒ™ãƒ³ãƒˆã®é‡è¤‡æŠ‘æ­¢ã‚’å¤±æ•—ä»¶æ•°ã¸åŠ ç®—ã—ãªã„", IntentionalSlackSkipDoesNotWarn);
-    suite.Add("é…ã„Slacké€šçŸ¥ã¯å®Ÿè¡Œæ™‚é–“ã¨åœæ­¢å¿œç­”ã‚’é…ã‚‰ã›ãªã„", SlowSlackNotificationsDoNotBlockWorkflowCancellation);
-    suite.Add("ç¦æ­¢é·ç§»ã¯çŠ¶æ…‹ã¨è¨˜éŒ²ã‚’å¤‰ãˆãªã„", RejectedTransitionDoesNotMutate);
-    suite.Add("Fakeæ­£å¸¸ç³»ã¯æˆæœç‰©å›ºå®šå¾Œã«ãƒ¬ãƒ“ãƒ¥ãƒ¼ã—è¨¼è·¡ä¸è¶³ã§åœæ­¢ã™ã‚‹", FakeSuccessKeepsReviewAndReadyEvidenceSeparate);
-    suite.Add("PRå¿…é ˆCodexçµŒè·¯ã¯pushæ¸ˆã¿å·®åˆ†ã‚’ãƒ¬ãƒ“ãƒ¥ãƒ¼ã—PRè¨¼è·¡å¾Œã«äººé–“å¾…ã¡ã¸é€²ã‚€", RequiredPullRequestWorkflowPushesReviewsAndCreatesPr);
-    suite.Add("PRå…¨ä½“ãƒ¬ãƒ“ãƒ¥ãƒ¼çµæœã‚³ãƒ¡ãƒ³ãƒˆã®æŠ•ç¨¿å¤±æ•—ã‚’æˆåŠŸæ‰±ã„ã—ãªã„", RequiredPullRequestWorkflowFailsClosedOnReviewCommentFailure);
-    suite.Add("PRå¿…é ˆCodexçµŒè·¯ã¯pushå¤±æ•—ã‚’æˆåŠŸæ‰±ã„ã›ãšReviewerã‚’èµ·å‹•ã—ãªã„", RequiredPullRequestWorkflowFailsClosedOnPushFailure);
-    suite.Add("PRå¿…é ˆCodexçµŒè·¯ã¯PRä½œæˆå¤±æ•—ã‚’æˆåŠŸæ‰±ã„ã—ãªã„", RequiredPullRequestWorkflowFailsClosedOnPrFailure);
-    suite.Add("PRè¨¼è·¡ãƒ•ã‚¡ã‚¤ãƒ«ãŒãªã„å ´åˆã¯äººé–“ç¢ºèªå¾…ã¡ã¸é€²ã¾ãªã„", RequiredPullRequestWorkflowRequiresPersistedEvidence);
-    suite.Add("PRå¿…é ˆCodexçµŒè·¯ã¯Pushä¸­ã®åœæ­¢è¦æ±‚ã‚’å¤±æ•—ã¨ã—ã¦è¨˜éŒ²ã™ã‚‹", RequiredPullRequestWorkflowStopsDuringPush);
-    suite.Add("PRå¿…é ˆCodexçµŒè·¯ã¯Pushç¢ºèªå¾Œã®åœæ­¢è¦æ±‚ã‚’è¨¼è·¡ä»˜ãã§å¤±æ•—è¨˜éŒ²ã™ã‚‹", RequiredPullRequestWorkflowStopsAfterVerifiedPush);
-    suite.Add("PRå¿…é ˆCodexçµŒè·¯ã¯PRä½œæˆä¸­ã®åœæ­¢è¦æ±‚ã‚’æˆåŠŸæ‰±ã„ã—ãªã„", RequiredPullRequestWorkflowStopsDuringPrCreation);
-    suite.Add("Fakeä¿®æ­£ç³»ã¯åŒä¸€Reviewerã§å†ãƒ¬ãƒ“ãƒ¥ãƒ¼ã—ä¸Šé™ã‚’å®ˆã‚‹", FakeRevisionIsBoundedAndReReviewed);
-    suite.Add("Fakeåœæ­¢ãƒ»å¤±æ•—ãƒ»ç©ºå¿œç­”ãƒ»ã‚¿ã‚¤ãƒ ã‚¢ã‚¦ãƒˆã‚’æ­£ã—ãå ±å‘Šã™ã‚‹", FakeStopAndFailureScenariosAreRecorded);
-    suite.Add("å†è©¦è¡Œä¸Šé™ã§Reviewerå¤±æ•—ã‚’çµ‚äº†ã™ã‚‹", ReviewerRetriesStopAtLimit);
-    suite.Add("ä¿®æ­£ä¸Šé™åˆ°é”æ™‚ã«äººé–“ã¸åœæ­¢ã‚’å ±å‘Šã™ã‚‹", RevisionLimitStopsForHuman);
-    suite.Add("ã‚¤ãƒ™ãƒ³ãƒˆä¿å­˜å¤±æ•—æ™‚ã«æˆåŠŸçŠ¶æ…‹ã¸é€²ã¾ãšéƒ¨åˆ†æˆæœç‰©ã‚’ä¿æŒã™ã‚‹", EventWriteFailureDoesNotClaimSuccess);
-    suite.Add("åœæ­¢ã‚¤ãƒ™ãƒ³ãƒˆãƒ»å ±å‘Šä¿å­˜å¤±æ•—ã‚’å®ŸJSONLã¨çµæœã¸åæ˜ ã™ã‚‹", ReportPersistenceFailuresAreConsistent);
-    suite.Add("report_writtenè¨˜éŒ²å¤±æ•—å¾Œã«ä¿å­˜æ¸ˆã¿å ±å‘Šã‚’æ›´æ–°ã™ã‚‹", ReportWrittenEventFailureUpdatesReport);
-    suite.Add("Readyé·ç§»å¾Œã®report_writtenå¤±æ•—ã‚’å ±å‘ŠçŠ¶æ…‹ã¸åæ˜ ã™ã‚‹", ReadyReportWrittenEventFailureUpdatesState);
-    suite.Add("Fakeæˆæœç‰©ä¿å­˜å¤±æ•—ã¯Reviewerã‚’èµ·å‹•ã›ãšåœæ­¢ç†ç”±ã‚’è¨˜éŒ²ã™ã‚‹", FakeArtifactWriteFailureStopsAndReports);
-    suite.Add("Fake Reviewerå¿œç­”ã®é€”ä¸­ä¿å­˜å¤±æ•—ã¯è¿½åŠ Agentãªã—ã§åœæ­¢ã™ã‚‹", FakeMidwayWriteFailureStopsAndReports);
-    suite.Add("æ—¢å­˜å®Ÿè¡Œä¿å­˜å…ˆã‚’ä¸Šæ›¸ãã›ãšã«æ‹’å¦ã™ã‚‹", ExistingRunDirectoryIsPreserved);
-    suite.Add("äººé–“ç¢ºèªå¾…ã¡ã¯ç‹¬ç«‹è¨¼è·¡ã¨PRæ“ä½œè¨˜éŒ²ãŒæƒã‚ãªã‘ã‚Œã°æ‹’å¦ã™ã‚‹", ReadyRequiresIndependentEvidenceRecords);
-    suite.Add("ç©ºã®runãƒ‘ã‚¹æŒ‡å®šã‚’çµ‚äº†ã‚³ãƒ¼ãƒ‰2ã®å…¥åŠ›ã‚¨ãƒ©ãƒ¼ã¨ã—ã¦è¿”ã™", EmptyRunPathsReturnInputError);
-    suite.Add("è¨¼è·¡ãƒ•ã‚¡ã‚¤ãƒ«ã®èª­è¾¼ãƒ»JSONå½¢å¼ã‚¨ãƒ©ãƒ¼ã‚’å®Ÿè¡Œå‰ã«æ‹’å¦ã™ã‚‹", ReviewEvidenceReadErrorsAreInputFailures);
-    suite.Add("NULæ–‡å­—ã‚’å«ã‚€å¤–éƒ¨è¨¼è·¡å‚ç…§ã‚’ä¸ä¸€è‡´ã¨ã—ã¦æ‹’å¦ã™ã‚‹", InvalidEvidenceReferenceIsRejected);
-    suite.Add("Fake Codexå‡ºåŠ›ã®æ—¢çŸ¥ãƒ—ãƒ­ã‚­ã‚·èªè¨¼æƒ…å ±ã‚’ä¿å­˜å‰ã«ãƒã‚¹ã‚¯ã™ã‚‹", CodexProxyCredentialsAreRedactedFromPersistedOutputs);
-    suite.Add("Fake Codexãƒ—ãƒ­ã‚»ã‚¹ã®JSONLãƒ»stderrãƒ»usageãƒ»æœªçŸ¥eventã‚’åˆ¥ã€…ã«è¨˜éŒ²ã™ã‚‹", CodexProcessCapturesJsonlAndSeparatesStreams);
-    suite.Add("Reviewerã¯å›ºå®šæˆæœç‰©ã®SHA-256ä¸ä¸€è‡´ã§èµ·å‹•ã—ãªã„", ReviewerRejectsChangedFixedArtifact);
-    suite.Add("Codexæ¨™æº–å…¥åŠ›ã§æ—¥æœ¬èªãƒ—ãƒ­ãƒ³ãƒ—ãƒˆã‚’UTF-8ã®ã¾ã¾æ¸¡ã™", CodexPromptIsPassedAsUtf8);
-    if (OperatingSystem.IsWindows())
-        suite.Add("npm codex.cmdã¨codex.ps1 shimã§æ—¥æœ¬èªãƒ—ãƒ­ãƒ³ãƒ—ãƒˆã‚’æ¸¡ã™", CodexNpmShimsReceiveUtf8Prompt);
-    suite.Add("Fake Codexå®Ÿè¡Œã§killå‡¦ç†ã¨CLIç‰ˆç¢ºèªãŒèµ·å‹•ã—ãªã„", CodexVersionProbeKillFailureIsRecorded);
-    suite.Add("Fake Codexå®Ÿè¡Œãƒ•ã‚¡ã‚¤ãƒ«èµ·å‹•å¤±æ•—ã‚’å®‰å…¨ã«è¨˜éŒ²ã™ã‚‹", CodexVersionProbeStartFailureStopsBeforeExecution);
-    suite.Add("terminal eventã¨çµ‚äº†ã‚³ãƒ¼ãƒ‰ã®ä¸ä¸€è‡´ã‚’æˆåŠŸæ‰±ã„ã—ãªã„", CodexTerminalAndExitCodeMustAgree);
-    suite.Add("ä¸æ­£JSONLãƒ»ç©ºå¿œç­”ãƒ»ç•°å¸¸çµ‚äº†ã‚’æˆåŠŸæ‰±ã„ã—ãªã„", CodexMalformedAndEmptyResponsesFail);
-    suite.Add("timeoutå¾Œã«killã‚’è©¦ã—çµ‚äº†ãƒ»streamåˆ‡æ–­ã‚’è¨˜éŒ²ã™ã‚‹", CodexTimeoutKillIsReportedSeparately);
-    suite.Add("timeoutæ™‚ã«Fakeãƒ—ãƒ­ã‚»ã‚¹ã®å­ãƒ—ãƒ­ã‚»ã‚¹åœæ­¢ã‚‚ç¢ºèªã™ã‚‹", CodexTimeoutStopsFakeChildProcess);
-    suite.Add("killå¤±æ•—ã‚’è¨˜éŒ²ã—ãƒ—ãƒ­ã‚»ã‚¹çµ‚äº†æœªç¢ºèªã‚’æˆåŠŸæ‰±ã„ã—ãªã„", CodexKillFailureIsNotReportedAsSuccess);
-    suite.Add("Ctrl+Cåœæ­¢è¦æ±‚ã¨timeoutã‚’åŒºåˆ¥ã—killãƒ»çµ‚äº†ãƒ»streamçµæœã‚’è¨˜éŒ²ã™ã‚‹", CodexCancellationIsDistinctFromTimeout);
-    suite.Add("Workflowåœæ­¢è¦æ±‚ã‚’Codex Runnerã¨Fakeå­ãƒ—ãƒ­ã‚»ã‚¹ã¸ä¼æ’­ã™ã‚‹", WorkflowCancellationStopsFakeCodexProcess);
-    suite.Add("Codexå­ãƒ—ãƒ­ã‚»ã‚¹ã¸è¦ªã®API secretç’°å¢ƒå¤‰æ•°ã‚’æ¸¡ã•ãªã„", CodexChildEnvironmentFiltersSecrets);
-    suite.Add("Codexå­ãƒ—ãƒ­ã‚»ã‚¹ã¸SystemDriveã‚’æ¸¡ã™", CodexChildInheritsSystemDrive);
-    suite.Add("Fake CodexãŒç”Ÿæˆã—ãŸæœªè¿½è·¡ãƒã‚¤ãƒŠãƒªã‚’å·®åˆ†å›ºå®šæ™‚ã«æ‹’å¦ã™ã‚‹", CodexRejectsUntrackedBinaryChanges);
-    suite.Add("PRä¸è¦ã®Codexå®Ÿè¡Œã§ã¯å®Ÿè¡Œbitå¤‰æ›´ã‚’è¨±å®¹ã™ã‚‹", CodexNonPullRequestAllowsExecutableModeChange);
-    suite.Add("PRå¿…é ˆCodex snapshotã¯æ–°è¦å®Ÿè¡Œãƒ•ã‚¡ã‚¤ãƒ«ã®modeã‚’ä¿æŒã™ã‚‹", CodexPullRequestSnapshotPreservesNewExecutableMode);
-    suite.Add("æ—¢å­˜CODEX_HOMEã¨é€šå¸¸ã®ãƒ¦ãƒ¼ã‚¶ãƒ¼ãƒ—ãƒ­ãƒ•ã‚¡ã‚¤ãƒ«ã‚’ä½¿ãˆã‚‹", CodexExistingProfilesAreAccepted);
-    suite.Add("å†å®Ÿè£…ãƒ—ãƒ­ãƒ³ãƒ—ãƒˆã®å¥‘ç´„ç¯„å›²ã‚’Fake CodexãŒèª­ã¿å–ã‚‹", CodexFakeParsesScopeBeforeRevisionFinding);
-    suite.Add("Codex Fakeãƒ—ãƒ­ã‚»ã‚¹ã§ç‹¬ç«‹ãƒ¬ãƒ“ãƒ¥ãƒ¼ã¾ã§ç¸¦æ–­ã—å›ºå®šhashã‚’å¼•ãç¶™ã", CodexFakeProcessesCompleteIndependentReviewSlice);
-    suite.Add("Codexä¸€å›ãƒ¢ãƒ¼ãƒ‰ã¯æˆåŠŸãƒ»æŒ‡æ‘˜ãƒ»å¤±æ•—ã‚’è¨˜éŒ²ã—è¿½åŠ èµ·å‹•ã›ãšäººé–“åˆ¤æ–­å¾…ã¡ã§æ­¢ã¾ã‚‹", CodexOneShotStopsWithoutRetries);
-}
-
-static void GitHubRemoteUrlRequiresExactHostAndPath()
-{
-    Assert.True(GitHubWorkflowPublisher.RemoteMatches("https://github.com/Ateliers-Dev/ateliers-ai-orchestrator.git", "Ateliers-Dev/ateliers-ai-orchestrator"));
-    Assert.True(GitHubWorkflowPublisher.RemoteMatches("git@github.com:Ateliers-Dev/ateliers-ai-orchestrator", "Ateliers-Dev/ateliers-ai-orchestrator"));
-    Assert.True(GitHubWorkflowPublisher.RemoteMatches("ssh://git@github.com/Ateliers-Dev/ateliers-ai-orchestrator.git", "Ateliers-Dev/ateliers-ai-orchestrator"));
-    Assert.False(GitHubWorkflowPublisher.RemoteMatches("https://attacker.example/path/github.com/Ateliers-Dev/ateliers-ai-orchestrator", "Ateliers-Dev/ateliers-ai-orchestrator"));
-    Assert.False(GitHubWorkflowPublisher.RemoteMatches("https://github.com.attacker.example/Ateliers-Dev/ateliers-ai-orchestrator", "Ateliers-Dev/ateliers-ai-orchestrator"));
-    Assert.False(GitHubWorkflowPublisher.RemoteMatches("https://github.com/Ateliers-Dev/other-repo", "Ateliers-Dev/ateliers-ai-orchestrator"));
-}
-
-static void CliHelpAndInputErrorsAreSeparated()
-{
-    var originalOut = Console.Out;
-    var originalError = Console.Error;
-    try
-    {
-        foreach (var args in new[]
-                 {
-                     Array.Empty<string>(), ["--help"], ["-h"],
-                     ["validate", "--help"], ["validate", "-h"],
-                     ["start", "--help"], ["start", "-h"],
-                     ["run", "--help"], ["run", "-h"]
-                 })
-        {
-            using var stdout = new StringWriter();
-            using var stderr = new StringWriter();
-            Console.SetOut(stdout);
-            Console.SetError(stderr);
-            var exitCode = OrchestratorCli.RunAsync(args).GetAwaiter().GetResult();
-            Assert.Equal(0, exitCode);
-            Assert.True(!string.IsNullOrWhiteSpace(stdout.ToString()));
-            Assert.Equal(string.Empty, stderr.ToString());
-        }
-
-        using var invalidOut = new StringWriter();
-        using var invalidError = new StringWriter();
-        Console.SetOut(invalidOut);
-        Console.SetError(invalidError);
-        var invalidExitCode = OrchestratorCli.RunAsync(["run"]).GetAwaiter().GetResult();
-        Assert.Equal(2, invalidExitCode);
-        Assert.Equal(string.Empty, invalidOut.ToString());
-        Assert.True(invalidError.ToString().Contains("ä½¿ç”¨æ–¹æ³•", StringComparison.Ordinal));
-    }
-    finally
-    {
-        Console.SetOut(originalOut);
-        Console.SetError(originalError);
-    }
-}
-
-static void PublisherIsolatesInheritedGitConfigAndRejectsLocalFilters()
-{
-    using var temp = new TemporaryDirectory();
-    var repository = Path.Combine(temp.Path, "repo");
-    Directory.CreateDirectory(repository);
-    RunGitFixture(repository, "init", "-q");
-    var isolatedConfig = Path.Combine(temp.Path, "isolated-config");
-    File.WriteAllText(isolatedConfig, string.Empty);
-    RunGitFixture(repository, "config", "--file", isolatedConfig, "--add", "credential.https://github.com.helper", string.Empty);
-    RunGitFixture(repository, "config", "--file", isolatedConfig, "--add", "credential.https://github.com.helper", "!gh auth git-credential");
-
-    // The publisher's exact two-value helper is trusted only when it comes from its isolated global config.
-    Assert.False(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
-    var alteredIsolatedConfig = Path.Combine(temp.Path, "altered-isolated-config");
-    File.WriteAllText(alteredIsolatedConfig, string.Empty);
-    RunGitFixture(repository, "config", "--file", alteredIsolatedConfig, "--add", "credential.https://github.com.helper", "!unexpected-helper");
-    var alteredEntries = GitHubWorkflowPublisher.GetUnsafeEffectiveGitConfig(repository, Path.GetFullPath(
-        RunGitFixture(repository, "rev-parse", "--git-path", "config").Trim(), repository), alteredIsolatedConfig, CancellationToken.None);
-    Assert.True(alteredEntries.Any(entry => entry.Key == "credential.https://github.com.helper" && entry.Source == "isolated-global"));
-
-    RunGitFixture(repository, "config", "--local", "credential.https://github.com.helper", "!untrusted-helper-secret");
-    var localConfigPath = Path.GetFullPath(RunGitFixture(repository, "rev-parse", "--git-path", "config").Trim(), repository);
-    var unsafeHelpers = GitHubWorkflowPublisher.GetUnsafeEffectiveGitConfig(repository, localConfigPath, isolatedConfig, CancellationToken.None);
-    Assert.True(unsafeHelpers.Any(entry => entry.Key == "credential.<redacted>.helper" && entry.Source == "repository-local"),
-        string.Join(",", unsafeHelpers.Select(entry => $"{entry.Key}:{entry.Source}")));
-    Assert.False(string.Join(" ", unsafeHelpers.Select(entry => entry.Key + entry.Source)).Contains("untrusted-helper-secret", StringComparison.Ordinal));
-    RunGitFixture(repository, "config", "--local", "--unset-all", "credential.https://github.com.helper");
-
-    RunGitFixture(repository, "config", "--local", "filter.lfs.clean", "git-lfs clean -- %f");
-    Assert.True(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
-    RunGitFixture(repository, "config", "--local", "--unset-all", "filter.lfs.clean");
-    Assert.False(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
-
-    RunGitFixture(repository, "config", "--local", "core.fsmonitor", "untrusted-monitor");
-    Assert.True(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
-    RunGitFixture(repository, "config", "--local", "--unset-all", "core.fsmonitor");
-    RunGitFixture(repository, "config", "--local", "core.hooksPath", "C:/private/untrusted-hooks");
-    var unsafeHooks = GitHubWorkflowPublisher.GetUnsafeEffectiveGitConfig(repository, localConfigPath, isolatedConfig, CancellationToken.None);
-    Assert.True(unsafeHooks.Any(entry => entry.Key == "core.hooksPath" && entry.Source == "repository-local"));
-    Assert.False(string.Join(" ", unsafeHooks.Select(entry => entry.Key + entry.Source)).Contains("C:/private/untrusted-hooks", StringComparison.Ordinal));
-    RunGitFixture(repository, "config", "--local", "--unset-all", "core.hooksPath");
-    RunGitFixture(repository, "config", "--local", "include.path", "C:/private/untrusted-config");
-    var unsafeIncludes = GitHubWorkflowPublisher.GetUnsafeEffectiveGitConfig(repository, localConfigPath, isolatedConfig, CancellationToken.None);
-    Assert.True(unsafeIncludes.Any(entry => entry.Key == "include.<redacted>" && entry.Source == "repository-local"));
-    Assert.False(string.Join(" ", unsafeIncludes.Select(entry => entry.Key + entry.Source)).Contains("C:/private/untrusted-config", StringComparison.Ordinal));
-    RunGitFixture(repository, "config", "--local", "--unset-all", "include.path");
-    RunGitFixture(repository, "config", "--local", "extensions.worktreeConfig", "true");
-    Assert.True(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
-
-    File.WriteAllText(Path.Combine(repository, ".gitattributes"), "*.dat filter=lfs\n");
-    Assert.True(GitHubWorkflowPublisher.HasActiveGitFilterPaths(repository, ["sample.dat"], isolatedConfig, CancellationToken.None));
-    Assert.False(GitHubWorkflowPublisher.HasActiveGitFilterPaths(repository, ["sample.txt"], isolatedConfig, CancellationToken.None));
-    File.WriteAllText(Path.Combine(repository, ".gitattributes"), "*.custom filter=custom-driver\n");
-    Assert.True(GitHubWorkflowPublisher.HasActiveGitFilterPaths(repository, ["sample.custom"], isolatedConfig, CancellationToken.None));
-    File.WriteAllText(Path.Combine(repository, ".gitattributes"), "*.disabled -filter\n");
-    Assert.True(GitHubWorkflowPublisher.HasActiveGitFilterPaths(repository, ["sample.disabled"], isolatedConfig, CancellationToken.None));
-}
-
-static void PublisherPersistsVerifiedPrEvidenceBeforeRemovingPending()
-{
-    var root = Path.Combine(Path.GetTempPath(), $"verified-pr-evidence-{Guid.NewGuid():N}");
-    Directory.CreateDirectory(root);
-    try
-    {
-        var pendingPath = Path.Combine(root, "github-pull-request-pending.json");
-        File.WriteAllText(pendingPath, "{\"state\":\"create-returned\"}");
-        var evidence = new
-        {
-            evidenceKind = "github-pull-request-created",
-            url = "https://github.com/Ateliers-Dev/test/pull/9",
-            headSha = new string('a', 40),
-            baseSha = new string('b', 40),
-            merged = false,
-            verified = true
-        };
-
-        GitHubWorkflowPublisher.PersistVerifiedPullRequestEvidence(root, evidence, evidence.url, evidence.headSha, evidence.baseSha);
-
-        var finalPath = Path.Combine(root, "github-pull-request.json");
-        Assert.True(File.Exists(finalPath));
-        Assert.False(File.Exists(pendingPath));
-        using var saved = JsonDocument.Parse(File.ReadAllBytes(finalPath));
-        Assert.Equal(evidence.url, saved.RootElement.GetProperty("url").GetString());
-        Assert.True(saved.RootElement.GetProperty("verified").GetBoolean());
-    }
-    finally { Directory.Delete(root, true); }
-
-}
-
-static void ReviewCommentIsStructuredAndIdempotent()
-{
-    const string prUrl = "https://github.com/Ateliers-Dev/test/pull/9";
-    const string headSha = "0123456789012345678901234567890123456789";
-    const string baseSha = "1123456789012345678901234567890123456789";
-    const string diffSha = "2123456789012345678901234567890123456789";
-    const string baseBranch = "main";
-    const string marker = "<!-- ateliers-review-result run=run-1 head=0123456789012345678901234567890123456789 base=1123456789012345678901234567890123456789 diff=2123456789012345678901234567890123456789 -->";
-    var reviewResult = new WorkflowReviewResult("run-1", "reviewer-1", prUrl, headSha, baseSha, baseBranch,
-        diffSha, WorkflowReviewDecision.Approve, false, "æ¡ä»¶ã‚’æº€ãŸã—ã¦ã„ã¾ã™ã€‚");
-    var approval = GitHubWorkflowPublisher.FormatReviewComment(reviewResult, marker);
-    Assert.True(approval.Contains("åˆ¤å®š: æ‰¿èª", StringComparison.Ordinal));
-    Assert.True(approval.Contains("æŒ‡æ‘˜æœ‰ç„¡: ãªã—", StringComparison.Ordinal));
-    Assert.True(approval.Contains("Run ID: `run-1`", StringComparison.Ordinal));
-    Assert.True(approval.Contains("Reviewer: `reviewer-1`", StringComparison.Ordinal));
-    Assert.True(approval.Contains($"PR: {prUrl}", StringComparison.Ordinal));
-    Assert.True(approval.Contains($"ãƒ¬ãƒ“ãƒ¥ãƒ¼å¯¾è±¡ head SHA: `{headSha}`", StringComparison.Ordinal));
-    Assert.True(approval.Contains($"ãƒ¬ãƒ“ãƒ¥ãƒ¼å¯¾è±¡ base: `{baseBranch}` (`{baseSha}`)", StringComparison.Ordinal));
-    Assert.True(approval.Contains($"ãƒ¬ãƒ“ãƒ¥ãƒ¼å·®åˆ† SHA-256: `{diffSha}`", StringComparison.Ordinal));
-
-    var findings = GitHubWorkflowPublisher.FormatReviewComment(reviewResult with
-    {
-        HasFindings = true,
-        Summary = "æŒ‡æ‘˜:\né‡è¦åº¦: P2\nå¯¾è±¡: src/File.cs\næ ¹æ‹ : nullå…¥åŠ›æ™‚ã«ä¾‹å¤–ã¨ãªã‚‹\næ”¹å–„æ¡ˆ: å…¥åŠ›æ¤œè¨¼ã‚’è¿½åŠ ã™ã‚‹"
-    }, marker);
-    Assert.True(findings.Contains("åˆ¤å®š: æ‰¿èª", StringComparison.Ordinal));
-    Assert.True(findings.Contains("æŒ‡æ‘˜æœ‰ç„¡: ã‚ã‚Š", StringComparison.Ordinal));
-    Assert.True(findings.Contains("é‡è¦åº¦: P2", StringComparison.Ordinal));
-    Assert.True(findings.Contains("å¯¾è±¡: src/File.cs", StringComparison.Ordinal));
-    Assert.True(findings.Contains("æ ¹æ‹ :", StringComparison.Ordinal));
-    Assert.True(findings.Contains("æ”¹å–„æ¡ˆ:", StringComparison.Ordinal));
-    var multipleFindings = reviewResult with
-    {
-        HasFindings = true,
-        Summary = "æŒ‡æ‘˜:\né‡è¦åº¦: P1\nå¯¾è±¡: src/A.cs\næ ¹æ‹ : Aã®æ ¹æ‹ \næ”¹å–„æ¡ˆ: Aã‚’ç›´ã™\n\næŒ‡æ‘˜:\né‡è¦åº¦: P2\nå¯¾è±¡: src/B.cs\næ ¹æ‹ : Bã®æ ¹æ‹ \næ”¹å–„æ¡ˆ: Bã‚’ç›´ã™"
-    };
-    var multipleFindingsComment = GitHubWorkflowPublisher.FormatReviewComment(multipleFindings, marker);
-    Assert.True(multipleFindingsComment.Contains("å¯¾è±¡: src/A.cs", StringComparison.Ordinal));
-    Assert.True(multipleFindingsComment.Contains("å¯¾è±¡: src/B.cs", StringComparison.Ordinal));
-
-    var matchingBody = JsonSerializer.Serialize(new[] { new { id = 10, body = approval, html_url = "https://github.com/Ateliers-Dev/test/pull/9#issuecomment-10" } });
-    Assert.True(GitHubWorkflowPublisher.FindExistingReviewComment(matchingBody, marker, approval) is not null);
-    var duplicateBody = JsonSerializer.Serialize(new[] { new { id = 10, body = approval }, new { id = 11, body = approval } });
-    Assert.Throws<InvalidOperationException>(() => GitHubWorkflowPublisher.FindExistingReviewComment(duplicateBody, marker, approval));
-    var conflictingBody = JsonSerializer.Serialize(new[] { new { id = 10, body = approval + "modified" } });
-    Assert.Throws<InvalidOperationException>(() => GitHubWorkflowPublisher.FindExistingReviewComment(conflictingBody, marker, approval));
-    Assert.Throws<System.Text.Json.JsonException>(() => GitHubWorkflowPublisher.FindExistingReviewComment("{invalid-json", marker, approval));
-    var session = new WorkflowPublicationSession(".", "Ateliers-Dev/test", "codex/run-1", baseBranch, baseSha,
-        "git-config", "config-hash", "safe-hooks");
-    var snapshot = new WorkflowPublicationSnapshot(headSha, diffSha, "artifacts/diff.patch");
-    var pullRequest = new WorkflowPullRequest(prUrl, headSha, baseSha, "codex/run-1", baseBranch, "github-pull-request.json");
-    Assert.Throws<InvalidOperationException>(() => GitHubWorkflowPublisher.EnsurePullRequestTargetsReview(
-        [headSha, new string('f', 40), "codex/run-1", baseBranch, "OPEN"], session, snapshot, pullRequest));
-    Assert.Throws<InvalidOperationException>(() => GitHubWorkflowPublisher.EnsurePullRequestTargetsReview(
-        [headSha, baseSha, "codex/run-1", "release", "OPEN"], session, snapshot, pullRequest));
-    Assert.Throws<InvalidOperationException>(() => GitHubWorkflowPublisher.FormatReviewComment(
-        reviewResult with { Summary = "æŒ‡æ‘˜:\né‡è¦åº¦: P1\nå¯¾è±¡: src/File.cs\næ ¹æ‹ : nullå…¥åŠ›æ™‚ã«ä¾‹å¤–ã¨ãªã‚‹\næ”¹å–„æ¡ˆ: å…¥åŠ›æ¤œè¨¼ã‚’è¿½åŠ ã™ã‚‹" }, marker));
-    Assert.Throws<InvalidOperationException>(() => WorkflowReviewAssessment.Parse(
-        "åˆ¤å®š: æ‰¿èª\næŒ‡æ‘˜æœ‰ç„¡: ãªã—\n\né‡è¦åº¦: P1\nå¯¾è±¡: src/File.cs\næ ¹æ‹ : nullå…¥åŠ›æ™‚ã«ä¾‹å¤–ã¨ãªã‚‹\næ”¹å–„æ¡ˆ: å…¥åŠ›æ¤œè¨¼ã‚’è¿½åŠ ã™ã‚‹"));
-    Assert.Throws<InvalidOperationException>(() => WorkflowReviewAssessment.Parse(
-        "ãƒ¬ãƒ“ãƒ¥ãƒ¼åˆæ ¼: æŒ‡æ‘˜ãªã—\n\né‡è¦åº¦: P1\nå¯¾è±¡: src/File.cs\næ ¹æ‹ : nullå…¥åŠ›æ™‚ã«ä¾‹å¤–ã¨ãªã‚‹\næ”¹å–„æ¡ˆ: å…¥åŠ›æ¤œè¨¼ã‚’è¿½åŠ ã™ã‚‹"));
-    Assert.Throws<InvalidOperationException>(() => WorkflowReviewAssessment.Parse(
-        "åˆ¤å®š: ä¿®æ­£ä¾é ¼\næŒ‡æ‘˜æœ‰ç„¡: ãªã—\n\næ ¹æ‹ ã‚’è¿½è¨˜ã—ã¦ãã ã•ã„"));
-    Assert.Throws<InvalidOperationException>(() => WorkflowReviewAssessment.Parse(
-        "åˆ¤å®š: ä¿®æ­£ä¾é ¼\næŒ‡æ‘˜æœ‰ç„¡: ã‚ã‚Š\n\næŒ‡æ‘˜:\né‡è¦åº¦: P1\nå¯¾è±¡: src/File.cs\næ ¹æ‹ : nullå…¥åŠ›æ™‚ã«ä¾‹å¤–ã¨ãªã‚‹\næ”¹å–„æ¡ˆ: å…¥åŠ›æ¤œè¨¼ã‚’è¿½åŠ ã™ã‚‹\n\næŒ‡æ‘˜:\né‡è¦åº¦: P2\nå¯¾è±¡: src/Other.cs"));
-    Assert.Throws<InvalidOperationException>(() => WorkflowReviewAssessment.Parse(
-        "åˆ¤å®š: æ‰¿èª\næŒ‡æ‘˜æœ‰ç„¡: ã‚ã‚Š\n\næŒ‡æ‘˜:\né‡è¦åº¦: P1\nå¯¾è±¡: src/File.cs\næ ¹æ‹ : nullå…¥åŠ›æ™‚ã«ä¾‹å¤–ã¨ãªã‚‹\næ”¹å–„æ¡ˆ: å…¥åŠ›æ¤œè¨¼ã‚’è¿½åŠ ã™ã‚‹\n\nè©³ç´°: " + new string('x', WorkflowReviewAssessment.MaximumSummaryCharacters)));
-    var requestChanges = WorkflowReviewAssessment.Parse(
-        "åˆ¤å®š: ä¿®æ­£ä¾é ¼\næŒ‡æ‘˜æœ‰ç„¡: ã‚ã‚Š\n\næŒ‡æ‘˜:\né‡è¦åº¦: P1\nå¯¾è±¡: src/File.cs\næ ¹æ‹ : nullå…¥åŠ›æ™‚ã«ä¾‹å¤–ã¨ãªã‚‹\næ”¹å–„æ¡ˆ: å…¥åŠ›æ¤œè¨¼ã‚’è¿½åŠ ã™ã‚‹");
-    Assert.Equal(WorkflowReviewDecision.RequestChanges, requestChanges.Decision);
-    Assert.True(requestChanges.HasFindings);
-
-    var evidenceRoot = Path.Combine(Path.GetTempPath(), $"review-comment-evidence-{Guid.NewGuid():N}");
-    Directory.CreateDirectory(evidenceRoot);
-    try
-    {
-        var expectedCommentUrl = prUrl + "#issuecomment-10";
-        var pendingPath = Path.Combine(evidenceRoot, "github-review-comment-pending.json");
-        File.WriteAllText(pendingPath, "pending");
-        var validEvidence = new
-        {
-            evidenceKind = "github-review-result-comment-posted", url = expectedCommentUrl, commentId = 10L,
-            runId = reviewResult.RunId, reviewerId = reviewResult.ReviewerId, headSha = reviewResult.ReviewedHeadSha,
-            pullRequestUrl = reviewResult.PullRequestUrl, baseSha = reviewResult.ReviewedBaseSha,
-            baseBranch = reviewResult.ReviewedBaseBranch, reviewDiffSha256 = reviewResult.ReviewDiffSha256,
-            decision = reviewResult.Decision.ToString(), hasFindings = reviewResult.HasFindings, verified = true
-        };
-        GitHubWorkflowPublisher.PersistReviewCommentEvidence(evidenceRoot, validEvidence, 10, expectedCommentUrl,
-            reviewResult, headSha);
-        Assert.False(File.Exists(pendingPath));
-
-        var alteredRoot = Path.Combine(evidenceRoot, "altered");
-        Directory.CreateDirectory(alteredRoot);
-        File.WriteAllText(Path.Combine(alteredRoot, "github-review-comment-pending.json"), "pending");
-        var alteredEvidence = new
-        {
-            validEvidence.evidenceKind, validEvidence.url, validEvidence.commentId, validEvidence.runId,
-            validEvidence.reviewerId, validEvidence.headSha, validEvidence.pullRequestUrl, validEvidence.baseSha,
-            validEvidence.baseBranch, reviewDiffSha256 = new string('f', 40), validEvidence.decision,
-            validEvidence.hasFindings, validEvidence.verified
-        };
-        Assert.Throws<InvalidOperationException>(() => GitHubWorkflowPublisher.PersistReviewCommentEvidence(
-            alteredRoot, alteredEvidence, 10, expectedCommentUrl, reviewResult, headSha));
-        Assert.True(File.Exists(Path.Combine(alteredRoot, "github-review-comment-pending.json")),
-            "è¨¼è·¡ä¸ä¸€è‡´æ™‚ã«pendingè¨¼è·¡ã‚’å‰Šé™¤ã—ã¾ã—ãŸã€‚");
-    }
-    finally { Directory.Delete(evidenceRoot, true); }
-}
-
-static void RequiredPullRequestWorkflowPushesReviewsAndCreatesPr()
-{
-    var root = Path.Combine(Path.GetTempPath(), $"required-pr-workflow-{Guid.NewGuid():N}");
-    var runDirectory = Path.Combine(root, "run");
-    Directory.CreateDirectory(root);
-    Directory.CreateDirectory(runDirectory);
-    try
-    {
-        using var events = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "required-pr-test");
-        var publisher = new StubWorkflowPublisher();
-        var runner = new CountingPublicationAgentRunner(FakeScenario.RevisionThenSuccess);
-        var result = new FakeAgentWorkflow().Run(SampleContract() with
-            { WorkingDirectory = root, Reporting = new ReportingRequirements { PullRequestExpected = true, FinalReportFormat = "markdown" } },
-            "contract-hash", "required-pr-test", runDirectory, runner, events,
-            codexOneShot: true, publisher: publisher);
-        events.Dispose();
-
-        Assert.Equal(RunState.NeedsHumanInput, result.State);
-        Assert.True(result.PersistenceSucceeded);
-        Assert.Equal("start,push,push,create-pr,post-review-comment", string.Join(',', publisher.Calls));
-        Assert.Equal(2, runner.ImplementationCalls);
-        Assert.Equal(2, runner.ReviewCalls);
-        Assert.Equal("artifacts/implementer-snapshot-test.json", publisher.SnapshotReferences.First());
-        Assert.True(publisher.SnapshotHashes.All(hash => hash == "snapshot-test-hash"));
-        var storedEvents = File.ReadAllLines(Path.Combine(runDirectory, "events.jsonl"));
-        Assert.True(storedEvents.Any(line => line.Contains("github_push_verified", StringComparison.Ordinal)));
-        Assert.True(storedEvents.Any(line => line.Contains("github_pull_request_created", StringComparison.Ordinal) &&
-            line.Contains("head-sha-2", StringComparison.Ordinal)));
-        Assert.True(storedEvents.Any(line => line.Contains("github_review_result_comment_posted", StringComparison.Ordinal) &&
-            line.Contains("head-sha-2", StringComparison.Ordinal)));
-        var evidencePath = Path.Combine(runDirectory, "github-pull-request.json");
-        Assert.True(File.Exists(evidencePath), "æˆåŠŸã—ãŸPRã®æ¤œè¨¼æ¸ˆã¿è¨¼è·¡ãŒå®Ÿè¡Œè¨˜éŒ²ã«æ®‹ã£ã¦ã„ã¾ã›ã‚“ã€‚");
-        Assert.False(File.Exists(Path.Combine(runDirectory, "github-pull-request-pending.json")));
-        using (var savedEvidence = JsonDocument.Parse(File.ReadAllBytes(evidencePath)))
-            Assert.True(savedEvidence.RootElement.GetProperty("verified").GetBoolean());
-        var commentEvidencePath = Path.Combine(runDirectory, "github-review-comment.json");
-        Assert.True(File.Exists(commentEvidencePath), "å¿…é ˆãƒ¬ãƒ“ãƒ¥ãƒ¼çµæœã‚³ãƒ¡ãƒ³ãƒˆã®è¨¼è·¡ãŒä¿å­˜ã•ã‚Œã¦ã„ã¾ã›ã‚“ã€‚");
-        using (var commentEvidence = JsonDocument.Parse(File.ReadAllBytes(commentEvidencePath)))
-        {
-            Assert.Equal("required-pr-test", commentEvidence.RootElement.GetProperty("runId").GetString());
-            Assert.Equal("codex-cli-reviewer", commentEvidence.RootElement.GetProperty("reviewerId").GetString());
-            Assert.Equal("head-sha-2", commentEvidence.RootElement.GetProperty("headSha").GetString());
-            Assert.Equal(nameof(WorkflowReviewDecision.Approve), commentEvidence.RootElement.GetProperty("decision").GetString());
-            Assert.False(commentEvidence.RootElement.GetProperty("hasFindings").GetBoolean());
-        }
-        var report = File.ReadAllText(Path.Combine(runDirectory, "report.md"));
-        Assert.True(report.Contains("https://github.com/Ateliers-Dev/test/pull/9", StringComparison.Ordinal));
-    }
-    finally { Directory.Delete(root, true); }
-}
-
-static void RequiredPullRequestWorkflowFailsClosedOnReviewCommentFailure()
-{
-    foreach (var malformedResponse in new[] { false, true })
-    {
-        var runId = malformedResponse ? "required-pr-comment-json-fail" : "required-pr-comment-fail";
-        var root = Path.Combine(Path.GetTempPath(), $"{runId}-{Guid.NewGuid():N}");
-        var runDirectory = Path.Combine(root, "run");
-        Directory.CreateDirectory(root);
-        Directory.CreateDirectory(runDirectory);
-        try
-        {
-            using var events = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), runId);
-            var publisher = new StubWorkflowPublisher
-                { FailReviewComment = true, FailReviewCommentWithJson = malformedResponse };
-            var runner = new CountingPublicationAgentRunner(FakeScenario.Success);
-            var result = new FakeAgentWorkflow().Run(SampleContract() with
-                { WorkingDirectory = root, Reporting = new ReportingRequirements { PullRequestExpected = true, FinalReportFormat = "markdown" } },
-                "contract-hash", runId, runDirectory, runner, events,
-                codexOneShot: true, publisher: publisher);
-            events.Dispose();
-
-            Assert.Equal(RunState.Failed, result.State);
-            Assert.True(result.PersistenceSucceeded);
-            var storedEvents = File.ReadAllText(Path.Combine(runDirectory, "events.jsonl"));
-            Assert.True(storedEvents.Contains("github_review_result_comment_failed", StringComparison.Ordinal));
-            Assert.True(storedEvents.Contains("expectedHeadSha=head-sha-1", StringComparison.Ordinal));
-            Assert.False(storedEvents.Contains("github_review_result_comment_posted", StringComparison.Ordinal));
-            Assert.True(File.Exists(Path.Combine(runDirectory, "github-review-comment-pending.json")));
-            Assert.True(File.ReadAllText(Path.Combine(runDirectory, "report.md")).Contains("æˆåŠŸæ‰±ã„ã«ã¯ã—ã¦ã„ã¾ã›ã‚“", StringComparison.Ordinal));
-        }
-        finally { Directory.Delete(root, true); }
-    }
-
-    var invalidAssessments = new[]
-    {
-        ("required-pr-inconsistent-review", "åˆ¤å®š: æ‰¿èª\næŒ‡æ‘˜æœ‰ç„¡: ãªã—\n\næŒ‡æ‘˜:\né‡è¦åº¦: P1\nå¯¾è±¡: src/File.cs\næ ¹æ‹ : nullå…¥åŠ›æ™‚ã«ä¾‹å¤–ã¨ãªã‚‹\næ”¹å–„æ¡ˆ: å…¥åŠ›æ¤œè¨¼ã‚’è¿½åŠ ã™ã‚‹"),
-        ("required-pr-incomplete-finding", "åˆ¤å®š: æ‰¿èª\næŒ‡æ‘˜æœ‰ç„¡: ã‚ã‚Š\n\næŒ‡æ‘˜:\né‡è¦åº¦: P1\nå¯¾è±¡: src/A.cs\næ ¹æ‹ : Aã®æ ¹æ‹ \næ”¹å–„æ¡ˆ: Aã‚’ç›´ã™\n\næŒ‡æ‘˜:\né‡è¦åº¦: P2\nå¯¾è±¡: src/B.cs"),
-        ("required-pr-oversized-finding", "åˆ¤å®š: æ‰¿èª\næŒ‡æ‘˜æœ‰ç„¡: ã‚ã‚Š\n\næŒ‡æ‘˜:\né‡è¦åº¦: P1\nå¯¾è±¡: src/A.cs\næ ¹æ‹ : Aã®æ ¹æ‹ \næ”¹å–„æ¡ˆ: Aã‚’ç›´ã™\n\nè©³ç´°: " + new string('x', WorkflowReviewAssessment.MaximumSummaryCharacters))
-    };
-    foreach (var (runId, content) in invalidAssessments)
-    {
-        var invalidRoot = Path.Combine(Path.GetTempPath(), $"{runId}-{Guid.NewGuid():N}");
-        var invalidRunDirectory = Path.Combine(invalidRoot, "run");
-        Directory.CreateDirectory(invalidRoot);
-        Directory.CreateDirectory(invalidRunDirectory);
-        try
-        {
-            using var events = JsonlRunEventStore.CreateNew(Path.Combine(invalidRunDirectory, "events.jsonl"), runId);
-            var publisher = new StubWorkflowPublisher();
-            var runner = new CountingPublicationAgentRunner(FakeScenario.Success, content);
-            var result = new FakeAgentWorkflow().Run(SampleContract() with
-                { WorkingDirectory = invalidRoot, Reporting = new ReportingRequirements { PullRequestExpected = true, FinalReportFormat = "markdown" } },
-                "contract-hash", runId, invalidRunDirectory, runner, events,
-                codexOneShot: true, publisher: publisher);
-            events.Dispose();
-
-            Assert.Equal(RunState.Failed, result.State);
-            Assert.False(publisher.Calls.Contains("create-pr"), "ä¸æ­£ãƒ»ä¸å®Œå…¨ãªãƒ¬ãƒ“ãƒ¥ãƒ¼æŒ‡æ‘˜ã§PRã‚’ä½œæˆã—ã¾ã—ãŸã€‚");
-            Assert.False(publisher.Calls.Contains("post-review-comment"), "ä¸æ­£ãƒ»ä¸å®Œå…¨ãªãƒ¬ãƒ“ãƒ¥ãƒ¼æŒ‡æ‘˜ã‚’ã‚³ãƒ¡ãƒ³ãƒˆæŠ•ç¨¿ã—ã¾ã—ãŸã€‚");
-            var log = File.ReadAllText(Path.Combine(invalidRunDirectory, "events.jsonl"));
-            Assert.True(log.Contains("github_review_assessment_failed", StringComparison.Ordinal));
-            Assert.False(log.Contains("github_pull_request_created", StringComparison.Ordinal));
-        }
-        finally { Directory.Delete(invalidRoot, true); }
-    }
-}
-
-static void RequiredPullRequestWorkflowRequiresPersistedEvidence()
-{
-    var root = Path.Combine(Path.GetTempPath(), $"required-pr-missing-evidence-{Guid.NewGuid():N}");
-    var runDirectory = Path.Combine(root, "run");
-    Directory.CreateDirectory(root);
-    Directory.CreateDirectory(runDirectory);
-    try
-    {
-        using var events = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "required-pr-missing-evidence");
-        var publisher = new StubWorkflowPublisher { OmitPrEvidence = true };
-        var runner = new CountingPublicationAgentRunner(FakeScenario.Success);
-        var result = new FakeAgentWorkflow().Run(SampleContract() with
-            { WorkingDirectory = root, Reporting = new ReportingRequirements { PullRequestExpected = true, FinalReportFormat = "markdown" } },
-            "contract-hash", "required-pr-missing-evidence", runDirectory, runner, events,
-            codexOneShot: true, publisher: publisher);
-        events.Dispose();
-
-        Assert.Equal(RunState.Failed, result.State);
-        Assert.False(File.ReadAllText(Path.Combine(runDirectory, "events.jsonl")).Contains("github_pull_request_created", StringComparison.Ordinal));
-        Assert.True(File.ReadAllText(Path.Combine(runDirectory, "events.jsonl")).Contains("github_publication_failed", StringComparison.Ordinal));
-    }
-    finally { Directory.Delete(root, true); }
-
-    var tamperedRoot = Path.Combine(Path.GetTempPath(), $"required-pr-tampered-comment-{Guid.NewGuid():N}");
-    var tamperedRunDirectory = Path.Combine(tamperedRoot, "run");
-    Directory.CreateDirectory(tamperedRoot);
-    Directory.CreateDirectory(tamperedRunDirectory);
-    try
-    {
-        using var events = JsonlRunEventStore.CreateNew(Path.Combine(tamperedRunDirectory, "events.jsonl"), "required-pr-tampered-comment");
-        var publisher = new StubWorkflowPublisher { TamperReviewCommentEvidence = true };
-        var runner = new CountingPublicationAgentRunner(FakeScenario.Success);
-        var result = new FakeAgentWorkflow().Run(SampleContract() with
-            { WorkingDirectory = tamperedRoot, Reporting = new ReportingRequirements { PullRequestExpected = true, FinalReportFormat = "markdown" } },
-            "contract-hash", "required-pr-tampered-comment", tamperedRunDirectory, runner, events,
-            codexOneShot: true, publisher: publisher);
-        events.Dispose();
-
-        Assert.Equal(RunState.Failed, result.State);
-        var log = File.ReadAllText(Path.Combine(tamperedRunDirectory, "events.jsonl"));
-        Assert.True(log.Contains("github_review_result_comment_failed", StringComparison.Ordinal));
-        Assert.False(log.Contains("github_review_result_comment_posted", StringComparison.Ordinal));
-        Assert.True(File.Exists(Path.Combine(tamperedRunDirectory, "github-review-comment.json")));
-    }
-    finally { Directory.Delete(tamperedRoot, true); }
-}
-
-static void RequiredPullRequestWorkflowStopsDuringPush()
-{
-    var root = Path.Combine(Path.GetTempPath(), $"required-pr-cancel-push-{Guid.NewGuid():N}");
-    var runDirectory = Path.Combine(root, "run");
-    Directory.CreateDirectory(root);
-    Directory.CreateDirectory(runDirectory);
-    try
-    {
-        using var events = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "required-pr-cancel-push");
-        using var stop = new CancellationTokenSource();
-        var publisher = new StubWorkflowPublisher { CancelDuringPush = stop };
-        var runner = new CountingPublicationAgentRunner(FakeScenario.Success);
-        var result = new FakeAgentWorkflow().Run(SampleContract() with
-            { WorkingDirectory = root, Reporting = new ReportingRequirements { PullRequestExpected = true, FinalReportFormat = "markdown" } },
-            "contract-hash", "required-pr-cancel-push", runDirectory, runner, events,
-            stopToken: stop.Token, codexOneShot: true, publisher: publisher);
-        events.Dispose();
-        Assert.Equal(RunState.Failed, result.State);
-        Assert.Equal(0, runner.ReviewCalls);
-        Assert.True(File.ReadAllText(Path.Combine(runDirectory, "events.jsonl")).Contains("github_publication_cancelled", StringComparison.Ordinal));
-    }
-    finally { Directory.Delete(root, true); }
-}
-
-static void RequiredPullRequestWorkflowStopsDuringPrCreation()
-{
-    var root = Path.Combine(Path.GetTempPath(), $"required-pr-cancel-create-{Guid.NewGuid():N}");
-    var runDirectory = Path.Combine(root, "run");
-    Directory.CreateDirectory(root);
-    Directory.CreateDirectory(runDirectory);
-    try
-    {
-        using var events = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "required-pr-cancel-create");
-        using var stop = new CancellationTokenSource();
-        var publisher = new StubWorkflowPublisher { CancelDuringPrCreation = stop };
-        var runner = new CountingPublicationAgentRunner(FakeScenario.Success);
-        var result = new FakeAgentWorkflow().Run(SampleContract() with
-            { WorkingDirectory = root, Reporting = new ReportingRequirements { PullRequestExpected = true, FinalReportFormat = "markdown" } },
-            "contract-hash", "required-pr-cancel-create", runDirectory, runner, events,
-            stopToken: stop.Token, codexOneShot: true, publisher: publisher);
-        events.Dispose();
-        Assert.Equal(RunState.Failed, result.State);
-        Assert.False(File.ReadAllText(Path.Combine(runDirectory, "events.jsonl")).Contains("github_pull_request_created", StringComparison.Ordinal));
-        Assert.True(File.ReadAllText(Path.Combine(runDirectory, "events.jsonl")).Contains("github_publication_cancelled", StringComparison.Ordinal));
-    }
-    finally { Directory.Delete(root, true); }
-}
-
-static void RequiredPullRequestWorkflowStopsAfterVerifiedPush()
-{
-    var root = Path.Combine(Path.GetTempPath(), $"required-pr-cancel-after-push-{Guid.NewGuid():N}");
-    var runDirectory = Path.Combine(root, "run");
-    Directory.CreateDirectory(root);
-    Directory.CreateDirectory(runDirectory);
-    try
-    {
-        using var events = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "required-pr-cancel-after-push");
-        using var stop = new CancellationTokenSource();
-        var publisher = new StubWorkflowPublisher { CancelAfterPush = stop };
-        var runner = new CountingPublicationAgentRunner(FakeScenario.Success);
-        var result = new FakeAgentWorkflow().Run(SampleContract() with
-            { WorkingDirectory = root, Reporting = new ReportingRequirements { PullRequestExpected = true, FinalReportFormat = "markdown" } },
-            "contract-hash", "required-pr-cancel-after-push", runDirectory, runner, events,
-            stopToken: stop.Token, codexOneShot: true, publisher: publisher);
-        events.Dispose();
-        var log = File.ReadAllText(Path.Combine(runDirectory, "events.jsonl"));
-        Assert.Equal(RunState.Failed, result.State);
-        Assert.Equal(0, runner.ReviewCalls);
-        Assert.True(log.Contains("github_push_verified", StringComparison.Ordinal));
-        Assert.True(log.Contains("github_publication_cancelled", StringComparison.Ordinal));
-        Assert.True(log.Contains("head-sha-1", StringComparison.Ordinal));
-    }
-    finally { Directory.Delete(root, true); }
-}
-
-static void RequiredPullRequestWorkflowFailsClosedOnPushFailure()
-{
-    var root = Path.Combine(Path.GetTempPath(), $"required-pr-fail-{Guid.NewGuid():N}");
-    var runDirectory = Path.Combine(root, "run");
-    Directory.CreateDirectory(root);
-    Directory.CreateDirectory(runDirectory);
-    try
-    {
-        using var events = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "required-pr-fail-test");
-        var publisher = new StubWorkflowPublisher { FailPush = true };
-        var runner = new CountingPublicationAgentRunner(FakeScenario.Success);
-        var result = new FakeAgentWorkflow().Run(SampleContract() with
-            { WorkingDirectory = root, Reporting = new ReportingRequirements { PullRequestExpected = true, FinalReportFormat = "markdown" } },
-            "contract-hash", "required-pr-fail-test", runDirectory, runner, events,
-            codexOneShot: true, publisher: publisher);
-        events.Dispose();
-
-        Assert.Equal(RunState.Failed, result.State);
-        Assert.True(result.PersistenceSucceeded);
-        Assert.Equal("start,push", string.Join(',', publisher.Calls));
-        Assert.Equal(0, runner.ReviewCalls);
-        Assert.False(File.Exists(Path.Combine(runDirectory, "github-pull-request.json")));
-        Assert.True(File.ReadAllText(Path.Combine(runDirectory, "report.md")).Contains("æˆåŠŸæ‰±ã„ã«ã¯ã—ã¦ã„ã¾ã›ã‚“", StringComparison.Ordinal));
-    }
-    finally { Directory.Delete(root, true); }
-}
-
-static void RequiredPullRequestWorkflowFailsClosedOnPrFailure()
-{
-    var root = Path.Combine(Path.GetTempPath(), $"required-pr-create-fail-{Guid.NewGuid():N}");
-    var runDirectory = Path.Combine(root, "run");
-    Directory.CreateDirectory(root);
-    Directory.CreateDirectory(runDirectory);
-    try
-    {
-        using var events = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "required-pr-create-fail-test");
-        var publisher = new StubWorkflowPublisher { FailCreatePullRequest = true };
-        var runner = new CountingPublicationAgentRunner(FakeScenario.Success);
-        var result = new FakeAgentWorkflow().Run(SampleContract() with
-            { WorkingDirectory = root, Reporting = new ReportingRequirements { PullRequestExpected = true, FinalReportFormat = "markdown" } },
-            "contract-hash", "required-pr-create-fail-test", runDirectory, runner, events,
-            codexOneShot: true, publisher: publisher);
-        events.Dispose();
-
-        Assert.Equal(RunState.Failed, result.State);
-        Assert.True(result.PersistenceSucceeded);
-        Assert.Equal("start,push,create-pr", string.Join(',', publisher.Calls));
-        Assert.False(File.Exists(Path.Combine(runDirectory, "github-pull-request.json")));
-        Assert.False(File.ReadAllText(Path.Combine(runDirectory, "events.jsonl")).Contains("github_pull_request_created", StringComparison.Ordinal));
-    }
-    finally { Directory.Delete(root, true); }
-}
-
-static int RunFakeCodexFixture(string[] args)
-{
-    Console.InputEncoding = new System.Text.UTF8Encoding(false);
-    Console.OutputEncoding = new System.Text.UTF8Encoding(false);
-    var mode = args.Length > 1 ? args[1] : "success";
-    if (mode == "child-sleeper") { Thread.Sleep(10_000); return 0; }
-    if (args[^1] == "--version")
-    {
-        if (mode == "version-timeout") Thread.Sleep(6_000);
-        Console.WriteLine("codex-cli fixture-1");
-        return 0;
-    }
-    using var promptBuffer = new MemoryStream();
-    Console.OpenStandardInput().CopyTo(promptBuffer);
-    var promptBytes = promptBuffer.ToArray();
-    var prompt = new UTF8Encoding(false, true).GetString(promptBytes);
-    if (prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal) || prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal))
-    {
-        var contractMarker = "å¥‘ç´„:\n";
-        var contractStart = prompt.IndexOf(contractMarker, StringComparison.Ordinal);
-        if (contractStart < 0) throw new InvalidOperationException("Fake Codexãƒ—ãƒ­ãƒ³ãƒ—ãƒˆã«å¥‘ç´„JSONãŒã‚ã‚Šã¾ã›ã‚“ã€‚");
-        contractStart += contractMarker.Length;
-        var contractEnd = prompt.IndexOf("\n\nå›ºå®šæˆæœç‰©:", contractStart, StringComparison.Ordinal);
-        var reviewFindingStart = prompt.IndexOf("\nå‰å›ãƒ¬ãƒ“ãƒ¥ãƒ¼æŒ‡æ‘˜:", contractStart, StringComparison.Ordinal);
-        if (reviewFindingStart >= 0 && (contractEnd < 0 || reviewFindingStart < contractEnd))
-            contractEnd = reviewFindingStart;
-        if (contractEnd < 0) contractEnd = prompt.Length;
-        using var contractJson = JsonDocument.Parse(prompt[contractStart..contractEnd]);
-        var scope = contractJson.RootElement.GetProperty("Scope");
-        var included = scope.GetProperty("Included").EnumerateArray().Select(value => value.GetString() ?? throw new InvalidOperationException("Includedã«æ–‡å­—åˆ—ä»¥å¤–ã®å€¤ãŒã‚ã‚Šã¾ã™ã€‚")).ToArray();
-        var excluded = scope.GetProperty("Excluded").EnumerateArray().Select(value => value.GetString() ?? throw new InvalidOperationException("Excludedã«æ–‡å­—åˆ—ä»¥å¤–ã®å€¤ãŒã‚ã‚Šã¾ã™ã€‚")).ToArray();
-        var policy = new
-        {
-            scope_included = included,
-            scope_excluded = excluded,
-            os_boundary_disclaimed = prompt.Contains("ä½œæ¥­ç¯„å›²ã¯Agentã¸ã®æŒ‡ç¤ºã§ã‚ã‚Šã€OSãƒ¬ãƒ™ãƒ«ã§ç¯„å›²å¤–ã‚¢ã‚¯ã‚»ã‚¹ã‚’å®Œå…¨ã«é˜²ãä¿è¨¼ã§ã¯ã‚ã‚Šã¾ã›ã‚“ã€‚", StringComparison.Ordinal),
-            utf8_bom_present = promptBytes.AsSpan().StartsWith(Encoding.UTF8.GetPreamble())
-        };
-        Console.WriteLine($"{{\"type\":\"fixture.prompt_policy\",\"policy\":{JsonSerializer.Serialize(policy)}}}");
-    }
-    Console.Error.WriteLine("fixture warning: stderr is independent from the terminal status");
-    var proxy = new[] { "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "https_proxy", "http_proxy", "all_proxy" }
-        .Select(Environment.GetEnvironmentVariable).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
-    if (mode == "proxy-output")
-    {
-        Console.WriteLine("{\"type\":\"fixture.proxy_username\",\"username\":\"split-proxy-user\"}");
-        Console.Error.WriteLine("proxy diagnostic password: split-proxy-password");
-        Console.WriteLine($"{{\"type\":\"fixture.proxy_diagnostic\",\"message\":{JsonSerializer.Serialize($"proxy diagnostic URL: {proxy}")}}}");
-    }
-    if (mode == "timeout-with-child")
-    {
-        var child = Process.Start(new ProcessStartInfo(Environment.ProcessPath!)
-        {
-            UseShellExecute = false,
-            ArgumentList = { "--fake-codex-fixture", "child-sleeper" }
-        }) ?? throw new InvalidOperationException("fixture child process did not start");
-        Console.WriteLine($"{{\"type\":\"fixture.child\",\"process_id\":{child.Id}}}");
-        Console.Out.Flush();
-        Thread.Sleep(10_000);
-        return 0;
-    }
-    if (mode == "timeout") { Thread.Sleep(5_000); return 0; }
-    if (mode == "cancel")
-    {
-        var signalPath = Path.Combine(Environment.CurrentDirectory, "fake-codex-started.signal");
-        var temporarySignalPath = signalPath + ".tmp";
-        File.WriteAllText(temporarySignalPath, "started");
-        File.Move(temporarySignalPath, signalPath);
-        Thread.Sleep(5_000);
-        return 0;
-    }
-    if (mode == "kill-failure") { Thread.Sleep(500); return 0; }
-    if (prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal)) File.WriteAllText("example.txt", "fixture change\n");
-    if (mode == "executable-mode-change" && prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal) && !OperatingSystem.IsWindows())
-        File.SetUnixFileMode("example.txt", UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-    if (mode == "new-executable" && prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal) && !OperatingSystem.IsWindows())
-    {
-        File.WriteAllText("new-script.sh", "#!/bin/sh\necho fixture\n");
-        File.SetUnixFileMode("new-script.sh", UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-    }
-    if (mode == "untracked-binary" && prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal))
-        File.WriteAllBytes("fixture-cache.db", [0x43, 0x56, 0x45, 0x52, 0x53, 0x49, 0x4f, 0x4e, 0x53, 0x00, 0x01]);
-    if (prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal) && mode is "workflow" or "artifact-only")
-    {
-        Directory.CreateDirectory("artifacts");
-        File.WriteAllText(Path.Combine("artifacts", "review-notes.txt"), "fixture supplemental artifact");
-        Directory.CreateDirectory(Path.Combine("artifacts", "analysis"));
-        File.WriteAllText(Path.Combine("artifacts", "analysis", "proposal.json"), "{\"proposal\":true}");
-    }
-    Console.WriteLine($"{{\"type\":\"fixture.arguments\",\"arguments\":{JsonSerializer.Serialize(args)}}}");
-    Console.WriteLine($"{{\"type\":\"fixture.environment\",\"openai_key_present\":{(Environment.GetEnvironmentVariable("OPENAI_API_KEY") is null ? "false" : "true")},\"https_proxy_present\":{(Environment.GetEnvironmentVariable("HTTPS_PROXY") is null ? "false" : "true")}}}");
-    var environmentPaths = new Dictionary<string, string?>
-    {
-        ["CODEX_HOME"] = Environment.GetEnvironmentVariable("CODEX_HOME"),
-        ["HOME"] = Environment.GetEnvironmentVariable("HOME"),
-        ["USERPROFILE"] = Environment.GetEnvironmentVariable("USERPROFILE"),
-        ["APPDATA"] = Environment.GetEnvironmentVariable("APPDATA"),
-        ["LOCALAPPDATA"] = Environment.GetEnvironmentVariable("LOCALAPPDATA"),
-        ["TEMP"] = Environment.GetEnvironmentVariable("TEMP"),
-        ["TMP"] = Environment.GetEnvironmentVariable("TMP"),
-        ["TMPDIR"] = Environment.GetEnvironmentVariable("TMPDIR"),
-        ["SystemDrive"] = Environment.GetEnvironmentVariable("SystemDrive")
-    };
-    Console.WriteLine($"{{\"type\":\"fixture.environment_paths\",\"paths\":{JsonSerializer.Serialize(environmentPaths)}}}");
-    if (prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal))
-        Console.WriteLine($"{{\"type\":\"fixture.reviewer_input\",\"self_assessment_present\":{prompt.Contains("IMPLEMENTER-SELF-ASSESSMENT-SECRET", StringComparison.Ordinal).ToString().ToLowerInvariant()}}}");
-    if (mode == "malformed") Console.WriteLine("{not-json");
-    var threadId = prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal)
-        ? prompt.Contains("REVIEW_ATTEMPT: 1", StringComparison.Ordinal) ? "thread-fixture-reviewer-1" : "thread-fixture-reviewer-2"
-        : "thread-fixture-implementer";
-    Console.WriteLine($"{{\"type\":\"thread.started\",\"thread_id\":\"{threadId}\"}}");
-    Console.WriteLine("{\"type\":\"future.unknown\",\"extra\":true}");
-    if (mode != "empty" && !(mode == "artifact-only" && prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal)))
-    {
-        var message = mode == "proxy-output" && prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal)
-            ? "ãƒ¬ãƒ“ãƒ¥ãƒ¼åˆæ ¼: proxy credentials split-proxy-user / split-proxy-password"
-            : mode == "proxy-output" ? "proxy credentials split-proxy-user / split-proxy-password"
-            : mode == "workflow" && prompt.Contains("ROLE=REVIEWER", StringComparison.Ordinal)
-            ? prompt.Contains("REVIEW_ATTEMPT: 1", StringComparison.Ordinal) ? "æŒ‡æ‘˜: ãƒ†ã‚¹ãƒˆçµæœã‚’æ˜è¨˜ã—ã¦ãã ã•ã„ã€‚" : "ãƒ¬ãƒ“ãƒ¥ãƒ¼åˆæ ¼: æŒ‡æ‘˜ãªã—ã€‚fixture reviewed fixed artifact"
-            : (mode is "workflow" or "artifact-only") && prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal)
-                ? "IMPLEMENTER-SELF-ASSESSMENT-SECRET" : "fixture response";
-        var serializedMessage = JsonSerializer.Serialize(message);
-        Console.WriteLine($"{{\"type\":\"item.completed\",\"item\":{{\"type\":\"agent_message\",\"text\":{serializedMessage}}}}}");
-    }
-    Console.WriteLine("{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":12,\"output_tokens\":3}}");
-    return mode == "exit-mismatch" ? 7 : 0;
-}
-
-static void CodexNonPullRequestAllowsExecutableModeChange()
-{
-    if (OperatingSystem.IsWindows()) Assert.Skip("Unixã®å®Ÿè¡Œå±æ€§ã‚’ç¢ºèªã™ã‚‹ãƒ†ã‚¹ãƒˆã¯Windowsã§ã¯å®Ÿè¡Œã§ãã¾ã›ã‚“ã€‚");
-    var (runner, request, root) = CreateCodexFixture("executable-mode-change");
-    using (root)
-    {
-        var response = runner.Implement(request with
-        { Contract = request.Contract with { Reporting = request.Contract.Reporting with { PullRequestExpected = false } } });
-        Assert.True(response.Succeeded, response.ExecutionEvidence?.Error ?? "PRä¸è¦ã®runã§å®Ÿè¡Œbitå¤‰æ›´ã‚’è¨±å¯ã—ã¾ã›ã‚“ã§ã—ãŸã€‚");
-        Assert.True(response.WorkspaceSnapshotReference is null);
-    }
-}
-
-static void CodexPullRequestSnapshotPreservesNewExecutableMode()
-{
-    if (OperatingSystem.IsWindows()) Assert.Skip("Unix modeä»˜ããƒ•ã‚¡ã‚¤ãƒ«ã®snapshotæ¤œè¨¼ã¯Unix runnerã§å®Ÿè¡Œã—ã¾ã™ã€‚");
-    var (runner, request, root) = CreateCodexFixture("new-executable");
-    using (root)
-    {
-        var response = runner.Implement(request with
-        { Contract = request.Contract with { Reporting = request.Contract.Reporting with { PullRequestExpected = true } } });
-        Assert.True(response.Succeeded, response.ExecutionEvidence?.Error ?? "å®Ÿè¡Œãƒ•ã‚¡ã‚¤ãƒ«snapshotã‚’ä½œæˆã§ãã¾ã›ã‚“ã§ã—ãŸã€‚");
-        Assert.True(response.WorkspaceSnapshotReference is not null && response.WorkspaceSnapshotSha256 is not null);
-        var snapshotPath = Path.Combine(request.RunDirectory!, response.WorkspaceSnapshotReference!);
-        using var snapshot = JsonDocument.Parse(File.ReadAllBytes(snapshotPath));
-        var executable = snapshot.RootElement.GetProperty("Entries").EnumerateArray()
-            .Single(entry => entry.GetProperty("Path").GetString() == "new-script.sh");
-        Assert.Equal("100755", executable.GetProperty("Mode").GetString());
-    }
-}
-
-static int RunExternalProcessFixture(string[] args)
-{
-    var mode = args.Length > 1 ? args[1] : "success";
-    if (mode == "sleep") { Thread.Sleep(5_000); return 0; }
-    Console.WriteLine("C:\\Users\\Local User\\private-output.txt /home/local-user/private-output.txt");
-    Console.Error.WriteLine("C:\\Users\\Local User\\private-error.txt /home/local-user/private-error.txt");
-    return mode == "fail" ? 7 : 0;
-}
-
-static int RunLifecycleWriterFixture(string[] args)
-{
-    if (args.Length != 4 || !int.TryParse(args[3], out var count) || count < 1) return 2;
-    var writer = new JsonlLifecycleEventWriter(args[1]);
-    for (var index = 0; index < count; index++)
-    {
-        if (!writer.TryAppend(new LifecycleEvent
-        {
-            RunId = args[2],
-            TimestampUtc = DateTimeOffset.UtcNow,
-            Role = "Implementer",
-            EventType = "completed",
-            Status = "succeeded",
-            State = "Implementing",
-            RelatedId = $"attempt:{index + 1}",
-            Summary = "Fixture event."
-        })) return 3;
-    }
-    return 0;
-}
-
-static void CodexProxyCredentialsAreRedactedFromPersistedOutputs()
-{
-    const string username = "split-proxy-user";
-    const string password = "split-proxy-password";
-    var proxyVariables = new[] { "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "https_proxy", "http_proxy", "all_proxy" };
-    var originalValues = proxyVariables.ToDictionary(name => name, Environment.GetEnvironmentVariable, StringComparer.Ordinal);
-    try
-    {
-        foreach (var name in proxyVariables)
-        {
-            foreach (var proxyVariable in proxyVariables) Environment.SetEnvironmentVariable(proxyVariable, null);
-            var proxyUrl = $"http://{username}:{password}@{name.ToLowerInvariant()}.proxy.example.invalid:8080";
-            Environment.SetEnvironmentVariable(name, proxyUrl);
-            var (runner, request, root) = CreateCodexFixture("proxy-output");
-            using (root)
-            {
-                var eventPath = Path.Combine(request.RunDirectory!, "events.jsonl");
-                FakeWorkflowResult result;
-                using (var events = JsonlRunEventStore.CreateNew(eventPath, request.RunId))
-                    result = new FakeAgentWorkflow().Run(request.Contract, new string('d', 64), request.RunId,
-                        request.RunDirectory!, runner, events, codexOneShot: true);
-
-                Assert.Equal(RunState.NeedsHumanInput, result.State);
-                var persistedFiles = Directory.EnumerateFiles(request.RunDirectory!, "*", SearchOption.AllDirectories);
-                foreach (var file in persistedFiles)
-                {
-                    var contents = File.ReadAllText(file);
-                    Assert.False(contents.Contains(username, StringComparison.Ordinal), $"ãƒ¦ãƒ¼ã‚¶ãƒ¼åãŒè¨˜éŒ²ã«æ®‹ã£ã¦ã„ã¾ã™ ({name}): {Path.GetFileName(file)}");
-                    Assert.False(contents.Contains(password, StringComparison.Ordinal), $"ãƒ‘ã‚¹ãƒ¯ãƒ¼ãƒ‰ãŒè¨˜éŒ²ã«æ®‹ã£ã¦ã„ã¾ã™ ({name}): {Path.GetFileName(file)}");
-                    Assert.False(contents.Contains(proxyUrl, StringComparison.Ordinal), $"ãƒ—ãƒ­ã‚­ã‚·URLãŒè¨˜éŒ²ã«æ®‹ã£ã¦ã„ã¾ã™ ({name}): {Path.GetFileName(file)}");
-                }
-                var stdout = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "codex.stdout.jsonl"));
-                var stderr = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "codex.stderr.txt"));
-                Assert.True(stdout.Contains("[REDACTED_PROXY]", StringComparison.Ordinal));
-                Assert.True(stderr.Contains("[REDACTED_PROXY]", StringComparison.Ordinal));
-                var selfAssessmentPath = Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "self-assessment.md");
-                Assert.True(File.Exists(selfAssessmentPath), $"Implementerè‡ªå·±è©•ä¾¡ãŒä¿å­˜ã•ã‚Œã¦ã„ã¾ã›ã‚“ ({name}): {File.ReadAllText(Path.Combine(request.RunDirectory!, result.ReportReference))}");
-                var selfAssessment = File.ReadAllText(selfAssessmentPath);
-                Assert.True(selfAssessment.Contains("[REDACTED_PROXY]", StringComparison.Ordinal));
-                Assert.True(File.Exists(Path.Combine(request.RunDirectory!, result.ReportReference)));
-            }
-        }
-    }
-    finally
-    {
-        foreach (var (name, value) in originalValues) Environment.SetEnvironmentVariable(name, value);
-    }
-}
-
-static void CodexProcessCapturesJsonlAndSeparatesStreams()
-{
-    var (runner, request, root) = CreateCodexFixture("success");
-    using (root)
-    {
-        var response = runner.Implement(request);
-        Assert.True(response.Succeeded, response.ExecutionEvidence?.Error ?? "æ­£å¸¸terminal eventã¨çµ‚äº†ã‚³ãƒ¼ãƒ‰0ã‚’æˆåŠŸæ‰±ã„ã—ã¾ã›ã‚“ã§ã—ãŸã€‚");
-        Assert.True(response.Content.Contains("fixture change", StringComparison.Ordinal), "Gitä½œæ¥­é ˜åŸŸã®å®Ÿå·®åˆ†ãŒå›ºå®šæˆæœç‰©ã«å«ã¾ã‚Œã¦ã„ã¾ã›ã‚“ã€‚");
-        Assert.False(response.Content.Contains("fixture response", StringComparison.Ordinal), "Implementerã®è‡ªå·±ç”³å‘ŠãŒReviewerå‘ã‘å›ºå®šæˆæœç‰©ã¸æ··å…¥ã—ã¾ã—ãŸã€‚");
-        Assert.Equal("fixture response", response.SelfAssessment);
-        Assert.Equal("thread-fixture-implementer", response.ExecutionEvidence!.ThreadId);
-        Assert.Equal("turn.completed", response.ExecutionEvidence.TerminalEvent);
-        Assert.True(response.ExecutionEvidence.UsageJson!.Contains("input_tokens", StringComparison.Ordinal));
-        var rawEvents = File.ReadAllText(Path.Combine(request.RunDirectory!, response.ExecutionEvidence.StandardOutputReference!));
-        Assert.True(rawEvents.Contains("future.unknown", StringComparison.Ordinal));
-        Assert.True(rawEvents.Contains("never", StringComparison.Ordinal), "éå¯¾è©±ãƒ—ãƒ­ã‚»ã‚¹ã®approval policyå¼•æ•°ãŒã‚ã‚Šã¾ã›ã‚“ã€‚");
-        Assert.False(rawEvents.Contains("--ephemeral", StringComparison.Ordinal));
-        Assert.True(File.ReadAllText(Path.Combine(request.RunDirectory!, response.ExecutionEvidence.StandardErrorReference!)).Contains("fixture warning", StringComparison.Ordinal));
-        Assert.True(response.ExecutionEvidence.CliVersion is null, "PoCã§å–å¾—ã—ã¦ã„ãªã„CLIç‰ˆãŒå€¤ã‚’æŒã£ã¦ã„ã¾ã™ã€‚");
-        Assert.False(Directory.EnumerateFiles(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1"), "*version*", SearchOption.AllDirectories).Any(),
-            "ä½™åˆ†ãªCLIç‰ˆç¢ºèªãƒ—ãƒ­ã‚»ã‚¹ã®è¨¼è·¡ãŒä½œã‚‰ã‚Œã¦ã„ã¾ã™ã€‚");
-        Assert.False(rawEvents.Contains("--version", StringComparison.Ordinal), "codex --version ãŒèµ·å‹•å¼•æ•°ã«å«ã¾ã‚Œã¦ã„ã¾ã™ã€‚");
-        Assert.True(response.ExecutionEvidence.ProcessId > 0);
-        Assert.True(response.ExecutionEvidence.ProcessExitObserved == true && response.ExecutionEvidence.StreamsClosed == true);
-    }
-}
-
-static void CodexPromptIsPassedAsUtf8()
-{
-    var (runner, request, root) = CreateCodexFixture("success");
-    using (root)
-    {
-        var response = runner.Implement(request);
-        Assert.True(response.Succeeded, response.ExecutionEvidence?.Error ?? "Fake Codex runãŒæˆåŠŸã—ã¾ã›ã‚“ã§ã—ãŸã€‚");
-        var output = File.ReadAllText(Path.Combine(request.RunDirectory!, response.ExecutionEvidence!.StandardOutputReference!));
-        Assert.True(output.Contains("\"os_boundary_disclaimed\":true", StringComparison.Ordinal),
-            "Codexå­ãƒ—ãƒ­ã‚»ã‚¹ãŒæ—¥æœ¬èªã‚’å«ã‚€ãƒ—ãƒ­ãƒ³ãƒ—ãƒˆã‚’UTF-8ã¨ã—ã¦å—ã‘å–ã‚Œã¾ã›ã‚“ã§ã—ãŸã€‚");
-        Assert.True(output.Contains("\"utf8_bom_present\":false", StringComparison.Ordinal),
-            "Codexå­ãƒ—ãƒ­ã‚»ã‚¹ã®æ¨™æº–å…¥åŠ›ã«UTF-8 BOMãŒå«ã¾ã‚Œã¦ã„ã¾ã—ãŸã€‚");
-    }
-}
-
-static void CodexNpmShimsReceiveUtf8Prompt()
-{
-    foreach (var extension in new[] { ".cmd", ".ps1" })
-    {
-        var (_, request, root) = CreateCodexFixture("success");
-        using (root)
-        {
-            var executable = Environment.ProcessPath!;
-            var implementerHome = Path.Combine(root.Path, "implementer-profile");
-            var reviewerHome = Path.Combine(root.Path, "reviewer-profile");
-            var shimPath = Path.Combine(root.Path, $"codex{extension}");
-            var shim = extension == ".cmd"
-                ? $"@echo off\r\n\"{executable}\" --fake-codex-fixture success %*\r\n"
-                : $"& '{executable.Replace("'", "''", StringComparison.Ordinal)}' --fake-codex-fixture success @args\r\n";
-            File.WriteAllText(shimPath, shim, new UTF8Encoding(false));
-            var options = new CodexCliRunnerOptions(shimPath, implementerHome, reviewerHome);
-            var response = new CodexCliAgentRunner(options).Implement(request);
-            Assert.True(response.Succeeded, $"{extension} shim: {response.ExecutionEvidence?.Error ?? "run failed"}");
-            var output = File.ReadAllText(Path.Combine(request.RunDirectory!, response.ExecutionEvidence!.StandardOutputReference!));
-            Assert.True(output.Contains("\"os_boundary_disclaimed\":true", StringComparison.Ordinal),
-                $"{extension} shimã§æ—¥æœ¬èªãƒ—ãƒ­ãƒ³ãƒ—ãƒˆãŒUTF-8ã¨ã—ã¦å­ãƒ—ãƒ­ã‚»ã‚¹ã¸å±Šãã¾ã›ã‚“ã§ã—ãŸã€‚");
-            Assert.True(output.Contains("\"utf8_bom_present\":false", StringComparison.Ordinal),
-                $"{extension} shimã§UTF-8 BOMãŒæ¤œå‡ºã•ã‚Œã¾ã—ãŸã€‚");
-        }
-    }
-}
-
-static void CodexVersionProbeKillFailureIsRecorded()
-{
-    var killCalls = 0;
-    var (runner, request, root) = CreateCodexFixture("success", killOverride: _ =>
-    { killCalls++; throw new InvalidOperationException("unexpected kill invocation"); });
-    using (root)
-    {
-        var response = runner.Implement(request);
-        Assert.True(response.Succeeded, response.ExecutionEvidence?.Error ?? "Fake Agent runãŒæˆåŠŸã—ã¾ã›ã‚“ã§ã—ãŸã€‚");
-        Assert.Equal(0, killCalls, "é€šå¸¸çµ‚äº†æ™‚ã«åœæ­¢å‡¦ç†ãŒå‘¼ã³å‡ºã•ã‚Œã¾ã—ãŸã€‚");
-        Assert.True(response.ExecutionEvidence!.CliVersion is null);
-        Assert.False(Directory.EnumerateFiles(Path.Combine(request.RunDirectory!, "exchanges"), "*version*", SearchOption.AllDirectories).Any());
-    }
-}
-
-static void CodexVersionProbeStartFailureStopsBeforeExecution()
-{
-    using var root = new TemporaryDirectory();
-    var implementer = Path.Combine(root.Path, "implementer-profile");
-    var reviewer = Path.Combine(root.Path, "reviewer-profile");
-    foreach (var home in new[] { implementer, reviewer })
-        Directory.CreateDirectory(home);
-    var invalidExecutable = Path.Combine(root.Path, "not-an-executable.exe");
-    File.WriteAllText(invalidExecutable, "fixture only");
-    var workspace = Path.Combine(Environment.CurrentDirectory, ".test-workspaces", Guid.NewGuid().ToString("N"));
-    root.AdditionalPath = workspace;
-    var runDirectory = Path.Combine(root.Path, "run");
-    Directory.CreateDirectory(workspace);
-    Directory.CreateDirectory(runDirectory);
-    File.WriteAllText(Path.Combine(workspace, "example.txt"), "baseline\n");
-    RunGitFixture(workspace, "init", "-q");
-    RunGitFixture(workspace, "add", "example.txt");
-    RunGitFixture(workspace, "-c", "user.name=Orchestrator Test", "-c", "user.email=orchestrator-test@example.invalid", "commit", "-qm", "baseline");
-    var options = new CodexCliRunnerOptions(invalidExecutable, implementer, reviewer);
-    var request = new AgentRequest("fixture-run", "Implementer", SampleContract() with { WorkingDirectory = workspace }, 1,
-        RunDirectory: runDirectory, RemainingTime: TimeSpan.FromSeconds(5));
-
-    var response = new CodexCliAgentRunner(options).Implement(request);
-    Assert.False(response.Succeeded);
-    Assert.True(response.ExecutionEvidence!.ProcessId is null,
-        "èµ·å‹•ã«å¤±æ•—ã—ãŸCLIã®process IDãŒè¨˜éŒ²ã•ã‚Œã¾ã—ãŸã€‚");
-    Assert.True(response.ExecutionEvidence.Error is not null,
-        "Fake CLIå®Ÿè¡Œãƒ•ã‚¡ã‚¤ãƒ«ã®èµ·å‹•ã‚¨ãƒ©ãƒ¼ãŒè¨˜éŒ²ã•ã‚Œã¦ã„ã¾ã›ã‚“ã€‚");
-    Assert.True(response.ExecutionEvidence.CliVersion is null);
-}
-
-static void CodexTerminalAndExitCodeMustAgree()
-{
-    var (runner, request, root) = CreateCodexFixture("exit-mismatch");
-    using (root)
-    {
-        var response = runner.Implement(request);
-        Assert.False(response.Succeeded);
-        Assert.Equal(7, response.ExecutionEvidence!.ExitCode);
-        Assert.Equal("turn.completed", response.ExecutionEvidence.TerminalEvent);
-        Assert.True(response.ExecutionEvidence.Error!.Contains("çµ‚äº†ã‚³ãƒ¼ãƒ‰ 7", StringComparison.Ordinal),
-            "éã‚¼ãƒ­çµ‚äº†ã‚³ãƒ¼ãƒ‰ãŒè¨ºæ–­æƒ…å ±ã«ã‚ã‚Šã¾ã›ã‚“ã€‚");
-        Assert.True(response.ExecutionEvidence.Error.Contains("terminal=turn.completed", StringComparison.Ordinal),
-            "çµ‚ç«¯ã‚¤ãƒ™ãƒ³ãƒˆãŒè¨ºæ–­æƒ…å ±ã«ã‚ã‚Šã¾ã›ã‚“ã€‚");
-        Assert.False(response.ExecutionEvidence.Error.Contains("fixture warning", StringComparison.Ordinal),
-            "stderræœ¬æ–‡ãŒä¸Šä½ã®ã‚¨ãƒ©ãƒ¼è¨ºæ–­ã¸è¤‡è£½ã•ã‚Œã¦ã„ã¾ã™ã€‚");
-        var stderrPath = Path.Combine(request.RunDirectory!, response.ExecutionEvidence.StandardErrorReference!);
-        Assert.True(File.ReadAllText(stderrPath).Contains("fixture warning", StringComparison.Ordinal),
-            "è©³ç´°ãªstderrãŒå°‚ç”¨è¨¼è·¡ãƒ•ã‚¡ã‚¤ãƒ«ã«ä¿å­˜ã•ã‚Œã¦ã„ã¾ã›ã‚“ã€‚");
-    }
-}
-
-static void CodexMalformedAndEmptyResponsesFail()
-{
-    foreach (var scenario in new[] { "malformed", "empty" })
-    {
-        var (runner, request, root) = CreateCodexFixture(scenario);
-        using (root)
-        {
-            var response = runner.Implement(request);
-            Assert.False(response.Succeeded, $"{scenario} ãŒæˆåŠŸæ‰±ã„ã•ã‚Œã¾ã—ãŸã€‚");
-            Assert.True(File.Exists(Path.Combine(request.RunDirectory!, response.ExecutionEvidence!.StandardOutputReference!)));
-            if (scenario == "empty")
-            {
-                var artifactPath = Path.Combine(request.RunDirectory!, "fixture-artifact.md");
-                File.WriteAllText(artifactPath, "fixed reviewer input");
-                var artifactSha256 = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(artifactPath)));
-                var reviewerResponse = runner.Review(request with
-                    { Role = "Reviewer", ArtifactReference = "fixture-artifact.md", ArtifactSha256 = artifactSha256 });
-                Assert.False(reviewerResponse.Succeeded, "æœ¬æ–‡ãƒ»æˆæœç‰©ã¨ã‚‚ã«ç©ºã®Reviewerã‚’æˆåŠŸæ‰±ã„ã—ã¾ã—ãŸã€‚");
-                Assert.True(reviewerResponse.ExecutionEvidence!.Error!.Contains("æœ¬æ–‡ã‚‚ä»»æ„æˆæœç‰©ã‚‚è¿”ã—ã¾ã›ã‚“ã§ã—ãŸ", StringComparison.Ordinal));
-            }
-        }
-    }
-}
-
-static void ReviewerRejectsChangedFixedArtifact()
-{
-    var (runner, request, root) = CreateCodexFixture("success");
-    using (root)
-    {
-        var artifactPath = Path.Combine(request.RunDirectory!, "fixture-artifact.md");
-        File.WriteAllText(artifactPath, "fixed reviewer input");
-        var expectedHash = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(artifactPath)));
-        File.WriteAllText(artifactPath, "changed after the fixed hash was captured");
-
-        var exception = Assert.Throws<InvalidOperationException>(() => runner.Review(request with
-        {
-            Role = "Reviewer",
-            ArtifactReference = "fixture-artifact.md",
-            ArtifactSha256 = expectedHash
-        }));
-
-        Assert.True(exception.Message.Contains("SHA-256ãŒä¸€è‡´ã—ã¾ã›ã‚“", StringComparison.Ordinal));
-        Assert.False(Directory.Exists(Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "workspace")),
-            "å›ºå®šæˆæœç‰©ã®æ¤œè¨¼å‰ã«Reviewerä½œæ¥­é ˜åŸŸã‚’ä½œæˆã—ã¾ã—ãŸã€‚");
-        Assert.False(File.Exists(Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "codex.stdout.jsonl")),
-            "å›ºå®šæˆæœç‰©ã®SHA-256ä¸ä¸€è‡´å¾Œã«Codexã‚’èµ·å‹•ã—ã¾ã—ãŸã€‚");
-    }
-}
-
-static void CodexTimeoutKillIsReportedSeparately()
-{
-    var (runner, request, root) = CreateCodexFixture("timeout", TimeSpan.FromMilliseconds(100));
-    using (root)
-    {
-        var response = runner.Implement(request);
-        Assert.False(response.Succeeded);
-        Assert.True(response.TimedOut);
-        Assert.True(response.ExecutionEvidence!.KillAttempted);
-        Assert.True(response.ExecutionEvidence.ProcessExitObserved == true);
-        Assert.True(response.ExecutionEvidence.StreamsClosed == true);
-    }
-}
-
-static void CodexTimeoutStopsFakeChildProcess()
-{
-    var (runner, request, root) = CreateCodexFixture("timeout-with-child", TimeSpan.FromMilliseconds(200),
-        beforeTimeoutForTesting: path =>
-        {
-            var started = SpinWait.SpinUntil(() => File.Exists(path) &&
-                ReadSharedLines(path).Any(line => line.Contains("fixture.child", StringComparison.Ordinal)), TimeSpan.FromSeconds(15));
-            if (!started) throw new InvalidOperationException("Fake child processã®èµ·å‹•è¨¼è·¡ãŒtimeouté–‹å§‹å‰ã«å±Šãã¾ã›ã‚“ã§ã—ãŸã€‚");
-        });
-    using (root)
-    {
-        var response = runner.Implement(request);
-        Assert.False(response.Succeeded, "Fakeè¦ªãƒ—ãƒ­ã‚»ã‚¹ã®å­èµ·å‹•å‰timeoutã‚’æˆåŠŸæ‰±ã„ã—ã¾ã—ãŸã€‚");
-        Assert.True(response.ExecutionEvidence!.TimedOut,
-            $"Fake childèµ·å‹•å¾Œã«timeoutã¨ã—ã¦è¨˜éŒ²ã•ã‚Œã¾ã›ã‚“ã§ã—ãŸ: terminal={response.ExecutionEvidence.TerminalEvent}, exit={response.ExecutionEvidence.ExitCode}, error={response.ExecutionEvidence.Error}, stop={response.ExecutionEvidence.StopReason}");
-        Assert.True(response.ExecutionEvidence.KillAttempted, "timeoutå¾Œã®åœæ­¢è¦æ±‚ãŒè¨˜éŒ²ã•ã‚Œã¾ã›ã‚“ã§ã—ãŸã€‚");
-        Assert.True(response.ExecutionEvidence.ProcessExitObserved == true, "timeoutå¾Œã«è¦ªãƒ—ãƒ­ã‚»ã‚¹ã®çµ‚äº†ãŒç¢ºèªã•ã‚Œã¾ã›ã‚“ã§ã—ãŸã€‚");
-        var stdoutPath = Path.Combine(request.RunDirectory!, response.ExecutionEvidence.StandardOutputReference!);
-        var childLine = File.ReadLines(stdoutPath).FirstOrDefault(line => line.Contains("fixture.child", StringComparison.Ordinal));
-        Assert.True(childLine is not null, "Fake child processã®PIDè¨¼è·¡ãŒã‚ã‚Šã¾ã›ã‚“ã€‚");
-        using var childEvent = JsonDocument.Parse(childLine!);
-        var childId = childEvent.RootElement.GetProperty("process_id").GetInt32();
-        var exited = SpinWait.SpinUntil(() =>
-        {
-            try { using var child = Process.GetProcessById(childId); return child.HasExited; }
-            catch (ArgumentException) { return true; }
-            catch (InvalidOperationException) { return true; }
-        }, TimeSpan.FromSeconds(5));
-        Assert.True(exited, $"timeoutå¾Œã‚‚Fake child process {childId}ã®çµ‚äº†ã‚’ç¢ºèªã§ãã¾ã›ã‚“ã§ã—ãŸã€‚");
-    }
-}
-
-static string[] ReadSharedLines(string path)
-{
-    using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-    using var reader = new StreamReader(stream, Encoding.UTF8);
-    return reader.ReadToEnd().Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries);
-}
-
-static void CodexKillFailureIsNotReportedAsSuccess()
-{
-    var (runner, request, root) = CreateCodexFixture("kill-failure", TimeSpan.FromMilliseconds(50),
-        _ => throw new InvalidOperationException("fixture kill failure"));
-    using (root)
-    {
-        var response = runner.Implement(request);
-        Assert.False(response.Succeeded);
-        Assert.True(response.ExecutionEvidence!.KillAttempted);
-        Assert.True(response.ExecutionEvidence.Error!.Contains("fixture kill failure", StringComparison.Ordinal));
-        Assert.True(response.ExecutionEvidence.ProcessExitObserved == true);
-    }
-}
-
-static void CodexCancellationIsDistinctFromTimeout()
-{
-    using var cancellation = new CancellationTokenSource();
-    var (runner, request, root) = CreateCodexFixture("cancel", cancellationToken: cancellation.Token);
-    using (root)
-    {
-        var task = Task.Run(() => runner.Implement(request));
-        WaitForFakeCodexStart(request);
-        cancellation.Cancel();
-        var response = task.GetAwaiter().GetResult();
-        Assert.False(response.Succeeded);
-        Assert.True(response.StopRequested);
-        Assert.False(response.TimedOut);
-        Assert.Equal("caller-cancellation", response.ExecutionEvidence!.StopReason);
-        Assert.True(response.ExecutionEvidence.KillAttempted);
-        Assert.True(response.ExecutionEvidence.ProcessExitObserved == true);
-        Assert.True(response.ExecutionEvidence.StreamsClosed == true);
-    }
-}
-
-static void WorkflowCancellationStopsFakeCodexProcess()
-{
-    using var cancellation = new CancellationTokenSource();
-    var (runner, request, root) = CreateCodexFixture("cancel");
-    using (root)
-    {
-        var eventPath = Path.Combine(request.RunDirectory!, "events.jsonl");
-        FakeWorkflowResult result;
-        using var events = JsonlRunEventStore.CreateNew(eventPath, request.RunId);
-        var workflow = Task.Run(() => new FakeAgentWorkflow().Run(request.Contract, new string('d', 64), request.RunId,
-            request.RunDirectory!, runner, events, stopToken: cancellation.Token, codexOneShot: true));
-
-        WaitForFakeCodexStart(request);
-        cancellation.Cancel();
-        result = workflow.GetAwaiter().GetResult();
-
-        Assert.Equal(RunState.NeedsHumanInput, result.State);
-        Assert.Equal(1, result.ImplementationCalls);
-        Assert.Equal(0, result.ReviewCalls);
-        var evidencePath = Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "execution-evidence.json");
-        var evidence = JsonSerializer.Deserialize<AgentExecutionEvidence>(File.ReadAllText(evidencePath));
-        Assert.True(evidence is not null, "ä¿å­˜æ¸ˆã¿å®Ÿè¡Œè¨¼è·¡ã‚’AgentExecutionEvidenceã¨ã—ã¦èª­ã¿å–ã‚Œã¾ã›ã‚“ã§ã—ãŸã€‚");
-        Assert.True(evidence!.StopRequested);
-        Assert.False(evidence.TimedOut);
-        Assert.Equal("caller-cancellation", evidence.StopReason);
-        Assert.True(evidence.KillAttempted);
-        Assert.True(evidence.ProcessExitObserved == true);
-        Assert.True(evidence.StreamsClosed == true);
-    }
-}
-
-static void WaitForFakeCodexStart(AgentRequest request)
-{
-    var signalPath = Path.Combine(request.Contract.WorkingDirectory, "fake-codex-started.signal");
-    var started = SpinWait.SpinUntil(() =>
-    {
-        try { return File.ReadAllText(signalPath) == "started"; }
-        catch (IOException) { return false; }
-        catch (UnauthorizedAccessException) { return false; }
-    }, TimeSpan.FromSeconds(15));
-    Assert.True(started, "Fake Codexå­ãƒ—ãƒ­ã‚»ã‚¹ã®é–‹å§‹ã‚·ã‚°ãƒŠãƒ«ã‚’15ç§’ä»¥å†…ã«ç¢ºèªã§ãã¾ã›ã‚“ã§ã—ãŸã€‚");
-}
-
-static void CodexChildEnvironmentFiltersSecrets()
-{
-    var original = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
-    var originalProxy = Environment.GetEnvironmentVariable("HTTPS_PROXY");
-    Environment.SetEnvironmentVariable("OPENAI_API_KEY", "fixture-secret-do-not-forward");
-    Environment.SetEnvironmentVariable("HTTPS_PROXY", "http://fixture-proxy.invalid:8080");
-    var (runner, request, root) = CreateCodexFixture("success");
-    try
-    {
-        using (root)
-        {
-            var response = runner.Implement(request);
-            Assert.True(response.Succeeded);
-            var rawEvents = File.ReadAllText(Path.Combine(request.RunDirectory!, response.ExecutionEvidence!.StandardOutputReference!));
-            Assert.True(rawEvents.Contains("\"openai_key_present\":false", StringComparison.Ordinal), "è¦ªç’°å¢ƒã®API keyãŒFake childã¸ç¶™æ‰¿ã•ã‚Œã¾ã—ãŸã€‚");
-            Assert.True(rawEvents.Contains("\"https_proxy_present\":true", StringComparison.Ordinal), "è¦ªç’°å¢ƒã®HTTPS proxyè¨­å®šãŒFake childã¸ç¶™æ‰¿ã•ã‚Œã¾ã›ã‚“ã§ã—ãŸã€‚");
-        }
-    }
-    finally
-    {
-        Environment.SetEnvironmentVariable("OPENAI_API_KEY", original);
-        Environment.SetEnvironmentVariable("HTTPS_PROXY", originalProxy);
-    }
-}
-
-static void CodexChildInheritsSystemDrive()
-{
-    var original = Environment.GetEnvironmentVariable("SystemDrive");
-    var expected = original;
-    if (!OperatingSystem.IsWindows())
-    {
-        expected = "fixture-system-drive";
-        Environment.SetEnvironmentVariable("SystemDrive", expected);
-    }
-
-    try
-    {
-        if (OperatingSystem.IsWindows())
-            Assert.True(!string.IsNullOrWhiteSpace(expected), "Windowsè¦ªãƒ—ãƒ­ã‚»ã‚¹ã«SystemDriveãŒè¨­å®šã•ã‚Œã¦ã„ã¾ã›ã‚“ã€‚");
-        var (runner, request, root) = CreateCodexFixture("success");
-        using (root)
-        {
-            var response = runner.Implement(request);
-            Assert.True(response.Succeeded, "SystemDriveä»˜ãã®Fake Codexå®Ÿè¡ŒãŒå¤±æ•—ã—ã¾ã—ãŸã€‚");
-            var paths = ReadFakeEnvironmentPaths(Path.Combine(request.RunDirectory!, response.ExecutionEvidence!.StandardOutputReference!));
-            Assert.Equal(expected, paths["SystemDrive"], "è¦ªã®SystemDriveãŒCodexå­ãƒ—ãƒ­ã‚»ã‚¹ã¸å¼•ãç¶™ãŒã‚Œã¾ã›ã‚“ã§ã—ãŸã€‚");
-        }
-    }
-    finally { Environment.SetEnvironmentVariable("SystemDrive", original); }
-}
-
-static void CodexRejectsUntrackedBinaryChanges()
-{
-    var (runner, request, root) = CreateCodexFixture("untracked-binary");
-    using (root)
-    {
-        var response = runner.Implement(request);
-        Assert.False(response.Succeeded, "æœªè¿½è·¡ãƒã‚¤ãƒŠãƒªãŒãƒ¬ãƒ“ãƒ¥ãƒ¼ç”¨å·®åˆ†ã¨ã—ã¦å—ç†ã•ã‚Œã¾ã—ãŸã€‚");
-        Assert.True(response.ExecutionEvidence!.Error?.Contains("æœªè¿½è·¡ãƒ•ã‚¡ã‚¤ãƒ«ã¯ãƒ†ã‚­ã‚¹ãƒˆå·®åˆ†ã¨ã—ã¦å®‰å…¨ã«ãƒ¬ãƒ“ãƒ¥ãƒ¼ã§ãã¾ã›ã‚“", StringComparison.Ordinal) == true,
-            "æœªè¿½è·¡ãƒã‚¤ãƒŠãƒªã®å®‰å…¨æ‹’å¦ç†ç”±ãŒè¨˜éŒ²ã•ã‚Œã¾ã›ã‚“ã§ã—ãŸã€‚");
-        Assert.True(File.Exists(Path.Combine(request.Contract.WorkingDirectory, "fixture-cache.db")),
-            "æ‹’å¦ã—ãŸæœªè¿½è·¡ãƒã‚¤ãƒŠãƒªã®è¨¼æ‹ ãƒ•ã‚¡ã‚¤ãƒ«ãŒã‚ã‚Šã¾ã›ã‚“ã€‚");
-    }
-}
-
-static void CodexExistingProfilesAreAccepted()
-{
-    using var root = new TemporaryDirectory();
-    var existingHome = Path.Combine(root.Path, "existing-codex-home");
-    Directory.CreateDirectory(existingHome);
-    File.WriteAllText(Path.Combine(existingHome, "auth.json"), "fixture credentials are not used by this test");
-
-    var options = new CodexCliRunnerOptions(Environment.ProcessPath!, existingHome, existingHome,
-        ["--fake-codex-fixture", "success"]).Validate();
-    Assert.True(options is not null, "æ—¢å­˜ã®CODEX_HOMEã‚’ä½¿ç”¨ã§ãã¾ã›ã‚“ã§ã—ãŸã€‚");
-
-    var original = Environment.GetEnvironmentVariable("CODEX_HOME");
-    try
-    {
-        Environment.SetEnvironmentVariable("CODEX_HOME", existingHome);
-        Assert.Equal(Path.GetFullPath(existingHome), CodexCliRunnerOptions.ResolveCodexHome(null));
-    }
-    finally { Environment.SetEnvironmentVariable("CODEX_HOME", original); }
-}
-
-static void CodexFakeParsesScopeBeforeRevisionFinding()
-{
-    var (runner, request, root) = CreateCodexFixture("success");
-    using (root)
-    {
-        var response = runner.Implement(request with { ReviewFinding = "ä¿®æ­£å¾Œã®å¿œç­”ã«å¿…è¦ãªãƒ†ã‚¹ãƒˆçµæœãŒä¸è¶³ã—ã¦ã„ã¾ã™ã€‚" });
-        Assert.True(response.Succeeded, "ãƒ¬ãƒ“ãƒ¥ãƒ¼æŒ‡æ‘˜ä»˜ãã®å†å®Ÿè£…ãƒ—ãƒ­ãƒ³ãƒ—ãƒˆã‚’Fake CodexãŒå‡¦ç†ã§ãã¾ã›ã‚“ã§ã—ãŸã€‚");
-        var stdout = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "codex.stdout.jsonl"));
-        AssertCodexFixturePolicy(stdout, "workspace-write", "Implementer", ["src"], ["bin"]);
-    }
-}
-
-static void CodexFakeProcessesCompleteIndependentReviewSlice()
-{
-    var (runner, request, root) = CreateCodexFixture("artifact-only");
-    using (root)
-    {
-        var eventPath = Path.Combine(request.RunDirectory!, "events.jsonl");
-        FakeWorkflowResult result;
-        using (var events = JsonlRunEventStore.CreateNew(eventPath, request.RunId))
-            result = new FakeAgentWorkflow().Run(request.Contract, new string('d', 64), request.RunId,
-                request.RunDirectory!, runner, events, codexOneShot: true);
-        Assert.Equal(RunState.NeedsHumanInput, result.State, "ãƒ¬ãƒ“ãƒ¥ãƒ¼åˆæ ¼ã®ã¿ã§PRç¢ºèªå¾…ã¡ã«é€²ã¿ã¾ã—ãŸã€‚");
-        Assert.Equal(0, result.RevisionAttempts);
-        Assert.Equal(1, result.ImplementationCalls);
-        Assert.Equal(1, result.ReviewCalls);
-        var firstReviewRequest = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "request.json"));
-        Assert.True(firstReviewRequest.Contains(result.ArtifactSha256!, StringComparison.Ordinal), "ãƒ¬ãƒ“ãƒ¥ãƒ¼è¦æ±‚ã«å›ºå®šæˆæœç‰©ãƒãƒƒã‚·ãƒ¥ãŒã‚ã‚Šã¾ã›ã‚“ã€‚");
-        Assert.False(firstReviewRequest.Contains("è‡ªå·±è©•ä¾¡", StringComparison.Ordinal));
-        var firstReviewEvidence = JsonDocument.Parse(File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "execution-evidence.json")));
-        Assert.Equal("thread-fixture-reviewer-1", firstReviewEvidence.RootElement.GetProperty("ThreadId").GetString());
-        Assert.Equal(result.ArtifactSha256, firstReviewEvidence.RootElement.GetProperty("ArtifactSha256").GetString());
-        var report = File.ReadAllText(Path.Combine(request.RunDirectory!, result.ReportReference));
-        Assert.True(report.Contains("thread-fixture-implementer", StringComparison.Ordinal), "ãƒ¬ãƒãƒ¼ãƒˆã«Implementerå®Ÿè¡Œè­˜åˆ¥å­ãŒã‚ã‚Šã¾ã›ã‚“ã€‚");
-        Assert.True(report.Contains("thread-fixture-reviewer-1", StringComparison.Ordinal), "ãƒ¬ãƒãƒ¼ãƒˆã«Reviewerå®Ÿè¡Œè­˜åˆ¥å­ãŒã‚ã‚Šã¾ã›ã‚“ã€‚");
-        Assert.False(report.Contains("thread-fixture-reviewer-2", StringComparison.Ordinal), "ReviewerãŒäºŒå›èµ·å‹•ã—ã¦ã„ã¾ã™ã€‚");
-        Assert.True(report.Contains("CLI=æœªå–å¾—", StringComparison.Ordinal), "ãƒ¬ãƒãƒ¼ãƒˆã«CLIç‰ˆã®æœªå–å¾—çŠ¶æ…‹ãŒã‚ã‚Šã¾ã›ã‚“ã€‚");
-        Assert.True(report.Contains("å®Ÿè²»ãƒ»è«‹æ±‚é¡ãƒ»ç¡¬ã„äºˆç®—ä¸Šé™: æœªå–å¾—", StringComparison.Ordinal), "ãƒ¬ãƒãƒ¼ãƒˆã«è²»ç”¨æƒ…å ±ã®æœªå–å¾—çŠ¶æ…‹ãŒã‚ã‚Šã¾ã›ã‚“ã€‚");
-        Assert.True(File.Exists(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "self-assessment.md")), "Implementerã®è‡ªå·±è©•ä¾¡è¨˜éŒ²ãŒã‚ã‚Šã¾ã›ã‚“ã€‚");
-        Assert.True(File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "self-assessment.md"))
-            .Contains("IMPLEMENTER-SELF-ASSESSMENT-SECRET", StringComparison.Ordinal));
-        var implementerStdout = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "codex.stdout.jsonl"));
-        Assert.False(implementerStdout.Contains("--version", StringComparison.Ordinal), "Codexç‰ˆç¢ºèªãƒ—ãƒ­ã‚»ã‚¹ãŒèµ·å‹•ã—ã¦ã„ã¾ã™ã€‚");
-        AssertCodexFixturePolicy(implementerStdout, "workspace-write", "Implementer", ["src"], ["bin"]);
-        var firstReviewStdoutPath = Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "codex.stdout.jsonl");
-        var firstReviewStdout = File.ReadAllText(firstReviewStdoutPath);
-        Assert.True(firstReviewStdout.Contains("\"self_assessment_present\":false", StringComparison.Ordinal),
-            "Reviewerãƒ—ãƒ­ãƒ³ãƒ—ãƒˆã«Implementerã®è‡ªå·±è©•ä¾¡ãŒæ··å…¥ã—ã¾ã—ãŸã€‚");
-        AssertCodexFixturePolicy(firstReviewStdout, "workspace-write", "Reviewer", ["src"], ["bin"]);
-        var reviewerArtifact = Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "workspace", "artifacts", "review-notes.txt");
-        Assert.True(File.Exists(reviewerArtifact), "ReviewerãŒç”Ÿæˆã—ãŸä»»æ„æˆæœç‰©ãŒä¿æŒã•ã‚Œã¦ã„ã¾ã›ã‚“ã€‚");
-        Assert.Equal("fixture supplemental artifact", File.ReadAllText(reviewerArtifact));
-        var nestedReviewerArtifact = Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "workspace", "artifacts", "analysis", "proposal.json");
-        Assert.Equal("{\"proposal\":true}", File.ReadAllText(nestedReviewerArtifact));
-        Assert.False(Path.GetFullPath(reviewerArtifact).StartsWith(
-            Path.GetFullPath(request.Contract.WorkingDirectory) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase),
-            "Revieweræˆæœç‰©å‡ºåŠ›å…ˆãŒãƒ¬ãƒ“ãƒ¥ãƒ¼å¯¾è±¡ã®ä½œæ¥­é ˜åŸŸå†…ã«ã‚ã‚Šã¾ã™ã€‚");
-        var reviewExecutionEvidence = JsonDocument.Parse(File.ReadAllText(
-            Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "execution-evidence.json")));
-        var reviewerWorkspace = Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "workspace");
-        var reviewerWorkingDirectory = reviewExecutionEvidence.RootElement.GetProperty("WorkingDirectory").GetString();
-        Assert.True(StringComparer.OrdinalIgnoreCase.Equals(reviewerWorkspace, reviewerWorkingDirectory),
-            "Reviewerã®ä½œæ¥­ãƒ‡ã‚£ãƒ¬ã‚¯ãƒˆãƒªãŒå®Ÿè¡Œè¨˜éŒ²å†…ã®å°‚ç”¨workspaceã§ã¯ã‚ã‚Šã¾ã›ã‚“ã€‚");
-        Assert.True(StringComparer.OrdinalIgnoreCase.Equals(Path.GetFullPath(reviewerWorkspace),
-            Path.GetFullPath(RunGitFixture(reviewerWorkspace, "rev-parse", "--show-toplevel").Trim())),
-            "Reviewer workspaceãŒGitãƒªãƒã‚¸ãƒˆãƒªã®ãƒ«ãƒ¼ãƒˆã§ã¯ã‚ã‚Šã¾ã›ã‚“ã€‚");
-        var reviewCallEvent = JsonDocument.Parse(File.ReadAllLines(eventPath)
-            .First(line => line.Contains("\"role\":\"Reviewer\"", StringComparison.Ordinal) &&
-                line.Contains("\"eventType\":\"agent_call\"", StringComparison.Ordinal)));
-        var artifactReferences = reviewCallEvent.RootElement.GetProperty("artifactReferences").EnumerateArray()
-            .Select(item => item.GetString()).ToHashSet(StringComparer.Ordinal);
-        Assert.True(artifactReferences.SetEquals([
-            "exchanges/reviewer-1/workspace/artifacts/review-notes.txt",
-            "exchanges/reviewer-1/workspace/artifacts/analysis/proposal.json"]), "ä»»æ„æˆæœç‰©ã®å‚ç…§ãŒã™ã¹ã¦ã‚¤ãƒ™ãƒ³ãƒˆã«è¨˜éŒ²ã•ã‚Œã¦ã„ã¾ã›ã‚“ã€‚");
-        Assert.False(File.Exists(Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "response.md")),
-            "æœ¬æ–‡ã‚’è¿”ã•ãªã„Reviewerã«å›ºå®šå½¢å¼ã®response.mdã‚’è¦æ±‚ã—ã¾ã—ãŸã€‚");
-        var implementerPaths = ReadFakeEnvironmentPaths(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "codex.stdout.jsonl"));
-        var reviewerPaths = ReadFakeEnvironmentPaths(firstReviewStdoutPath);
-        Assert.Equal(Path.Combine(root.Path, "implementer-profile"), implementerPaths["CODEX_HOME"]);
-        Assert.Equal(Path.Combine(root.Path, "reviewer-profile"), reviewerPaths["CODEX_HOME"]);
-        foreach (var name in new[] { "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "TMPDIR" })
-        {
-            var inherited = Environment.GetEnvironmentVariable(name);
-            Assert.Equal(inherited, implementerPaths[name], $"{name}ã‚’æ—¢å­˜ãƒ¦ãƒ¼ã‚¶ãƒ¼ç’°å¢ƒã‹ã‚‰å¤‰æ›´ã—ã¾ã—ãŸã€‚");
-            Assert.Equal(inherited, reviewerPaths[name], $"{name}ã‚’æ—¢å­˜ãƒ¦ãƒ¼ã‚¶ãƒ¼ç’°å¢ƒã‹ã‚‰å¤‰æ›´ã—ã¾ã—ãŸã€‚");
-        }
-    }
-}
-
-static void AssertCodexFixturePolicy(string stdout, string expectedSandbox, string role,
-    string[] expectedIncluded, string[] expectedExcluded)
-{
-    var policyLine = stdout.Split('\n').First(line => line.Contains("fixture.prompt_policy", StringComparison.Ordinal));
-    using var policyEvent = JsonDocument.Parse(policyLine);
-    var policy = policyEvent.RootElement.GetProperty("policy");
-    var included = policy.GetProperty("scope_included").EnumerateArray().Select(value => value.GetString()).ToArray();
-    var excluded = policy.GetProperty("scope_excluded").EnumerateArray().Select(value => value.GetString()).ToArray();
-    Assert.True(included.SequenceEqual(expectedIncluded, StringComparer.Ordinal),
-        $"{role}ã®åŒ…å«ç¯„å›²ãŒæœŸå¾…å€¤ã¨ç•°ãªã‚Šã¾ã™: expected={JsonSerializer.Serialize(expectedIncluded)}, actual={JsonSerializer.Serialize(included)}");
-    Assert.True(excluded.SequenceEqual(expectedExcluded, StringComparer.Ordinal),
-        $"{role}ã®é™¤å¤–ç¯„å›²ãŒæœŸå¾…å€¤ã¨ç•°ãªã‚Šã¾ã™: expected={JsonSerializer.Serialize(expectedExcluded)}, actual={JsonSerializer.Serialize(excluded)}");
-    Assert.True(policy.GetProperty("os_boundary_disclaimed").GetBoolean(), $"{role}è¦æ±‚ã«OSå¢ƒç•Œã®èª¬æ˜ãŒã‚ã‚Šã¾ã›ã‚“: {policyEvent.RootElement.GetRawText()}");
-
-    var argumentsLine = stdout.Split('\n').First(line => line.Contains("fixture.arguments", StringComparison.Ordinal));
-    using var argumentsEvent = JsonDocument.Parse(argumentsLine);
-    var arguments = argumentsEvent.RootElement.GetProperty("arguments").EnumerateArray().Select(value => value.GetString()).ToArray();
-    var sandboxIndex = Array.IndexOf(arguments, "--sandbox");
-    Assert.True(sandboxIndex >= 0 && sandboxIndex + 1 < arguments.Length && arguments[sandboxIndex + 1] == expectedSandbox,
-        $"Codex sandboxã« {expectedSandbox} ã‚’æŒ‡å®šã—ã¦ã„ã¾ã›ã‚“ã€‚");
-    var approvalConfigIndex = Array.IndexOf(arguments, "--config");
-    Assert.True(approvalConfigIndex >= 0 && approvalConfigIndex + 1 < arguments.Length &&
-        arguments[approvalConfigIndex + 1] == "approval_policy=\"never\"",
-        "éå¯¾è©±Codex runã®æ‰¿èªè¨­å®šãŒç¢ºèªã§ãã¾ã›ã‚“ã€‚");
-    var rootsConfigIndex = Array.LastIndexOf(arguments, "--config");
-    if (role == "Reviewer")
-        Assert.True(rootsConfigIndex >= 0 && rootsConfigIndex + 1 < arguments.Length &&
-            arguments[rootsConfigIndex + 1] == "sandbox_workspace_write.writable_roots=[]",
-            "Reviewerã®æ—¢å­˜è¿½åŠ æ›¸è¾¼ãƒ«ãƒ¼ãƒˆãŒç©ºé…åˆ—ã§ä¸Šæ›¸ãã•ã‚Œã¦ã„ã¾ã›ã‚“ã€‚");
-    else
-        Assert.False(arguments.Contains("sandbox_workspace_write.writable_roots=[]", StringComparer.Ordinal),
-            "Reviewerå°‚ç”¨ã®sandboxä¸Šæ›¸ããŒImplementerã¸é©ç”¨ã•ã‚Œã¾ã—ãŸã€‚");
-}
-
-static Dictionary<string, string> ReadFakeEnvironmentPaths(string stdoutPath)
-{
-    foreach (var line in File.ReadLines(stdoutPath))
-    {
-        using var document = JsonDocument.Parse(line);
-        if (document.RootElement.TryGetProperty("type", out var type) && type.GetString() == "fixture.environment_paths")
-            return document.RootElement.GetProperty("paths").EnumerateObject()
-                .ToDictionary(property => property.Name, property => property.Value.GetString()!, StringComparer.Ordinal);
-    }
-    throw new Exception("Fake childã®å®ŸåŠ¹profileç’°å¢ƒã‚’å–å¾—ã§ãã¾ã›ã‚“ã§ã—ãŸã€‚");
-}
-
-static (CodexCliAgentRunner Runner, AgentRequest Request, TemporaryDirectory Root) CreateCodexFixture(
-    string scenario, TimeSpan? timeout = null, Action<Process>? killOverride = null, CancellationToken cancellationToken = default,
-    Action<string>? beforeTimeoutForTesting = null)
-{
-    var root = new TemporaryDirectory();
-    var runDirectory = Path.Combine(root.Path, "run");
-    var workspace = Path.Combine(Environment.CurrentDirectory, ".test-workspaces", Guid.NewGuid().ToString("N"));
-    root.AdditionalPath = workspace;
-    var implementerHome = Path.Combine(root.Path, "implementer-profile");
-    var reviewerHome = Path.Combine(root.Path, "reviewer-profile");
-    Directory.CreateDirectory(runDirectory);
-    Directory.CreateDirectory(workspace);
-    File.WriteAllText(Path.Combine(workspace, "example.txt"), "baseline\n");
-    RunGitFixture(workspace, "init", "-q");
-    RunGitFixture(workspace, "add", "example.txt");
-    RunGitFixture(workspace, "-c", "user.name=Orchestrator Test", "-c", "user.email=orchestrator-test@example.invalid", "commit", "-qm", "baseline");
-    foreach (var home in new[] { implementerHome, reviewerHome })
-        Directory.CreateDirectory(home);
-    var executable = Environment.ProcessPath!;
-    var options = new CodexCliRunnerOptions(executable, implementerHome, reviewerHome,
-        ["--fake-codex-fixture", scenario], killOverride, cancellationToken, beforeTimeoutForTesting);
-    var request = new AgentRequest("fixture-run", "Implementer", SampleContract() with
-        { WorkingDirectory = workspace, Reporting = new ReportingRequirements { PullRequestExpected = false, FinalReportFormat = "markdown" } }, 1,
-        RunDirectory: runDirectory, RemainingTime: timeout ?? TimeSpan.FromSeconds(5));
-    return (new CodexCliAgentRunner(options), request, root);
-}
-
-static string RunGitFixture(string workingDirectory, params string[] arguments)
-{
-    var start = new ProcessStartInfo("git") { WorkingDirectory = workingDirectory, UseShellExecute = false,
-        RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-    foreach (var argument in arguments) start.ArgumentList.Add(argument);
-    using var process = Process.Start(start) ?? throw new Exception("Git fixture process did not start.");
-    process.WaitForExit();
-    if (process.ExitCode != 0) throw new Exception($"Git fixture failed: {process.StandardError.ReadToEnd()}");
-    return process.StandardOutput.ReadToEnd();
-}
-
-static void ValidContractIsAccepted()
-{
-    var errors = TaskContractReader.Validate(SampleContract());
-    Assert.Equal(0, errors.Count, string.Join(Environment.NewLine, errors));
-
-    using var temp = new TemporaryDirectory();
-    var path = Path.Combine(temp.Path, "contract.json");
-    File.WriteAllText(path, JsonSerializer.Serialize(SampleContract(), new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
-    var loaded = TaskContractReader.Read(path);
-    Assert.True(loaded.IsValid, string.Join(Environment.NewLine, loaded.Errors));
-    Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path))), loaded.ContentSha256);
-}
-
-static void InvalidContractsAreRejected()
-{
-    var invalid = SampleContract() with
-    {
-        SchemaVersion = 2,
-        TaskId = "bad\ntask",
-        WorkingDirectory = "relative/path",
-        Scope = new TaskScope { Included = ["src"], Excluded = ["SRC"] },
-        Requirements = [],
-        Limits = new ExecutionLimits { MaxDurationMinutes = 0, MaxRevisionAttempts = -1, MaxRetries = -1 }
-    };
-    var errors = TaskContractReader.Validate(invalid);
-    Assert.True(errors.Count >= 6, "ä¸è¶³ãƒ»ä¸æ­£ãªæ¡ä»¶ãŒã™ã¹ã¦æ¤œå‡ºã•ã‚Œã¦ã„ã¾ã›ã‚“ã€‚");
-
-    using var temp = new TemporaryDirectory();
-    var path = Path.Combine(temp.Path, "unknown.json");
-    File.WriteAllText(path, "{\"schemaVersion\":1,\"unknown\":true}");
-    Assert.False(TaskContractReader.Read(path).IsValid, "æœªçŸ¥ã®JSONé …ç›®ã‚’æ‹’å¦ã§ãã¾ã›ã‚“ã§ã—ãŸã€‚");
-
-    Assert.True(TaskContractReader.Validate(SampleContract() with { WorkingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")) })
-        .Any(error => error.Contains("ä½œæ¥­ãƒ‡ã‚£ãƒ¬ã‚¯ãƒˆãƒªãŒå­˜åœ¨ã—ã¾ã›ã‚“", StringComparison.Ordinal)), "å­˜åœ¨ã—ãªã„ä½œæ¥­ãƒ‡ã‚£ãƒ¬ã‚¯ãƒˆãƒªã‚’æ‹’å¦ã§ãã¾ã›ã‚“ã§ã—ãŸã€‚");
-}
-
-static void AllTransitionsAreExplicit()
-{
-    var states = Enum.GetValues<RunState>();
-    foreach (var from in states)
-    foreach (var to in states)
-    {
-        var shouldAllow = (from, to) switch
-        {
-            (RunState.Prepared, RunState.Implementing or RunState.NeedsHumanInput or RunState.Failed) => true,
-            (RunState.Implementing, RunState.Reviewing or RunState.NeedsHumanInput or RunState.Failed) => true,
-            (RunState.Reviewing, RunState.Revising or RunState.NeedsHumanInput or RunState.Failed) => true,
-            (RunState.Revising, RunState.Implementing or RunState.NeedsHumanInput or RunState.Failed) => true,
-            _ => false
-        };
-
-        if (shouldAllow) RunStateMachine.EnsureAllowed(from, to);
-        else Assert.Throws<InvalidRunTransitionException>(() => RunStateMachine.EnsureAllowed(from, to));
-    }
-
-}
-
-static void ReviewReadyIsUnavailableUntilEvidenceIntegration()
-{
-    foreach (var state in Enum.GetValues<RunState>())
-        Assert.Throws<InvalidRunTransitionException>(() => RunStateMachine.EnsureAllowed(state, RunState.ReadyForHumanReview));
-}
-
-static void EventLogIsSequencedAndUtc()
-{
-    using var temp = new TemporaryDirectory();
-    var path = Path.Combine(temp.Path, "events.jsonl");
-    using (var store = JsonlRunEventStore.CreateNew(path, "run-1"))
-    {
-        store.Append("run_prepared", "accepted", to: RunState.Prepared,
-            inputReference: "sha256:example", unknownInformation: ["commitæœªå–å¾—"]);
-        store.Append("report_written", "accepted", to: RunState.Prepared,
-            outputReference: "report.md", elapsedMilliseconds: 42);
-    }
-
-    var lines = File.ReadAllLines(path);
-    Assert.Equal(2, lines.Length);
-    using var first = JsonDocument.Parse(lines[0]);
-    using var second = JsonDocument.Parse(lines[1]);
-    Assert.Equal(1L, first.RootElement.GetProperty("sequence").GetInt64());
-    Assert.Equal(2L, second.RootElement.GetProperty("sequence").GetInt64());
-    var timestamp = DateTimeOffset.Parse(first.RootElement.GetProperty("timestampUtc").GetString()!);
-    Assert.Equal(TimeSpan.Zero, timestamp.Offset, "æ™‚åˆ»ãŒUTCã§è¨˜éŒ²ã•ã‚Œã¦ã„ã¾ã›ã‚“ã€‚");
-    Assert.Equal("sha256:example", first.RootElement.GetProperty("inputReference").GetString());
-    Assert.Equal("report.md", second.RootElement.GetProperty("outputReference").GetString());
-    Assert.Equal(42L, second.RootElement.GetProperty("elapsedMilliseconds").GetInt64());
-    Assert.Throws<IOException>(() => JsonlRunEventStore.CreateNew(path, "run-1"));
-}
-
-static void RejectedTransitionDoesNotMutate()
-{
-    using var temp = new TemporaryDirectory();
-    var path = Path.Combine(temp.Path, "events.jsonl");
-    using (var store = JsonlRunEventStore.CreateNew(path, "run-2"))
-    {
-        var run = new RunExecution(store);
-        Assert.Throws<InvalidRunTransitionException>(() => run.Transition(RunState.ReadyForHumanReview));
-        Assert.Equal(RunState.Prepared, run.State);
-    }
-    Assert.Equal(0, File.ReadAllLines(path).Length);
-}
-
-static void FakeSuccessKeepsReviewAndReadyEvidenceSeparate()
-{
-    using var temp = new TemporaryDirectory();
-    var runDirectory = Path.Combine(temp.Path, "run");
-    Directory.CreateDirectory(runDirectory);
-    var eventPath = Path.Combine(runDirectory, "events.jsonl");
-    FakeWorkflowResult result;
-    using (var store = JsonlRunEventStore.CreateNew(eventPath, "fake-success"))
-        result = new FakeAgentWorkflow().Run(SampleContract(), new string('a', 64), "fake-success", runDirectory,
-            new FakeAgentRunner(FakeScenario.Success), store);
-
-    Assert.Equal(RunState.NeedsHumanInput, result.State, "Fake review alone must not assert PR submission or acceptance verification.");
-    var artifactPath = Path.Combine(runDirectory, result.ArtifactReference!);
-    Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(artifactPath))), result.ArtifactSha256);
-    Assert.True(File.Exists(Path.Combine(runDirectory, result.ReportReference)));
-    var reviewerRequest = File.ReadAllText(Path.Combine(runDirectory, "exchanges", "reviewer-1", "request.json"));
-    Assert.False(reviewerRequest.Contains("è‡ªå·±è©•ä¾¡", StringComparison.Ordinal), "åˆå›Reviewerå…¥åŠ›ã«Implementerã®è‡ªå·±è©•ä¾¡ãŒæ··å…¥ã—ã¦ã„ã¾ã™ã€‚");
-    using var events = JsonDocument.Parse(File.ReadLines(eventPath).First(line => line.Contains("artifact_fixed", StringComparison.Ordinal)));
-    Assert.Equal(result.ArtifactSha256, events.RootElement.GetProperty("diffSha256").GetString());
-}
-
-static void LifecycleEventsArePersistedSafely()
-{
-    using var temp = new TemporaryDirectory();
-    var runDirectory = Path.Combine(temp.Path, "fixture", "run");
-    var lifecyclePath = Path.Combine(temp.Path, "persistent", "lifecycle.jsonl");
-    Directory.CreateDirectory(runDirectory);
-    FakeWorkflowResult result;
-    using (var store = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), "lifecycle-success"))
-        result = new FakeAgentWorkflow().Run(SampleContract(), new string('a', 64), "lifecycle-success", runDirectory,
-            new SecretAgentRunner(), store, lifecycleEvents: new JsonlLifecycleEventWriter(lifecyclePath));
-
-    Assert.Equal(RunState.NeedsHumanInput, result.State);
-    var lines = File.ReadAllLines(lifecyclePath);
-    Assert.True(lines.Length >= 7, "ãƒ©ã‚¤ãƒ•ã‚µã‚¤ã‚¯ãƒ«ã‚¤ãƒ™ãƒ³ãƒˆãŒä¸è¶³ã—ã¦ã„ã¾ã™ã€‚");
-    var events = lines.Select(line => JsonDocument.Parse(line)).ToArray();
-    try
-    {
-        var items = events.Select(document => document.RootElement).ToArray();
-        Assert.Equal("Orchestrator", items[0].GetProperty("role").GetString());
-        Assert.Equal("started", items[0].GetProperty("eventType").GetString());
-        Assert.True(items.Any(item => item.GetProperty("role").GetString() == "Implementer" && item.GetProperty("eventType").GetString() == "started"));
-        Assert.True(items.Any(item => item.GetProperty("role").GetString() == "Implementer" && item.GetProperty("eventType").GetString() == "completed"));
-        Assert.True(items.Any(item => item.GetProperty("role").GetString() == "Reviewer" && item.GetProperty("eventType").GetString() == "started"));
-        Assert.True(items.Any(item => item.GetProperty("role").GetString() == "Reviewer" && item.GetProperty("eventType").GetString() == "completed"));
-        Assert.True(items.Any(item => item.GetProperty("eventType").GetString() == "needs_human_input"));
-        Assert.Equal("completed", items[^1].GetProperty("eventType").GetString());
-        foreach (var item in items)
-        {
-            Assert.Equal("lifecycle-success", item.GetProperty("runId").GetString());
-            Assert.Equal(JsonValueKind.String, item.GetProperty("timestampUtc").ValueKind);
-            Assert.Equal(TimeSpan.Zero, DateTimeOffset.Parse(item.GetProperty("timestampUtc").GetString()!).Offset);
-            Assert.Equal(JsonValueKind.String, item.GetProperty("state").ValueKind);
-        }
-        var implementerStarted = Array.FindIndex(items, item => item.GetProperty("role").GetString() == "Implementer" && item.GetProperty("eventType").GetString() == "started");
-        var implementerCompleted = Array.FindIndex(items, item => item.GetProperty("role").GetString() == "Implementer" && item.GetProperty("eventType").GetString() == "completed");
-        var reviewerStarted = Array.FindIndex(items, item => item.GetProperty("role").GetString() == "Reviewer" && item.GetProperty("eventType").GetString() == "started");
-        Assert.True(implementerStarted < implementerCompleted && implementerCompleted < reviewerStarted, "å½¹å‰²ã‚¤ãƒ™ãƒ³ãƒˆã®é †åºãŒä¸æ­£ã§ã™ã€‚");
-        Assert.False(File.ReadAllText(lifecyclePath).Contains("PROMPT-AND-RESPONSE-SECRET", StringComparison.Ordinal));
-    }
-    finally
-    {
-        foreach (var document in events) document.Dispose();
-    }
-
-    Directory.Delete(Path.Combine(temp.Path, "fixture"), recursive: true);
-    Assert.True(File.Exists(lifecyclePath), "å®Ÿè¡Œfixtureå‰Šé™¤å¾Œã«ãƒ©ã‚¤ãƒ•ã‚µã‚¤ã‚¯ãƒ«ãƒ­ã‚°ãŒæ®‹ã£ã¦ã„ã¾ã›ã‚“ã€‚");
-    Assert.True(lines.SequenceEqual(File.ReadAllLines(lifecyclePath)), "å†èª­è¾¼ã—ãŸãƒ©ã‚¤ãƒ•ã‚µã‚¤ã‚¯ãƒ«JSONLã®å†…å®¹ãŒä¸€è‡´ã—ã¾ã›ã‚“ã€‚");
-
-    var failedRunDirectory = Path.Combine(temp.Path, "failed-run");
-    Directory.CreateDirectory(failedRunDirectory);
-    using (var store = JsonlRunEventStore.CreateNew(Path.Combine(failedRunDirectory, "events.jsonl"), "lifecycle-failed"))
-        new FakeAgentWorkflow().Run(SampleContract(), new string('b', 64), "lifecycle-failed", failedRunDirectory,
-            new FakeAgentRunner(FakeScenario.ImplementerFailure), store, lifecycleEvents: new JsonlLifecycleEventWriter(lifecyclePath));
+YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éíën¸õ:-jZ.¶›­–)Ş³WW6–ær7—7FVÒåFW‡C°Ğ§W6–ær7—7FVÒåFW‡Bä§6öã°Ğ§W6–ær7—7FVÒå6V7W&—G’ä7'—Föw&‡“°Ğ§W6–ær7—7FVÒäF–væ÷7F–73°Ğ§W6–ærFVÆ–W'2ä’ä÷&6†W7G&F÷"ä6÷&S°Ğ§W6–ærFVÆ–W'2ä’ä÷&6†W7G&F÷"ä6Æ“°Ğ§W6–ærFVÆ–W'2å6Æ6³°Ğ Ğ¦–b†&w2äÆVæwF‚ãÒbb&w5³ÒÓÒ"ÒÖf¶RÖ6öFW‚Öf—‡GW&R"’&WGW&â'Väf¶T6öFW„f—‡GW&R†&w2“°Ğ¦–b†&w2äÆVæwF‚ãÒbb&w5³ÒÓÒ"ÒÖW‡FW&æÂ×&ö6W72Öf—‡GW&R"’&WGW&â'VäW‡FW&æÅ&ö6W74f—‡GW&R†&w2“°Ğ¦–b†&w2äÆVæwF‚ãÒbb&w5³ÒÓÒ"ÒÖÆ–fV7–6ÆR×w&—FW"Öf—‡GW&R"’&WGW&â'VäÆ–fV7–6ÆUw&—FW$f—‡GW&R†&w2“°Ğ¦–b†&w2äÆVæwF‚âÇÂ†&w2äÆVæwF‚ÓÒbb&w5³ÒÒ"Ò×Væ—B"’Ğ§°Ğ¢6öç6öÆRäW'&÷"åw&—FTÆ–æR‚.KÛşyJikk9S¢FVÆ–W'2ä’ä÷&6†W7G&F÷"åFW7G2²Ò×Væ—EÒ"“°Ğ¢&WGW&â#°Ğ§ĞĞ Ğ§f"7V—FRÒæWrFW7E7V—FR‚“°Ğ¤FEVæ—EFW7G2‡7V—FR“°Ğ§&WGW&â7V—FRå'Vâ‚’äW†—D6öFS°Ğ Ğ§7FF–2fö–BFEVæ—EFW7G2…FW7E7V—FR7V—FRĞ§°Ğ¢òò4’–çfö¶W2F†—2W‡Æ–6—Bf¶Röf—‡GW&RÖöæÇ’6WBâW‡FW&æÂ×6W'f–6RæBFö6¶W"FW7G2Fòæ÷B&VÆöær†W&RàĞ¢7V—FRäFB‚.88n8+88™¸n8îK»ni[8;¾8:Ş8+8;¾{X.K¨n8+>8;Î888Å72ôf–ÂşiÊ®jIÎŠ‹Î8~Kˆˆ{N88(²"ÂFW7E7V—FT÷WF6öÖT6öçG&7D—46öç6—7FVçB“°Ğ¢7V—FRäFB‚.iÈX«8®ZY{HN8).jIÎŠ‹Î8~8Ş8(²"ÂfÆ–D6öçG&7D—466WFVB“°Ğ¢7V—FRäFB‚.ZY{HN8îKˆŞ‹k>8;¾yù¾y»î8;¾iÊ®yú^š^yºî8).h¹.Y
+n88(²"Â–çfÆ–D6öçG&7G4&U&V¦V7FVB“°Ğ¢7V—FRäFB‚.888n8îx«nhX¾89®8*.8).Š‹XúşŠ88®8(®8¾XŠNZé®88(²"ÂÆÅG&ç6—F–öç4&TW‡Æ–6—B“°Ğ¢7V—FRäFB‚.z+®Š¨Ş[è^88ô—77VR3>8~8şX‹˜NKˆŞˆ;Ò"Â&Wf–Wu&VG”—5Væf–Æ&ÆUVçF–ÄWf–FVæ6T–çFVw&F–öâ“°Ğ¢7V—FRäFB‚&÷&–v–âU$ÎjIÎŠ‹Î8ôv—D‡V.89¾8+888‡&W÷6—F÷'’F8).Xë>Zøn8¾xZ~Y88(²"Âv—D‡V%&VÖ÷FUW&Å&WV—&W4W†7D†÷7DæEF‚“°Ğ¢7V—FRäFB‚.8888>89~8:Î898:¾8YN8+>89î8;>888æ†VÇ8şh‰X©şX{®X©¾8~XZ^X©¾8*8:8;Î8şj‰k©n8*8:8;Î8Xˆn™º.88(²"Â6Æ”†VÇæD–çWDW'&÷'4&U6W&FVB“°Ğ¢7V—FRäFB‚%V&Æ—6†W.8÷7—7FVÒövÆö&Âv—NŠŠŞZé®8).™©N™º.8~8:Ş8;Î8*¾8:¶f–ÇFW.zØ8).h¹.Y
+n88(²"ÂV&Æ—6†W$—6öÆFW4–æ†W&—FVDv—D6öæf–tæE&V¦V7G4Æö6Äf–ÇFW'2“°Ğ¢7V—FRäFB‚%V&Æ—6†W.8õ.Š‹Î‹z8îKùŞZÙz+®Š¨Ş[èÎ8·VæF–æ~888).X˜®™šN88(²"ÂV&Æ—6†W%W'6—7G5fW&–f–VE$Wf–FVæ6T&Vf÷&U&VÖ÷f–æuVæF–ær“°Ğ¢7V—FRäFB‚%.8:Î89>8:^8;Î8+>8:8;>888şXŠNZé®8;¾hÈ~iš^yºî8).Š‰˜Ë.8~YÎKˆ'Vâõ4„8îXhŞh©^z‹ş8).™‹.8"Â&Wf–Wt6öÖÖVçD—57G'V7GW&VDæD–FV×÷FVçB“°Ğ¢7V—FRäFB‚$¥4ôäÎ8*N898;>888¾˜
+>yZ®8…UD>i˜.X‹¾8).Š‰˜Ë.88(²"ÂWfVçDÆöt—56WVVæ6VDæEWF2“°Ğ¢7V—FRäFB‚.8:8*N89^8+^8*N8*ş8:´¥4ôäÎ8şšn[¨ş8;¾XhŞŠªŞ‹ëÎ8;¾zyXËş8;¶f—‡GW&^X˜®™šN[èÎ8îKùŞZÙ8).k¨8ş8’"ÂÆ–fV7–6ÆTWfVçG4&UW'6—7FVE6fVÇ’“°Ğ¢7V—FRäFB‚.ŠH~i[89~8:Ş8+¾8+8¾8(8îYÎi˜.‹ûŞŠ‰8~XZ„¥4ôäÎŠÎ8).KùŞhÈ88(²"ÂÆ–fV7–6ÆT§6öæÅ6W&–Æ—¦W46öæ7W'&VçE&ö6W76W2“°Ğ¢7V—FRäFB‚%&Wf–WvW.ZKiY~8;¾XÎjÚ.Šhk.8;¾XhŞ8:Î89>8:^8;Î8).8:8*N89^8+^8*N8*ş8:¾8jÚ>8~8Nšn[¨ş8~Š‰˜Ë.88(²"ÂÆ–fV7–6ÆTWfVçG46÷fW$f–ÇW&U7F÷æE&Wf—6–öâ“°Ğ¢7V—FRäFB‚.8:8*N89^8+^8*N8*ş8:¾Š‰˜Ë.ZKiY~8şZéşŠÎ{YiéÎ8).™ª8^8®8B"ÂÆ–fV7–6ÆUw&—FTf–ÇW&TFöW4æ÷D†–FUv÷&¶fÆ÷u&W7VÇB“°Ğ¢7V—FRäFB‚%6Æ6¾ŠŠŞZé®KˆŞX)8).ŠÚnY®8~8n˜	®yú^8).8+8*Ş88>89~8tf¶^ZéşŠÎ8„¥4ôäÎ8).{jŞhÈ88(²"Â–çfÆ–E6Æ6µ6WGF–æw4Fôæ÷DffV7Df¶U'Vä÷$§6öæÂ“°Ğ¢7V—FRäFB‚$æVVG4‡VÖä–çWN{X.zºş8*N898;>888î˜xŞŠH~h©jÚ.8).ZKiY~K»ni[8Xªzé~8~8®8B"Â–çFVçF–öæÅ6Æ6µ6¶—FöW4æ÷Ev&â“°Ğ¢7V—FRäFB‚.˜^8E6Æ6¾˜	®yú^8şZéşŠÎi˜.™i>8XÎjÚ.[ùÎzÙN8).˜^8(8¾8®8B"Â6Æ÷u6Æ6´æ÷F–f–6F–öç4Fôæ÷D&Æö6µv÷&¶fÆ÷t6æ6VÆÆF–öâ“°Ğ¢7V—FRäFB‚.zhjÚ.˜~z{¾8şx«nhX¾8Š‰˜Ë.8).ZH88®8B"Â&V¦V7FVEG&ç6—F–öäFöW4æ÷D×WFFR“°Ğ¢7V—FRäFB‚$f¶^jÚ>[‹{;¾8şh‰iéÎxšY»®Zé®[èÎ8¾8:Î89>8:^8;Î8~Š‹Î‹zKˆŞ‹k>8~XÎjÚ.88(²"Âf¶U7V66W74¶VW5&Wf–WtæE&VG”Wf–FVæ6U6W&FR“°Ğ¢7V—FRäFB‚%.[ø^š„6öFW{XÎ‹zş8÷W6kˆ8ş[zîXˆn8).8:Î89>8:^8;Î8u.Š‹Î‹z[èÎ8¾K«®™i>[è^88˜.8("Â&WV—&VEVÆÅ&WVW7Ev÷&¶fÆ÷uW6†W5&Wf–Ww4æD7&VFW5"“°Ğ¢7V—FRäFB‚%.XZKÙ>8:Î89>8:^8;Î{YiéÎ8+>8:8;>888îh©^z‹şZKiY~8).h‰X©şh›8N8~8®8B"Â&WV—&VEVÆÅ&WVW7Ev÷&¶fÆ÷tf–Ç46Æ÷6VDöå&Wf–Wt6öÖÖVçDf–ÇW&R“°Ğ¢7V—FRäFB‚%.[ø^š„6öFW{XÎ‹zş8÷W6ZKiY~8).h‰X©şh›8N8¾8¥&Wf–WvW.8).‹[~X¹^8~8®8B"Â&WV—&VEVÆÅ&WVW7Ev÷&¶fÆ÷tf–Ç46Æ÷6VDöåW6„f–ÇW&R“°Ğ¢7V—FRäFB‚%.[ø^š„6öFW{XÎ‹zş8õ.KÙÎh‰ZKiY~8).h‰X©şh›8N8~8®8B"Â&WV—&VEVÆÅ&WVW7Ev÷&¶fÆ÷tf–Ç46Æ÷6VDöå$f–ÇW&R“°Ğ¢7V—FRäFB‚%.Š‹Î‹z89^8*8*N8:¾8Î8®8NZNY8şK«®™i>z+®Š¨Ş[è^88˜.8î8®8B"Â&WV—&VEVÆÅ&WVW7Ev÷&¶fÆ÷u&WV—&W5W'6—7FVDWf–FVæ6R“°Ğ¢7V—FRäFB‚%.[ø^š„6öFW{XÎ‹zş8õW6KŠŞ8îXÎjÚ.Šhk.8).ZKiY~88~8nŠ‰˜Ë.88(²"Â&WV—&VEVÆÅ&WVW7Ev÷&¶fÆ÷u7F÷4GW&–æuW6‚“°Ğ¢7V—FRäFB‚%.[ø^š„6öFW{XÎ‹zş8õW6z+®Š¨Ş[èÎ8îXÎjÚ.Šhk.8).Š‹Î‹zK¹8Ş8~ZKiY~Š‰˜Ë.88(²"Â&WV—&VEVÆÅ&WVW7Ev÷&¶fÆ÷u7F÷4gFW%fW&–f–VEW6‚“°Ğ¢7V—FRäFB‚%.[ø^š„6öFW{XÎ‹zş8õ.KÙÎh‰KŠŞ8îXÎjÚ.Šhk.8).h‰X©şh›8N8~8®8B"Â&WV—&VEVÆÅ&WVW7Ev÷&¶fÆ÷u7F÷4GW&–æu$7&VF–öâ“°Ğ¢7V—FRäFB‚$f¶^KúîjÚ>{;¾8şYÎKˆ&Wf–WvW.8~XhŞ8:Î89>8:^8;Î8~Kˆ®™™8).Zè8(²"Âf¶U&Wf—6–öä—4&÷VæFVDæE&U&Wf–WvVB“°Ğ¢7V—FRäFB‚$f¶^XÎjÚ.8;¾ZKiY~8;¾z›®[ùÎzÙN8;¾8+ş8*N8:8*.8*n888).jÚ>8~8şZY®88(²"Âf¶U7F÷æDf–ÇW&U66Væ&–÷4&U&V6÷&FVB“°Ğ¢7V—FRäFB‚.XhŞŠšnŠÎKˆ®™™8u&Wf–WvW.ZKiY~8).{X.K¨n88(²"Â&Wf–WvW%&WG&–W57F÷DÆ–Ö—B“°Ğ¢7V—FRäFB‚.KúîjÚ>Kˆ®™™X‹˜Ni˜.8¾K«®™i>8XÎjÚ.8).ZY®88(²"Â&Wf—6–öäÆ–Ö—E7F÷4f÷$‡VÖâ“°Ğ¢7V—FRäFB‚.8*N898;>88KùŞZÙZKiY~i˜.8¾h‰X©şx«nhX¾8˜.8î8®˜:Xˆnh‰iéÎxš8).KùŞhÈ88(²"ÂWfVçEw&—FTf–ÇW&TFöW4æ÷D6Æ–Õ7V66W72“°Ğ¢7V—FRäFB‚.XÎjÚ.8*N898;>888;¾ZY®KùŞZÙZKiY~8).Zéô¥4ôäÎ8{YiéÎ8XøŞiŠ88(²"Â&W÷'EW'6—7FVæ6Tf–ÇW&W4&T6öç6—7FVçB“°Ğ¢7V—FRäFB‚'&W÷'E÷w&—GFVîŠ‰˜Ë.ZKiY~[èÎ8¾KùŞZÙkˆ8şZY®8).i»Nik88(²"Â&W÷'Ew&—GFVäWfVçDf–ÇW&UWFFW5&W÷'B“°Ğ¢7V—FRäFB‚%&VG˜~z{¾[èÎ8ç&W÷'E÷w&—GFVîZKiY~8).ZY®x«nhX¾8XøŞiŠ88(²"Â&VG•&W÷'Ew&—GFVäWfVçDf–ÇW&UWFFW57FFR“°Ğ¢7V—FRäFB‚$f¶^h‰iéÎxšKùŞZÙZKiY~8õ&Wf–WvW.8).‹[~X¹^8¾8®XÎjÚ.ynyK8).Š‰˜Ë.88(²"Âf¶T'F–f7Ew&—FTf–ÇW&U7F÷4æE&W÷'G2“°Ğ¢7V—FRäFB‚$f¶R&Wf–WvW.[ùÎzÙN8î˜	NKŠŞKùŞZÙZKiY~8ş‹ûŞXªvVçN8®8~8~XÎjÚ.88(²"Âf¶TÖ–Gv•w&—FTf–ÇW&U7F÷4æE&W÷'G2“°Ğ¢7V—FRäFB‚.iz.ZÙZéşŠÎKùŞZÙXX8).Kˆ®i»8Ş8¾8®8¾h¹.Y
+n88(²"ÂW†—7F–æu'VäF—&V7F÷'”—5&W6W'fVB“°Ğ¢7V—FRäFB‚.K«®™i>z+®Š¨Ş[è^88şxºÎz¸¾Š‹Î‹z8….i8ŞKÙÎŠ‰˜Ë.8Îhø>8(ş8®88(Î8h¹.Y
+n88(²"Â&VG•&WV—&W4–æFWVæFVçDWf–FVæ6U&V6÷&G2“°Ğ¢7V—FRäFB‚.z›®8ç'Vî898+hÈ~Zé®8).{X.K¨n8+>8;Î88“.8îXZ^X©¾8*8:8;Î88~8n‹ùN8’"ÂV×G•'VåF‡5&WGW&ä–çWDW'&÷"“°Ğ¢7V—FRäFB‚.Š‹Î‹z89^8*8*N8:¾8îŠªŞ‹ëÎ8;´¥4ôî[Ú.[Èş8*8:8;Î8).ZéşŠÎX˜Ş8¾h¹.Y
+n88(²"Â&Wf–WtWf–FVæ6U&VDW'&÷'4&T–çWDf–ÇW&W2“°Ğ¢7V—FRäFB‚$åTÎih~ZÙ~8).Y
+¾8(ZIn˜:Š‹Î‹zXø.xZ~8).KˆŞKˆˆ{N88~8nh¹.Y
+n88(²"Â–çfÆ–DWf–FVæ6U&VfW&Væ6T—5&V¦V7FVB“°Ğ¢7V—FRäFB‚$f¶R6öFWX{®X©¾8îiz.yú^89~8:Ş8*Ş8+~Š¨ŞŠ‹Îh8^Z8).KùŞZÙX˜Ş8¾89î8+8*ş88(²"Â6öFW…&÷‡”7&VFVçF–Ç4&U&VF7FVDg&öÕW'6—7FVD÷WGWG2“°Ğ¢7V—FRäFB‚$f¶R6öFW89~8:Ş8+¾8+8ä¥4ôäÎ8;·7FFW'.8;·W6v^8;¾iÊ®yúVWfVçN8).XŠ^8^8¾Š‰˜Ë.88(²"Â6öFW…&ö6W746GW&W4§6öæÄæE6W&FW57G&V×2“°Ğ¢7V—FRäFB‚%&Wf–WvW.8şY»®Zé®h‰iéÎxš8å4„Ó#SnKˆŞKˆˆ{N8~‹[~X¹^8~8®8B"Â&Wf–WvW%&V¦V7G46†ævVDf—†VD'F–f7B“°Ğ¢7V—FRäFB‚$6öFWj‰k©nXZ^X©¾8~iz^iÊÎŠ©î89~8:Ş8;>89~888)%UDbÓ8î8î8îkŠ8’"Â6öFW…&ö×D—576VD5WFc‚“°Ğ¢–b„÷W&F–æu7—7FVÒä—5v–æF÷w2‚’Ğ¢7V—FRäFB‚&çÒ6öFW‚æ6ÖN8†6öFW‚ç36†–Ş8~iz^iÊÎŠ©î89~8:Ş8;>89~888).kŠ8’"Â6öFW„çÕ6†–×5&V6V—fUWFc…&ö×B“°Ğ¢7V—FRäFB‚$f¶R6öFWZéşŠÎ8v¶–ÆÎXznyn8„4Äx˜z+®Š¨Ş8Î‹[~X¹^8~8®8B"Â6öFW…fW'6–öå&ö&T¶–ÆÄf–ÇW&T—5&V6÷&FVB“°Ğ¢7V—FRäFB‚$f¶R6öFWZéşŠÎ89^8*8*N8:¾‹[~X¹^ZKiY~8).ZèXZ8¾Š‰˜Ë.88(²"Â6öFW…fW'6–öå&ö&U7F'Df–ÇW&U7F÷4&Vf÷&TW†V7WF–öâ“°Ğ¢7V—FRäFB‚'FW&Ö–æÂWfVçN8{X.K¨n8+>8;Î888îKˆŞKˆˆ{N8).h‰X©şh›8N8~8®8B"Â6öFW…FW&Ö–æÄæDW†—D6öFT×W7Dw&VR“°Ğ¢7V—FRäFB‚.KˆŞjÚ4¥4ôäÎ8;¾z›®[ùÎzÙN8;¾y[[‹{X.K¨n8).h‰X©şh›8N8~8®8B"Â6öFW„ÖÆf÷&ÖVDæDV×G•&W7öç6W4f–Â“°Ğ¢7V—FRäFB‚'F–ÖV÷WN[èÎ8¶¶–ÆÎ8).Ššn8~{X.K¨n8;·7G&VŞXˆ~ijŞ8).Š‰˜Ë.88(²"Â6öFW…F–ÖV÷WD¶–ÆÄ—5&W÷'FVE6W&FVÇ’“°Ğ¢7V—FRäFB‚'F–ÖV÷WNi˜.8´f¶^89~8:Ş8+¾8+8îZÙ89~8:Ş8+¾8+XÎjÚ.8(.z+®Š¨Ş88(²"Â6öFW…F–ÖV÷WE7F÷4f¶T6†–ÆE&ö6W72“°Ğ¢7V—FRäFB‚&¶–ÆÎZKiY~8).Š‰˜Ë.8~89~8:Ş8+¾8+{X.K¨niÊ®z+®Š¨Ş8).h‰X©şh›8N8~8®8B"Â6öFW„¶–ÆÄf–ÇW&T—4æ÷E&W÷'FVD57V66W72“°Ğ¢7V—FRäFB‚$7G&Â´>XÎjÚ.Šhk.8‡F–ÖV÷WN8).XË®XŠ^8v¶–ÆÎ8;¾{X.K¨n8;·7G&VŞ{YiéÎ8).Š‰˜Ë.88(²"Â6öFW„6æ6VÆÆF–öä—4F—7F–æ7Dg&öÕF–ÖV÷WB“°Ğ¢7V—FRäFB‚%v÷&¶fÆ÷~XÎjÚ.Šhk.8)$6öFW‚'VææW.8„f¶^ZÙ89~8:Ş8+¾8+8KÉŞi*Ş88(²"Âv÷&¶fÆ÷t6æ6VÆÆF–öå7F÷4f¶T6öFW…&ö6W72“°Ğ¢7V—FRäFB‚$6öFWZÙ89~8:Ş8+¾8+8Šj®8ä’6V7&WNy+Z(>ZHi[8).kŠ8^8®8B"Â6öFW„6†–ÆDVçf—&öæÖVçDf–ÇFW'56V7&WG2“°Ğ¢7V—FRäFB‚$6öFWZÙ89~8:Ş8+¾8+8…7—7FVÔG&—f^8).kŠ8’"Â6öFW„6†–ÆD–æ†W&—G57—7FVÔG&—fR“°Ğ¢7V—FRäFB‚$f¶R6öFW8ÎyIşh‰8~8şiÊ®‹ûŞ‹z898*N88®8:®8).[zîXˆnY»®Zé®i˜.8¾h¹.Y
+n88(²"Â6öFW…&V¦V7G5VçG&6¶VD&–æ'”6†ævW2“°Ğ¢7V—FRäFB‚%.KˆŞŠh8ä6öFWZéşŠÎ8~8şZéşŠÆ&—NZHi»N8).Š‹Zë88(²"Â6öFW„æöåVÆÅ&WVW7DÆÆ÷w4W†V7WF&ÆTÖöFT6†ævR“°Ğ¢7V—FRäFB‚%.[ø^š„6öFW‚6æ6†÷N8şikŠhşZéşŠÎ89^8*8*N8:¾8æÖöF^8).KùŞhÈ88(²"Â6öFW…VÆÅ&WVW7E6æ6†÷E&W6W'fW4æWtW†V7WF&ÆTÖöFR“°Ğ¢7V—FRäFB‚.iz.ZÙ„4ôDU…ô„ôÔ^8˜	®[‹8î8:n8;Î8+n8;Î89~8:Ş89^8*8*N8:¾8).KÛş88(²"Â6öFW„W†—7F–æu&öf–ÆW4&T66WFVB“°Ğ¢7V—FRäFB‚.XhŞZéşŠ8^89~8:Ş8;>89~888îZY{HNzøNY».8)$f¶R6öFW8ÎŠªŞ8şXùn8(²"Â6öFW„f¶U'6W566÷T&Vf÷&U&Wf—6–öäf–æF–ær“°Ğ¢7V—FRäFB‚$6öFW‚f¶^89~8:Ş8+¾8+8~xºÎz¸¾8:Î89>8:^8;Î8î8~{ŠnijŞ8~Y»®Zé¦†68).[É^8Ş{i8"Â6öFW„f¶U&ö6W76W46ö×ÆWFT–æFWVæFVçE&Wf–Wu6Æ–6R“°Ğ¢7V—FRäFB‚$6öFWKˆY¹î8:.8;Î888şh‰X©ş8;¾hÈ~i8;¾ZKiY~8).Š‰˜Ë.8~‹ûŞXª‹[~X¹^8¾8®K«®™i>XŠNijŞ[è^88~jÚ.8î8(²"Â6öFW„öæU6†÷E7F÷5v—F†÷WE&WG&–W2“°Ğ§ĞĞ Ğ§7FF–2fö–Bv—D‡V%&VÖ÷FUW&Å&WV—&W4W†7D†÷7DæEF‚‚Ğ§°Ğ¢76W'BåG'VR„v—D‡V%v÷&¶fÆ÷uV&Æ—6†W"å&VÖ÷FTÖF6†W2‚&‡GG3¢òöv—F‡V"æ6öÒôFVÆ–W'2ÔFWböFVÆ–W'2Ö’Ö÷&6†W7G&F÷"æv—B"Â$FVÆ–W'2ÔFWböFVÆ–W'2Ö’Ö÷&6†W7G&F÷""’“°Ğ¢76W'BåG'VR„v—D‡V%v÷&¶fÆ÷uV&Æ—6†W"å&VÖ÷FTÖF6†W2‚&v—Dv—F‡V"æ6öÓ¤FVÆ–W'2ÔFWböFVÆ–W'2Ö’Ö÷&6†W7G&F÷""Â$FVÆ–W'2ÔFWböFVÆ–W'2Ö’Ö÷&6†W7G&F÷""’“°Ğ¢76W'BåG'VR„v—D‡V%v÷&¶fÆ÷uV&Æ—6†W"å&VÖ÷FTÖF6†W2‚'76ƒ¢òöv—Dv—F‡V"æ6öÒôFVÆ–W'2ÔFWböFVÆ–W'2Ö’Ö÷&6†W7G&F÷"æv—B"Â$FVÆ–W'2ÔFWböFVÆ–W'2Ö’Ö÷&6†W7G&F÷""’“°Ğ¢76W'BäfÇ6R„v—D‡V%v÷&¶fÆ÷uV&Æ—6†W"å&VÖ÷FTÖF6†W2‚&‡GG3¢òöGF6¶W"æW†×ÆR÷F‚öv—F‡V"æ6öÒôFVÆ–W'2ÔFWböFVÆ–W'2Ö’Ö÷&6†W7G&F÷""Â$FVÆ–W'2ÔFWböFVÆ–W'2Ö’Ö÷&6†W7G&F÷""’“°Ğ¢76W'BäfÇ6R„v—D‡V%v÷&¶fÆ÷uV&Æ—6†W"å&VÖ÷FTÖF6†W2‚&‡GG3¢òöv—F‡V"æ6öÒæGF6¶W"æW†×ÆRôFVÆ–W'2ÔFWböFVÆ–W'2Ö’Ö÷&6†W7G&F÷""Â$FVÆ–W'2ÔFWböFVÆ–W'2Ö’Ö÷&6†W7G&F÷""’“°Ğ¢76W'BäfÇ6R„v—D‡V%v÷&¶fÆ÷uV&Æ—6†W"å&VÖ÷FTÖF6†W2‚&‡GG3¢òöv—F‡V"æ6öÒôFVÆ–W'2ÔFWbö÷F†W"×&Wò"Â$FVÆ–W'2ÔFWböFVÆ–W'2Ö’Ö÷&6†W7G&F÷""’“°Ğ§ĞĞ Ğ§7FF–2fö–B6Æ”†VÇæD–çWDW'&÷'4&U6W&FVB‚Ğ§°Ğ¢f"÷&–v–æÄ÷WBÒ6öç6öÆRä÷WC°Ğ¢f"÷&–v–æÄW'&÷"Ò6öç6öÆRäW'&÷#°Ğ¢G'Ğ¢°Ğ¢f÷&V6‚‡f"&w2–âæWuµĞĞ¢°Ğ¢'&’äV×G“Ç7G&–æsâ‚’Â²"ÒÖ†VÇ%ÒÂ²"Ö‚%ÒÀĞ¢²'fÆ–FFR"Â"ÒÖ†VÇ%ÒÂ²'fÆ–FFR"Â"Ö‚%ÒÀĞ¢²'7F'B"Â"ÒÖ†VÇ%ÒÂ²'7F'B"Â"Ö‚%ÒÀĞ¢²''Vâ"Â"ÒÖ†VÇ%ÒÂ²''Vâ"Â"Ö‚%ĞĞ¢ÒĞ¢°Ğ¢W6–ærf"7FF÷WBÒæWr7G&–æuw&—FW"‚“°Ğ¢W6–ærf"7FFW'"ÒæWr7G&–æuw&—FW"‚“°Ğ¢6öç6öÆRå6WD÷WB‡7FF÷WB“°Ğ¢6öç6öÆRå6WDW'&÷"‡7FFW'"“°Ğ¢f"W†—D6öFRÒ÷&6†W7G&F÷$6Æ’å'Vä7–æ2†&w2’ävWDv—FW"‚’ävWE&W7VÇB‚“°Ğ¢76W'BäWVÂƒÂW†—D6öFR“°Ğ¢76W'BåG'VR‚7G&–ærä—4çVÆÄ÷%v†—FU76R‡7FF÷WBåFõ7G&–ær‚’’“°Ğ¢76W'BäWVÂ‡7G&–æräV×G’Â7FFW'"åFõ7G&–ær‚’“°Ğ¢ĞĞ Ğ¢W6–ærf"–çfÆ–D÷WBÒæWr7G&–æuw&—FW"‚“°Ğ¢W6–ærf"–çfÆ–DW'&÷"ÒæWr7G&–æuw&—FW"‚“°Ğ¢6öç6öÆRå6WD÷WB†–çfÆ–D÷WB“°Ğ¢6öç6öÆRå6WDW'&÷"†–çfÆ–DW'&÷"“°Ğ¢f"–çfÆ–DW†—D6öFRÒ÷&6†W7G&F÷$6Æ’å'Vä7–æ2…²''Vâ%Ò’ävWDv—FW"‚’ävWE&W7VÇB‚“°Ğ¢76W'BäWVÂƒ"Â–çfÆ–DW†—D6öFR“°Ğ¢76W'BäWVÂ‡7G&–æräV×G’Â–çfÆ–D÷WBåFõ7G&–ær‚’“°Ğ¢76W'BåG'VR†–çfÆ–DW'&÷"åFõ7G&–ær‚’ä6öçF–ç2‚.KÛşyJikk9R"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢ĞĞ¢f–æÆÇĞ¢°Ğ¢6öç6öÆRå6WD÷WB†÷&–v–æÄ÷WB“°Ğ¢6öç6öÆRå6WDW'&÷"†÷&–v–æÄW'&÷"“°Ğ¢ĞĞ§ĞĞ Ğ§7FF–2fö–BV&Æ—6†W$—6öÆFW4–æ†W&—FVDv—D6öæf–tæE&V¦V7G4Æö6Äf–ÇFW'2‚Ğ§°Ğ¢W6–ærf"FV×ÒæWrFV×÷&'”F—&V7F÷'’‚“°Ğ¢f"&W÷6—F÷'’ÒF‚ä6öÖ&–æR‡FV×åF‚Â'&Wò"“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‡&W÷6—F÷'’“°Ğ¢'Väv—Df—‡GW&R‡&W÷6—F÷'’Â&–æ—B"Â"×"“°Ğ¢f"—6öÆFVD6öæf–rÒæWrv—D‡V%v÷&¶fÆ÷uV&Æ—6†W"äv—D6öæf–t÷fW&Æ’€Ğ¢¶æWr‚&7&VFVçF–Âæ‡GG3¢òöv—F‡V"æ6öÒæ†VÇW""Â7G&–æräV×G’’ÀĞ¢æWr‚&7&VFVçF–Âæ‡GG3¢òöv—F‡V"æ6öÒæ†VÇW""Â"v‚WF‚v—BÖ7&VFVçF–Â"•Ò“°Ğ Ğ¢òòF†RV&Æ—6†W"w2f—†VB†VÇW"—2G'W7FVB2â–âÖÖVÖ÷'’6öÖÖæB×66÷R÷fW&Æ“²æò6öæf–rf–ÆR—26öç7VÇFVBàĞ¢76W'BäfÇ6R„v—D‡V%v÷&¶fÆ÷uV&Æ—6†W"ä†5Vç6fTVffV7F—fTv—D6öæf–r‡&W÷6—F÷'’Â—6öÆFVD6öæf–rÂ6æ6VÆÆF–öåFö¶VâäæöæR’“°Ğ¢f"–æ†W&—FVDv—D6öæf–rÒVçf—&öæÖVçBävWDVçf—&öæÖVçEf&–&ÆW2‚’ä¶W—2ä67CÇ7G&–æsâ‚Ğ¢åv†W&R†¶W’Óâ¶W’å7F'G5v—F‚‚$t•Eô4ôäd”uò"Â7G&–æt6ö×&—6öâä÷&F–æÄ–væ÷&T66R’Ğ¢åFôF–7F–öæ'’†¶W’Óâ¶W’ÂVçf—&öæÖVçBävWDVçf—&öæÖVçEf&–&ÆRÂ7G&–æt6ö×&W"ä÷&F–æÄ–væ÷&T66R“°Ğ¢G'Ğ¢°Ğ¢f÷&V6‚‡f"¶W’–â–æ†W&—FVDv—D6öæf–rä¶W—2’Vçf—&öæÖVçBå6WDVçf—&öæÖVçEf&–&ÆR†¶W’ÂçVÆÂ“°Ğ¢Vçf—&öæÖVçBå6WDVçf—&öæÖVçEf&–&ÆR‚$t•Eô4ôäd”uô4õTåB"Â#"“°Ğ¢Vçf—&öæÖVçBå6WDVçf—&öæÖVçEf&–&ÆR‚$t•Eô4ôäd”uô´U•ó"Â&6÷&Ræg6Ööæ—F÷""“°Ğ¢Vçf—&öæÖVçBå6WDVçf—&öæÖVçEf&–&ÆR‚$t•Eô4ôäd”uõdÅTUó"Â"–æ†W&—FVBÖ6öæf–r×6V7&WB"“°Ğ¢76W'BäfÇ6R„v—D‡V%v÷&¶fÆ÷uV&Æ—6†W"ä†5Vç6fTVffV7F—fTv—D6öæf–r‡&W÷6—F÷'’Â—6öÆFVD6öæf–rÂ6æ6VÆÆF–öåFö¶VâäæöæR’ÀĞ¢&–æ†W&—FVBt•Eô4ôäd”uò¢fÇVW2×W7Bæ÷BVçFW"F†R—6öÆFVBv—B6†–ÆB"“°Ğ¢ĞĞ¢f–æÆÇĞ¢°Ğ¢f÷&V6‚‡f"¶W’–âVçf—&öæÖVçBävWDVçf—&öæÖVçEf&–&ÆW2‚’ä¶W—2ä67CÇ7G&–æsâ‚Ğ¢åv†W&R†¶W’Óâ¶W’å7F'G5v—F‚‚$t•Eô4ôäd”uò"Â7G&–æt6ö×&—6öâä÷&F–æÄ–væ÷&T66R’’åFô'&’‚’Ğ¢Vçf—&öæÖVçBå6WDVçf—&öæÖVçEf&–&ÆR†¶W’ÂçVÆÂ“°Ğ¢f÷&V6‚‡f"†¶W’ÂfÇVR’–â–æ†W&—FVDv—D6öæf–r’Vçf—&öæÖVçBå6WDVçf—&öæÖVçEf&–&ÆR†¶W’ÂfÇVR“°Ğ¢ĞĞ¢f"ÇFW&VD÷fW&Æ’ÒæWrv—D‡V%v÷&¶fÆ÷uV&Æ—6†W"äv—D6öæf–t÷fW&Æ’€Ğ¢¶æWr‚&7&VFVçF–Âæ‡GG3¢òöv—F‡V"æ6öÒæ†VÇW""Â"VæW‡V7FVBÖ†VÇW""•Ò“°Ğ¢f"ÇFW&VDVçG&–W2Òv—D‡V%v÷&¶fÆ÷uV&Æ—6†W"ävWEVç6fTVffV7F—fTv—D6öæf–r‡&W÷6—F÷'’ÂF‚ävWDgVÆÅF‚€Ğ¢'Väv—Df—‡GW&R‡&W÷6—F÷'’Â'&Wb×'6R"Â"ÒÖv—B×F‚"Â&6öæf–r"’åG&–Ò‚’Â&W÷6—F÷'’’ÂÇFW&VD÷fW&Æ’Â6æ6VÆÆF–öåFö¶VâäæöæR“°Ğ¢76W'BåG'VR†ÇFW&VDVçG&–W2äç’†VçG'’ÓâVçG'’ä¶W’ÓÒ&7&VFVçF–Âæ‡GG3¢òöv—F‡V"æ6öÒæ†VÇW""bbVçG'’å6÷W&6RÓÒ&—6öÆFVBÖ6öÖÖæB"’“°Ğ Ğ¢'Väv—Df—‡GW&R‡&W÷6—F÷'’Â&6öæf–r"Â"ÒÖÆö6Â"Â&7&VFVçF–Âæ‡GG3¢òöv—F‡V"æ6öÒæ†VÇW""Â"VçG'W7FVBÖ†VÇW"×6V7&WB"“°Ğ¢f"Æö6Ä6öæf–uF‚ÒF‚ävWDgVÆÅF‚…'Väv—Df—‡GW&R‡&W÷6—F÷'’Â'&Wb×'6R"Â"ÒÖv—B×F‚"Â&6öæf–r"’åG&–Ò‚’Â&W÷6—F÷'’“°Ğ¢f"Vç6fT†VÇW'2Òv—D‡V%v÷&¶fÆ÷uV&Æ—6†W"ävWEVç6fTVffV7F—fTv—D6öæf–r‡&W÷6—F÷'’ÂÆö6Ä6öæf–uF‚Â—6öÆFVD6öæf–rÂ6æ6VÆÆF–öåFö¶VâäæöæR“°Ğ¢76W'BåG'VR‡Vç6fT†VÇW'2äç’†VçG'’ÓâVçG'’ä¶W’ÓÒ&7&VFVçF–ÂãÇ&VF7FVCâæ†VÇW""bbVçG'’å6÷W&6RÓÒ'&W÷6—F÷'’ÖÆö6Â"’ÀĞ¢7G&–ærä¦ö–â‚"Â"ÂVç6fT†VÇW'2å6VÆV7B†VçG'’ÓâB'¶VçG'’ä¶W—Ó§¶VçG'’å6÷W&6WÒ"’’“°Ğ¢76W'BäfÇ6R‡7G&–ærä¦ö–â‚""ÂVç6fT†VÇW'2å6VÆV7B†VçG'’ÓâVçG'’ä¶W’²VçG'’å6÷W&6R’’ä6öçF–ç2‚'VçG'W7FVBÖ†VÇW"×6V7&WB"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢'Väv—Df—‡GW&R‡&W÷6—F÷'’Â&6öæf–r"Â"ÒÖÆö6Â"Â"Ò×Vç6WBÖÆÂ"Â&7&VFVçF–Âæ‡GG3¢òöv—F‡V"æ6öÒæ†VÇW""“°Ğ Ğ¢'Väv—Df—‡GW&R‡&W÷6—F÷'’Â&6öæf–r"Â"ÒÖÆö6Â"Â&f–ÇFW"æÆg2æ6ÆVâ"Â&v—BÖÆg26ÆVâÒÒVb"“°Ğ¢76W'BåG'VR„v—D‡V%v÷&¶fÆ÷uV&Æ—6†W"ä†5Vç6fTVffV7F—fTv—D6öæf–r‡&W÷6—F÷'’Â—6öÆFVD6öæf–rÂ6æ6VÆÆF–öåFö¶VâäæöæR’“°Ğ¢'Väv—Df—‡GW&R‡&W÷6—F÷'’Â&6öæf–r"Â"ÒÖÆö6Â"Â"Ò×Vç6WBÖÆÂ"Â&f–ÇFW"æÆg2æ6ÆVâ"“°Ğ¢76W'BäfÇ6R„v—D‡V%v÷&¶fÆ÷uV&Æ—6†W"ä†5Vç6fTVffV7F—fTv—D6öæf–r‡&W÷6—F÷'’Â—6öÆFVD6öæf–rÂ6æ6VÆÆF–öåFö¶VâäæöæR’“°Ğ Ğ¢'Väv—Df—‡GW&R‡&W÷6—F÷'’Â&6öæf–r"Â"ÒÖÆö6Â"Â&6÷&Ræg6Ööæ—F÷""Â'VçG'W7FVBÖÖöæ—F÷""“°Ğ¢76W'BåG'VR„v—D‡V%v÷&¶fÆ÷uV&Æ—6†W"ä†5Vç6fTVffV7F—fTv—D6öæf–r‡&W÷6—F÷'’Â—6öÆFVD6öæf–rÂ6æ6VÆÆF–öåFö¶VâäæöæR’“°Ğ¢'Väv—Df—‡GW&R‡&W÷6—F÷'’Â&6öæf–r"Â"ÒÖÆö6Â"Â"Ò×Vç6WBÖÆÂ"Â&6÷&Ræg6Ööæ—F÷""“°Ğ¢'Väv—Df—‡GW&R‡&W÷6—F÷'’Â&6öæf–r"Â"ÒÖÆö6Â"Â&6÷&Ræ†öö·5F‚"Â$3¢÷&—fFR÷VçG'W7FVBÖ†öö·2"“°Ğ¢f"Vç6fT†öö·2Òv—D‡V%v÷&¶fÆ÷uV&Æ—6†W"ävWEVç6fTVffV7F—fTv—D6öæf–r‡&W÷6—F÷'’ÂÆö6Ä6öæf–uF‚Â—6öÆFVD6öæf–rÂ6æ6VÆÆF–öåFö¶VâäæöæR“°Ğ¢76W'BåG'VR‡Vç6fT†öö·2äç’†VçG'’ÓâVçG'’ä¶W’ÓÒ&6÷&Ræ†öö·5F‚"bbVçG'’å6÷W&6RÓÒ'&W÷6—F÷'’ÖÆö6Â"’“°Ğ¢76W'BäfÇ6R‡7G&–ærä¦ö–â‚""ÂVç6fT†öö·2å6VÆV7B†VçG'’ÓâVçG'’ä¶W’²VçG'’å6÷W&6R’’ä6öçF–ç2‚$3¢÷&—fFR÷VçG'W7FVBÖ†öö·2"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢'Väv—Df—‡GW&R‡&W÷6—F÷'’Â&6öæf–r"Â"ÒÖÆö6Â"Â"Ò×Vç6WBÖÆÂ"Â&6÷&Ræ†öö·5F‚"“°Ğ¢'Väv—Df—‡GW&R‡&W÷6—F÷'’Â&6öæf–r"Â"ÒÖÆö6Â"Â&–æ6ÇVFRçF‚"Â$3¢÷&—fFR÷VçG'W7FVBÖ6öæf–r"“°Ğ¢f"Vç6fT–æ6ÇVFW2Òv—D‡V%v÷&¶fÆ÷uV&Æ—6†W"ävWEVç6fTVffV7F—fTv—D6öæf–r‡&W÷6—F÷'’ÂÆö6Ä6öæf–uF‚Â—6öÆFVD6öæf–rÂ6æ6VÆÆF–öåFö¶VâäæöæR“°Ğ¢76W'BåG'VR‡Vç6fT–æ6ÇVFW2äç’†VçG'’ÓâVçG'’ä¶W’ÓÒ&–æ6ÇVFRãÇ&VF7FVCâ"bbVçG'’å6÷W&6RÓÒ'&W÷6—F÷'’ÖÆö6Â"’“°Ğ¢76W'BäfÇ6R‡7G&–ærä¦ö–â‚""ÂVç6fT–æ6ÇVFW2å6VÆV7B†VçG'’ÓâVçG'’ä¶W’²VçG'’å6÷W&6R’’ä6öçF–ç2‚$3¢÷&—fFR÷VçG'W7FVBÖ6öæf–r"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢'Väv—Df—‡GW&R‡&W÷6—F÷'’Â&6öæf–r"Â"ÒÖÆö6Â"Â"Ò×Vç6WBÖÆÂ"Â&–æ6ÇVFRçF‚"“°Ğ¢f"–æ6ÇVFT–eF‚ÒF‚ä6öÖ&–æR‡FV×åF‚Â&6öæF—F–öæÂÖ6öæf–r"“°Ğ¢f–ÆRåw&—FTÆÅFW‡B†–æ6ÇVFT–eF‚Â%¶7&VFVçF–ÂÂ&‡GG3¢òöv—F‡V"æ6öÕÂ%ÕÆâ†VÇW"Ò6öæF—F–öæÂÖ†VÇW"×6V7&WEÆâ"“°Ğ¢'Väv—Df—‡GW&R‡&W÷6—F÷'’Â&6öæf–r"Â"ÒÖÆö6Â"Â"ÒÖFB"ÂB&–æ6ÇVFT–bæv—FF—#§·&W÷6—F÷'’å&WÆ6R‚uÅÂrÂròr—Òòæv—BçF‚"Â–æ6ÇVFT–eF‚“°Ğ¢f"Vç6fT6öæF—F–öæÄ–æ6ÇVFW2Òv—D‡V%v÷&¶fÆ÷uV&Æ—6†W"ävWEVç6fTVffV7F—fTv—D6öæf–r‡&W÷6—F÷'’ÂÆö6Ä6öæf–uF‚Â—6öÆFVD6öæf–rÂ6æ6VÆÆF–öåFö¶VâäæöæR“°Ğ¢76W'BåG'VR‡Vç6fT6öæF—F–öæÄ–æ6ÇVFW2äç’†VçG'’ÓâVçG'’ä¶W’ÓÒ&–æ6ÇVFRãÇ&VF7FVCâ"bbVçG'’å6÷W&6RÓÒ'&W÷6—F÷'’ÖÆö6Â"’ÀĞ¢7G&–ærä¦ö–â‚"Â"ÂVç6fT6öæF—F–öæÄ–æ6ÇVFW2å6VÆV7B†VçG'’ÓâB'¶VçG'’ä¶W—Ó§¶VçG'’å6÷W&6WÒ"’’“°Ğ¢76W'BäfÇ6R‡7G&–ærä¦ö–â‚""ÂVç6fT6öæF—F–öæÄ–æ6ÇVFW2å6VÆV7B†VçG'’ÓâVçG'’ä¶W’²VçG'’å6÷W&6R’’ä6öçF–ç2†–æ6ÇVFT–eF‚Â7G&–æt6ö×&—6öâä÷&F–æÄ–væ÷&T66R’“°Ğ¢'Väv—Df—‡GW&R‡&W÷6—F÷'’Â&6öæf–r"Â"ÒÖÆö6Â"Â"Ò×Vç6WBÖÆÂ"ÂB&–æ6ÇVFT–bæv—FF—#§·&W÷6—F÷'’å&WÆ6R‚uÅÂrÂròr—Òòæv—BçF‚"“°Ğ¢'Väv—Df—‡GW&R‡&W÷6—F÷'’Â&6öæf–r"Â"ÒÖÆö6Â"Â&W‡FVç6–öç2çv÷&·G&VT6öæf–r"Â'G'VR"“°Ğ¢76W'BåG'VR„v—D‡V%v÷&¶fÆ÷uV&Æ—6†W"ä†5Vç6fTVffV7F—fTv—D6öæf–r‡&W÷6—F÷'’Â—6öÆFVD6öæf–rÂ6æ6VÆÆF–öåFö¶VâäæöæR’“°Ğ¢'Väv—Df—‡GW&R‡&W÷6—F÷'’Â&6öæf–r"Â"ÒÖÆö6Â"Â"Ò×Vç6WBÖÆÂ"Â&W‡FVç6–öç2çv÷&·G&VT6öæf–r"“°Ğ¢'Väv—Df—‡GW&R‡&W÷6—F÷'’Â&6öæf–r"Â"ÒÖÆö6Â"Â&W‡FVç6–öç2çv÷&·G&VT6öæf–r"Â'G'VR"“°Ğ¢'Väv—Df—‡GW&R‡&W÷6—F÷'’Â&6öæf–r"Â"Ò×v÷&·G&VR"Â&7&VFVçF–Âæ‡GG3¢òöv—F‡V"æ6öÒæ†VÇW""Â"v÷&·G&VRÖ†VÇW"×6V7&WB"“°Ğ¢f"Vç6fUv÷&·G&VT†VÇW"Òv—D‡V%v÷&¶fÆ÷uV&Æ—6†W"ävWEVç6fTVffV7F—fTv—D6öæf–r‡&W÷6—F÷'’ÂÆö6Ä6öæf–uF‚Â—6öÆFVD6öæf–rÂ6æ6VÆÆF–öåFö¶VâäæöæR“°Ğ¢76W'BåG'VR‡Vç6fUv÷&·G&VT†VÇW"äç’†VçG'’ÓâVçG'’ä¶W’ÓÒ&7&VFVçF–ÂãÇ&VF7FVCâæ†VÇW""bbVçG'’å6÷W&6RÓÒ'&W÷6—F÷'’×v÷&·G&VR"’“°Ğ¢76W'BäfÇ6R‡7G&–ærä¦ö–â‚""ÂVç6fUv÷&·G&VT†VÇW"å6VÆV7B†VçG'’ÓâVçG'’ä¶W’²VçG'’å6÷W&6R’’ä6öçF–ç2‚'v÷&·G&VRÖ†VÇW"×6V7&WB"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢'Väv—Df—‡GW&R‡&W÷6—F÷'’Â&6öæf–r"Â"Ò×v÷&·G&VR"Â"Ò×Vç6WBÖÆÂ"Â&7&VFVçF–Âæ‡GG3¢òöv—F‡V"æ6öÒæ†VÇW""“°Ğ Ğ¢f–ÆRåw&—FTÆÅFW‡B…F‚ä6öÖ&–æR‡&W÷6—F÷'’Â"æv—FGG&–'WFW2"’Â"¢æFBf–ÇFW#ÖÆg5Æâ"“°Ğ¢76W'BåG'VR„v—D‡V%v÷&¶fÆ÷uV&Æ—6†W"ä†47F—fTv—Df–ÇFW%F‡2‡&W÷6—F÷'’Â²'6×ÆRæFB%ÒÂ—6öÆFVD6öæf–rÂ6æ6VÆÆF–öåFö¶VâäæöæR’“°Ğ¢76W'BäfÇ6R„v—D‡V%v÷&¶fÆ÷uV&Æ—6†W"ä†47F—fTv—Df–ÇFW%F‡2‡&W÷6—F÷'’Â²'6×ÆRçG‡B%ÒÂ—6öÆFVD6öæf–rÂ6æ6VÆÆF–öåFö¶VâäæöæR’“°Ğ¢f–ÆRåw&—FTÆÅFW‡B…F‚ä6öÖ&–æR‡&W÷6—F÷'’Â"æv—FGG&–'WFW2"’Â"¢æ7W7FöÒf–ÇFW#Ö7W7FöÒÖG&—fW%Æâ"“°Ğ¢76W'BåG'VR„v—D‡V%v÷&¶fÆ÷uV&Æ—6†W"ä†47F—fTv—Df–ÇFW%F‡2‡&W÷6—F÷'’Â²'6×ÆRæ7W7FöÒ%ÒÂ—6öÆFVD6öæf–rÂ6æ6VÆÆF–öåFö¶VâäæöæR’“°Ğ¢f–ÆRåw&—FTÆÅFW‡B…F‚ä6öÖ&–æR‡&W÷6—F÷'’Â"æv—FGG&–'WFW2"’Â"¢æF—6&ÆVBÖf–ÇFW%Æâ"“°Ğ¢76W'BåG'VR„v—D‡V%v÷&¶fÆ÷uV&Æ—6†W"ä†47F—fTv—Df–ÇFW%F‡2‡&W÷6—F÷'’Â²'6×ÆRæF—6&ÆVB%ÒÂ—6öÆFVD6öæf–rÂ6æ6VÆÆF–öåFö¶VâäæöæR’“°Ğ§ĞĞ Ğ§7FF–2fö–BV&Æ—6†W%W'6—7G5fW&–f–VE$Wf–FVæ6T&Vf÷&U&VÖ÷f–æuVæF–ær‚Ğ§°Ğ¢f"&ö÷BÒF‚ä6öÖ&–æR…F‚ävWEFV×F‚‚’ÂB'fW&–f–VB×"ÖWf–FVæ6R×´wV–BäæWtwV–B‚“¤çÒ"“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‡&ö÷B“°Ğ¢G'Ğ¢°Ğ¢f"VæF–æuF‚ÒF‚ä6öÖ&–æR‡&ö÷BÂ&v—F‡V"×VÆÂ×&WVW7B×VæF–æræ§6öâ"“°Ğ¢f–ÆRåw&—FTÆÅFW‡B‡VæF–æuF‚Â'µÂ'7FFUÂ#¥Â&7&VFR×&WGW&æVEÂ'Ò"“°Ğ¢f"Wf–FVæ6RÒæWpĞ¢°Ğ¢Wf–FVæ6T¶–æBÒ&v—F‡V"×VÆÂ×&WVW7BÖ7&VFVB"ÀĞ¢W&ÂÒ&‡GG3¢òöv—F‡V"æ6öÒôFVÆ–W'2ÔFWb÷FW7B÷VÆÂó’"ÀĞ¢†VE6†ÒæWr7G&–ær‚vrÂC’ÀĞ¢&6U6†ÒæWr7G&–ær‚v"rÂC’ÀĞ¢ÖW&vVBÒfÇ6RÀĞ¢fW&–f–VBÒG'VPĞ¢Ó°Ğ Ğ¢v—D‡V%v÷&¶fÆ÷uV&Æ—6†W"åW'6—7EfW&–f–VEVÆÅ&WVW7DWf–FVæ6R‡&ö÷BÂWf–FVæ6RÂWf–FVæ6RçW&ÂÂWf–FVæ6Ræ†VE6†ÂWf–FVæ6Ræ&6U6†“°Ğ Ğ¢f"f–æÅF‚ÒF‚ä6öÖ&–æR‡&ö÷BÂ&v—F‡V"×VÆÂ×&WVW7Bæ§6öâ"“°Ğ¢76W'BåG'VR„f–ÆRäW†—7G2†f–æÅF‚’“°Ğ¢76W'BäfÇ6R„f–ÆRäW†—7G2‡VæF–æuF‚’“°Ğ¢W6–ærf"6fVBÒ§6öäFö7VÖVçBå'6R„f–ÆRå&VDÆÄ'—FW2†f–æÅF‚’“°Ğ¢76W'BäWVÂ†Wf–FVæ6RçW&ÂÂ6fVBå&ö÷DVÆVÖVçBävWE&÷W'G’‚'W&Â"’ävWE7G&–ær‚’“°Ğ¢76W'BåG'VR‡6fVBå&ö÷DVÆVÖVçBävWE&÷W'G’‚'fW&–f–VB"’ävWD&ööÆVâ‚’“°Ğ¢ĞĞ¢f–æÆÇ’²F—&V7F÷'’äFVÆWFR‡&ö÷BÂG'VR“²ĞĞ Ğ§ĞĞ Ğ§7FF–2fö–B&Wf–Wt6öÖÖVçD—57G'V7GW&VDæD–FV×÷FVçB‚Ğ§°Ğ¢6öç7B7G&–ær%W&ÂÒ&‡GG3¢òöv—F‡V"æ6öÒôFVÆ–W'2ÔFWb÷FW7B÷VÆÂó’#°Ğ¢6öç7B7G&–ær†VE6†Ò##3CScsƒ“#3CScsƒ“#3CScsƒ“#3CScsƒ’#°Ğ¢6öç7B7G&–ær&6U6†Ò##3CScsƒ“#3CScsƒ“#3CScsƒ“#3CScsƒ’#°Ğ¢6öç7B7G&–ærF–fe6†Ò###3CScsƒ“#3CScsƒ“#3CScsƒ“#3CScsƒ’#°Ğ¢6öç7B7G&–ær&6T'&æ6‚Ò&Ö–â#°Ğ¢6öç7B7G&–ærÖ&¶W"Ò#ÂÒÒFVÆ–W'2×&Wf–Wr×&W7VÇB'Vã×'VâÓ†VCÓ#3CScsƒ“#3CScsƒ“#3CScsƒ“#3CScsƒ’&6SÓ#3CScsƒ“#3CScsƒ“#3CScsƒ“#3CScsƒ’F–fcÓ##3CScsƒ“#3CScsƒ“#3CScsƒ“#3CScsƒ’ÒÓâ#°Ğ¢f"&Wf–Wu&W7VÇBÒæWrv÷&¶fÆ÷u&Wf–Wu&W7VÇB‚''VâÓ"Â'&Wf–WvW"Ó"Â%W&ÂÂ†VE6†Â&6U6†Â&6T'&æ6‚ÀĞ¢F–fe6†Âv÷&¶fÆ÷u&Wf–WtFV6—6–öâä&÷fRÂfÇ6RÂ.iÚK»n8).k¨8ş8~8n8N8î88""“°Ğ¢f"&÷fÂÒv—D‡V%v÷&¶fÆ÷uV&Æ—6†W"äf÷&ÖE&Wf–Wt6öÖÖVçB‡&Wf–Wu&W7VÇBÂÖ&¶W"“°Ğ¢76W'BåG'VR†&÷fÂä6öçF–ç2‚.XŠNZé£¢h›şŠ¨Ò"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR†&÷fÂä6öçF–ç2‚.hÈ~iiÈxJ¢8®8r"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR†&÷fÂä6öçF–ç2‚%'Vâ”C¢'VâÓ"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR†&÷fÂä6öçF–ç2‚%&Wf–WvW#¢&Wf–WvW"Ó"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR†&÷fÂä6öçF–ç2‚B%#¢·%W&ÇÒ"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR†&÷fÂä6öçF–ç2‚B.8:Î89>8:^8;ÎZûî‹†VB4„¢¶†VE6†Ö"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR†&÷fÂä6öçF–ç2‚B.8:Î89>8:^8;ÎZûî‹&6S¢¶&6T'&æ6‡Ö†¶&6U6†Ö’"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR†&÷fÂä6öçF–ç2‚B.8:Î89>8:^8;Î[zîXˆb4„Ó#Sc¢¶F–fe6†Ö"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ Ğ¢f"f–æF–æw2Òv—D‡V%v÷&¶fÆ÷uV&Æ—6†W"äf÷&ÖE&Wf–Wt6öÖÖVçB‡&Wf–Wu&W7VÇBv—F€Ğ¢°Ğ¢†4f–æF–æw2ÒG'VRÀĞ¢7VÖÖ'’Ò.hÈ~iƒ¥Æî˜xŞŠh[ªc¢%ÆîZûî‹¢7&2ôf–ÆRæ75Æîjhº¢çVÆÎXZ^X©¾i˜.8¾Kè¾ZIn88®8(µÆîiKYhNjƒ¢XZ^X©¾jIÎŠ‹Î8).‹ûŞXª88(² Ğ¢ÒÂÖ&¶W"“°Ğ¢76W'BåG'VR†f–æF–æw2ä6öçF–ç2‚.XŠNZé£¢h›şŠ¨Ò"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR†f–æF–æw2ä6öçF–ç2‚.hÈ~iiÈxJ¢8.8(¢"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR†f–æF–æw2ä6öçF–ç2‚.˜xŞŠh[ªc¢""Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR†f–æF–æw2ä6öçF–ç2‚.Zûî‹¢7&2ôf–ÆRæ72"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR†f–æF–æw2ä6öçF–ç2‚.jhº¢"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR†f–æF–æw2ä6öçF–ç2‚.iKYhNjƒ¢"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢f"×VÇF—ÆTf–æF–æw2Ò&Wf–Wu&W7VÇBv—F€Ğ¢°Ğ¢†4f–æF–æw2ÒG'VRÀĞ¢7VÖÖ'’Ò.hÈ~iƒ¥Æî˜xŞŠh[ªc¢ÆîZûî‹¢7&2ôæ75Æîjhº¢8îjhºÆîiKYhNjƒ¢8).y»N8•ÆåÆîhÈ~iƒ¥Æî˜xŞŠh[ªc¢%ÆîZûî‹¢7&2ô"æ75Æîjhº¢.8îjhºÆîiKYhNjƒ¢.8).y»N8’ Ğ¢Ó°Ğ¢f"×VÇF—ÆTf–æF–æw46öÖÖVçBÒv—D‡V%v÷&¶fÆ÷uV&Æ—6†W"äf÷&ÖE&Wf–Wt6öÖÖVçB†×VÇF—ÆTf–æF–æw2ÂÖ&¶W"“°Ğ¢76W'BåG'VR†×VÇF—ÆTf–æF–æw46öÖÖVçBä6öçF–ç2‚.Zûî‹¢7&2ôæ72"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR†×VÇF—ÆTf–æF–æw46öÖÖVçBä6öçF–ç2‚.Zûî‹¢7&2ô"æ72"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ Ğ¢f"ÖF6†–æt&öG’Ò§6öå6W&–Æ—¦W"å6W&–Æ—¦R†æWuµÒ²æWr²–BÒÂ&öG’Ò&÷fÂÂ‡FÖÅ÷W&ÂÒ&‡GG3¢òöv—F‡V"æ6öÒôFVÆ–W'2ÔFWb÷FW7B÷VÆÂó’6—77VV6öÖÖVçBÓ"ÒÒ“°Ğ¢76W'BåG'VR„v—D‡V%v÷&¶fÆ÷uV&Æ—6†W"äf–æDW†—7F–æu&Wf–Wt6öÖÖVçB†ÖF6†–æt&öG’ÂÖ&¶W"Â&÷fÂ’—2æ÷BçVÆÂ“°Ğ¢f"GWÆ–6FT&öG’Ò§6öå6W&–Æ—¦W"å6W&–Æ—¦R†æWuµÒ²æWr²–BÒÂ&öG’Ò&÷fÂÒÂæWr²–BÒÂ&öG’Ò&÷fÂÒÒ“°Ğ¢76W'BåF‡&÷w3Ä–çfÆ–D÷W&F–öäW†6WF–öãâ‚‚’Óâv—D‡V%v÷&¶fÆ÷uV&Æ—6†W"äf–æDW†—7F–æu&Wf–Wt6öÖÖVçB†GWÆ–6FT&öG’ÂÖ&¶W"Â&÷fÂ’“°Ğ¢f"6öæfÆ–7F–æt&öG’Ò§6öå6W&–Æ—¦W"å6W&–Æ—¦R†æWuµÒ²æWr²–BÒÂ&öG’Ò&÷fÂ²&ÖöF–f–VB"ÒÒ“°Ğ¢76W'BåF‡&÷w3Ä–çfÆ–D÷W&F–öäW†6WF–öãâ‚‚’Óâv—D‡V%v÷&¶fÆ÷uV&Æ—6†W"äf–æDW†—7F–æu&Wf–Wt6öÖÖVçB†6öæfÆ–7F–æt&öG’ÂÖ&¶W"Â&÷fÂ’“°Ğ¢76W'BåF‡&÷w3Å7—7FVÒåFW‡Bä§6öâä§6öäW†6WF–öãâ‚‚’Óâv—D‡V%v÷&¶fÆ÷uV&Æ—6†W"äf–æDW†—7F–æu&Wf–Wt6öÖÖVçB‚'¶–çfÆ–BÖ§6öâ"ÂÖ&¶W"Â&÷fÂ’“°Ğ¢f"6W76–öâÒæWrv÷&¶fÆ÷uV&Æ–6F–öå6W76–öâ‚"â"Â$FVÆ–W'2ÔFWb÷FW7B"Â&6öFW‚÷'VâÓ"Â&6T'&æ6‚Â&6U6†ÀĞ¢&v—BÖ6öæf–r"Â&6öæf–rÖ†6‚"Â'6fRÖ†öö·2"“°Ğ¢f"6æ6†÷BÒæWrv÷&¶fÆ÷uV&Æ–6F–öå6æ6†÷B††VE6†ÂF–fe6†Â&'F–f7G2öF–fbçF6‚"“°Ğ¢f"VÆÅ&WVW7BÒæWrv÷&¶fÆ÷uVÆÅ&WVW7B‡%W&ÂÂ†VE6†Â&6U6†Â&6öFW‚÷'VâÓ"Â&6T'&æ6‚Â&v—F‡V"×VÆÂ×&WVW7Bæ§6öâ"“°Ğ¢76W'BåF‡&÷w3Ä–çfÆ–D÷W&F–öäW†6WF–öãâ‚‚’Óâv—D‡V%v÷&¶fÆ÷uV&Æ—6†W"äVç7W&UVÆÅ&WVW7EF&vWG5&Wf–Wr€Ğ¢¶†VE6†ÂæWr7G&–ær‚vbrÂC’Â&6öFW‚÷'VâÓ"Â&6T'&æ6‚Â$õTâ%ÒÂ6W76–öâÂ6æ6†÷BÂVÆÅ&WVW7B’“°Ğ¢76W'BåF‡&÷w3Ä–çfÆ–D÷W&F–öäW†6WF–öãâ‚‚’Óâv—D‡V%v÷&¶fÆ÷uV&Æ—6†W"äVç7W&UVÆÅ&WVW7EF&vWG5&Wf–Wr€Ğ¢¶†VE6†Â&6U6†Â&6öFW‚÷'VâÓ"Â'&VÆV6R"Â$õTâ%ÒÂ6W76–öâÂ6æ6†÷BÂVÆÅ&WVW7B’“°Ğ¢76W'BåF‡&÷w3Ä–çfÆ–D÷W&F–öäW†6WF–öãâ‚‚’Óâv—D‡V%v÷&¶fÆ÷uV&Æ—6†W"äf÷&ÖE&Wf–Wt6öÖÖVçB€Ğ¢&Wf–Wu&W7VÇBv—F‚²7VÖÖ'’Ò.hÈ~iƒ¥Æî˜xŞŠh[ªc¢ÆîZûî‹¢7&2ôf–ÆRæ75Æîjhº¢çVÆÎXZ^X©¾i˜.8¾Kè¾ZIn88®8(µÆîiKYhNjƒ¢XZ^X©¾jIÎŠ‹Î8).‹ûŞXª88(²"ÒÂÖ&¶W"’“°Ğ¢76W'BåF‡&÷w3Ä–çfÆ–D÷W&F–öäW†6WF–öãâ‚‚’Óâv÷&¶fÆ÷u&Wf–Wt76W76ÖVçBå'6R€Ğ¢.XŠNZé£¢h›şŠ¨ÕÆîhÈ~iiÈxJ¢8®8uÆåÆî˜xŞŠh[ªc¢ÆîZûî‹¢7&2ôf–ÆRæ75Æîjhº¢çVÆÎXZ^X©¾i˜.8¾Kè¾ZIn88®8(µÆîiKYhNjƒ¢XZ^X©¾jIÎŠ‹Î8).‹ûŞXª88(²"’“°Ğ¢76W'BåF‡&÷w3Ä–çfÆ–D÷W&F–öäW†6WF–öãâ‚‚’Óâv÷&¶fÆ÷u&Wf–Wt76W76ÖVçBå'6R€Ğ¢.8:Î89>8:^8;ÎYjÃ¢hÈ~i8®8uÆåÆî˜xŞŠh[ªc¢ÆîZûî‹¢7&2ôf–ÆRæ75Æîjhº¢çVÆÎXZ^X©¾i˜.8¾Kè¾ZIn88®8(µÆîiKYhNjƒ¢XZ^X©¾jIÎŠ‹Î8).‹ûŞXª88(²"’“°Ğ¢76W'BåF‡&÷w3Ä–çfÆ–D÷W&F–öäW†6WF–öãâ‚‚’Óâv÷&¶fÆ÷u&Wf–Wt76W76ÖVçBå'6R€Ğ¢.XŠNZé£¢KúîjÚ>KéŞšÅÆîhÈ~iiÈxJ¢8®8uÆåÆîjhº8).‹ûŞŠ‰8~8n8ş88^8B"’“°Ğ¢76W'BåF‡&÷w3Ä–çfÆ–D÷W&F–öäW†6WF–öãâ‚‚’Óâv÷&¶fÆ÷u&Wf–Wt76W76ÖVçBå'6R€Ğ¢.XŠNZé£¢KúîjÚ>KéŞšÅÆîhÈ~iiÈxJ¢8.8(¥ÆåÆîhÈ~iƒ¥Æî˜xŞŠh[ªc¢ÆîZûî‹¢7&2ôf–ÆRæ75Æîjhº¢çVÆÎXZ^X©¾i˜.8¾Kè¾ZIn88®8(µÆîiKYhNjƒ¢XZ^X©¾jIÎŠ‹Î8).‹ûŞXª88(µÆåÆîhÈ~iƒ¥Æî˜xŞŠh[ªc¢%ÆîZûî‹¢7&2ô÷F†W"æ72"’“°Ğ¢76W'BåF‡&÷w3Ä–çfÆ–D÷W&F–öäW†6WF–öãâ‚‚’Óâv÷&¶fÆ÷u&Wf–Wt76W76ÖVçBå'6R€Ğ¢.XŠNZé£¢h›şŠ¨ÕÆîhÈ~iiÈxJ¢8.8(¥ÆåÆîhÈ~iƒ¥Æî˜xŞŠh[ªc¢ÆîZûî‹¢7&2ôf–ÆRæ75Æîjhº¢çVÆÎXZ^X©¾i˜.8¾Kè¾ZIn88®8(µÆîiKYhNjƒ¢XZ^X©¾jIÎŠ‹Î8).‹ûŞXª88(µÆåÆîŠ›>{K¢"²æWr7G&–ær‚w‚rÂv÷&¶fÆ÷u&Wf–Wt76W76ÖVçBäÖ†–×VÕ7VÖÖ'”6†&7FW'2’’“°Ğ¢f"&WVW7D6†ævW2Òv÷&¶fÆ÷u&Wf–Wt76W76ÖVçBå'6R€Ğ¢.XŠNZé£¢KúîjÚ>KéŞšÅÆîhÈ~iiÈxJ¢8.8(¥ÆåÆîhÈ~iƒ¥Æî˜xŞŠh[ªc¢ÆîZûî‹¢7&2ôf–ÆRæ75Æîjhº¢çVÆÎXZ^X©¾i˜.8¾Kè¾ZIn88®8(µÆîiKYhNjƒ¢XZ^X©¾jIÎŠ‹Î8).‹ûŞXª88(²"“°Ğ¢76W'BäWVÂ…v÷&¶fÆ÷u&Wf–WtFV6—6–öâå&WVW7D6†ævW2Â&WVW7D6†ævW2äFV6—6–öâ“°Ğ¢76W'BåG'VR‡&WVW7D6†ævW2ä†4f–æF–æw2“°Ğ Ğ¢f"Wf–FVæ6U&ö÷BÒF‚ä6öÖ&–æR…F‚ävWEFV×F‚‚’ÂB'&Wf–WrÖ6öÖÖVçBÖWf–FVæ6R×´wV–BäæWtwV–B‚“¤çÒ"“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’†Wf–FVæ6U&ö÷B“°Ğ¢G'Ğ¢°Ğ¢f"W‡V7FVD6öÖÖVçEW&ÂÒ%W&Â²"6—77VV6öÖÖVçBÓ#°Ğ¢f"VæF–æuF‚ÒF‚ä6öÖ&–æR†Wf–FVæ6U&ö÷BÂ&v—F‡V"×&Wf–WrÖ6öÖÖVçB×VæF–æræ§6öâ"“°Ğ¢f–ÆRåw&—FTÆÅFW‡B‡VæF–æuF‚Â'VæF–ær"“°Ğ¢f"fÆ–DWf–FVæ6RÒæWpĞ¢°Ğ¢Wf–FVæ6T¶–æBÒ&v—F‡V"×&Wf–Wr×&W7VÇBÖ6öÖÖVçB×÷7FVB"ÂW&ÂÒW‡V7FVD6öÖÖVçEW&ÂÂ6öÖÖVçD–BÒÂÀĞ¢'Vä–BÒ&Wf–Wu&W7VÇBå'Vä–BÂ&Wf–WvW$–BÒ&Wf–Wu&W7VÇBå&Wf–WvW$–BÂ†VE6†Ò&Wf–Wu&W7VÇBå&Wf–WvVD†VE6†ÀĞ¢VÆÅ&WVW7EW&ÂÒ&Wf–Wu&W7VÇBåVÆÅ&WVW7EW&ÂÂ&6U6†Ò&Wf–Wu&W7VÇBå&Wf–WvVD&6U6†ÀĞ¢&6T'&æ6‚Ò&Wf–Wu&W7VÇBå&Wf–WvVD&6T'&æ6‚Â&Wf–WtF–fe6†#SbÒ&Wf–Wu&W7VÇBå&Wf–WtF–fe6†#SbÀĞ¢FV6—6–öâÒ&Wf–Wu&W7VÇBäFV6—6–öâåFõ7G&–ær‚’Â†4f–æF–æw2Ò&Wf–Wu&W7VÇBä†4f–æF–æw2ÂfW&–f–VBÒG'VPĞ¢Ó°Ğ¢v—D‡V%v÷&¶fÆ÷uV&Æ—6†W"åW'6—7E&Wf–Wt6öÖÖVçDWf–FVæ6R†Wf–FVæ6U&ö÷BÂfÆ–DWf–FVæ6RÂÂW‡V7FVD6öÖÖVçEW&ÂÀĞ¢&Wf–Wu&W7VÇBÂ†VE6†“°Ğ¢76W'BäfÇ6R„f–ÆRäW†—7G2‡VæF–æuF‚’“°Ğ Ğ¢f"ÇFW&VE&ö÷BÒF‚ä6öÖ&–æR†Wf–FVæ6U&ö÷BÂ&ÇFW&VB"“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’†ÇFW&VE&ö÷B“°Ğ¢f–ÆRåw&—FTÆÅFW‡B…F‚ä6öÖ&–æR†ÇFW&VE&ö÷BÂ&v—F‡V"×&Wf–WrÖ6öÖÖVçB×VæF–æræ§6öâ"’Â'VæF–ær"“°Ğ¢f"ÇFW&VDWf–FVæ6RÒæWpĞ¢°Ğ¢fÆ–DWf–FVæ6RæWf–FVæ6T¶–æBÂfÆ–DWf–FVæ6RçW&ÂÂfÆ–DWf–FVæ6Ræ6öÖÖVçD–BÂfÆ–DWf–FVæ6Rç'Vä–BÀĞ¢fÆ–DWf–FVæ6Rç&Wf–WvW$–BÂfÆ–DWf–FVæ6Ræ†VE6†ÂfÆ–DWf–FVæ6RçVÆÅ&WVW7EW&ÂÂfÆ–DWf–FVæ6Ræ&6U6†ÀĞ¢fÆ–DWf–FVæ6Ræ&6T'&æ6‚Â&Wf–WtF–fe6†#SbÒæWr7G&–ær‚vbrÂC’ÂfÆ–DWf–FVæ6RæFV6—6–öâÀĞ¢fÆ–DWf–FVæ6Ræ†4f–æF–æw2ÂfÆ–DWf–FVæ6RçfW&–f–V@Ğ¢Ó°Ğ¢76W'BåF‡&÷w3Ä–çfÆ–D÷W&F–öäW†6WF–öãâ‚‚’Óâv—D‡V%v÷&¶fÆ÷uV&Æ—6†W"åW'6—7E&Wf–Wt6öÖÖVçDWf–FVæ6R€Ğ¢ÇFW&VE&ö÷BÂÇFW&VDWf–FVæ6RÂÂW‡V7FVD6öÖÖVçEW&ÂÂ&Wf–Wu&W7VÇBÂ†VE6†’“°Ğ¢76W'BåG'VR„f–ÆRäW†—7G2…F‚ä6öÖ&–æR†ÇFW&VE&ö÷BÂ&v—F‡V"×&Wf–WrÖ6öÖÖVçB×VæF–æræ§6öâ"’’ÀĞ¢.Š‹Î‹zKˆŞKˆˆ{Ni˜.8·VæF–æ~Š‹Î‹z8).X˜®™šN8~8î8~8ş8""“°Ğ¢ĞĞ¢f–æÆÇ’²F—&V7F÷'’äFVÆWFR†Wf–FVæ6U&ö÷BÂG'VR“²ĞĞ§ĞĞ Ğ§7FF–2fö–B&WV—&VEVÆÅ&WVW7Ev÷&¶fÆ÷uW6†W5&Wf–Ww4æD7&VFW5"‚Ğ§°Ğ¢f"&ö÷BÒF‚ä6öÖ&–æR…F‚ävWEFV×F‚‚’ÂB'&WV—&VB×"×v÷&¶fÆ÷r×´wV–BäæWtwV–B‚“¤çÒ"“°Ğ¢f"'VäF—&V7F÷'’ÒF‚ä6öÖ&–æR‡&ö÷BÂ''Vâ"“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‡&ö÷B“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‡'VäF—&V7F÷'’“°Ğ¢G'Ğ¢°Ğ¢W6–ærf"WfVçG2Ò§6öæÅ'VäWfVçE7F÷&Rä7&VFTæWr…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&WfVçG2æ§6öæÂ"’Â'&WV—&VB×"×FW7B"“°Ğ¢f"V&Æ—6†W"ÒæWr7GV%v÷&¶fÆ÷uV&Æ—6†W"‚“°Ğ¢f"'VææW"ÒæWr6÷VçF–æuV&Æ–6F–öävVçE'VææW"„f¶U66Væ&–òå&Wf—6–öåF†Vå7V66W72“°Ğ¢f"&W7VÇBÒæWrf¶TvVçEv÷&¶fÆ÷r‚’å'Vâ…6×ÆT6öçG&7B‚’v—F€Ğ¢²v÷&¶–ætF—&V7F÷'’Ò&ö÷BÂ&W÷'F–ærÒæWr&W÷'F–æu&WV—&VÖVçG2²VÆÅ&WVW7DW‡V7FVBÒG'VRÂf–æÅ&W÷'Df÷&ÖBÒ&Ö&¶F÷vâ"ÒÒÀĞ¢&6öçG&7BÖ†6‚"Â'&WV—&VB×"×FW7B"Â'VäF—&V7F÷'’Â'VææW"ÂWfVçG2ÀĞ¢6öFW„öæU6†÷C¢G'VRÂV&Æ—6†W#¢V&Æ—6†W"“°Ğ¢WfVçG2äF—7÷6R‚“°Ğ Ğ¢76W'BäWVÂ…'Vå7FFRäæVVG4‡VÖä–çWBÂ&W7VÇBå7FFR“°Ğ¢76W'BåG'VR‡&W7VÇBåW'6—7FVæ6U7V66VVFVB“°Ğ¢76W'BäWVÂ‚'7F'BÇW6‚ÇW6‚Æ7&VFR×"Ç÷7B×&Wf–WrÖ6öÖÖVçB"Â7G&–ærä¦ö–â‚rÂrÂV&Æ—6†W"ä6ÆÇ2’“°Ğ¢76W'BäWVÂƒ"Â'VææW"ä–×ÆVÖVçFF–öä6ÆÇ2“°Ğ¢76W'BäWVÂƒ"Â'VææW"å&Wf–Wt6ÆÇ2“°Ğ¢76W'BäWVÂ‚&'F–f7G2ö–×ÆVÖVçFW"×6æ6†÷B×FW7Bæ§6öâ"ÂV&Æ—6†W"å6æ6†÷E&VfW&Væ6W2äf—'7B‚’“°Ğ¢76W'BåG'VR‡V&Æ—6†W"å6æ6†÷D†6†W2äÆÂ††6‚Óâ†6‚ÓÒ'6æ6†÷B×FW7BÖ†6‚"’“°Ğ¢f"7F÷&VDWfVçG2Òf–ÆRå&VDÆÄÆ–æW2…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&WfVçG2æ§6öæÂ"’“°Ğ¢76W'BåG'VR‡7F÷&VDWfVçG2äç’†Æ–æRÓâÆ–æRä6öçF–ç2‚&v—F‡V%÷W6…÷fW&–f–VB"Â7G&–æt6ö×&—6öâä÷&F–æÂ’’“°Ğ¢76W'BåG'VR‡7F÷&VDWfVçG2äç’†Æ–æRÓâÆ–æRä6öçF–ç2‚&v—F‡V%÷VÆÅ÷&WVW7Eö7&VFVB"Â7G&–æt6ö×&—6öâä÷&F–æÂ’b`Ğ¢Æ–æRä6öçF–ç2‚&†VB×6†Ó""Â7G&–æt6ö×&—6öâä÷&F–æÂ’’“°Ğ¢76W'BåG'VR‡7F÷&VDWfVçG2äç’†Æ–æRÓâÆ–æRä6öçF–ç2‚&v—F‡V%÷&Wf–Wu÷&W7VÇEö6öÖÖVçE÷÷7FVB"Â7G&–æt6ö×&—6öâä÷&F–æÂ’b`Ğ¢Æ–æRä6öçF–ç2‚&†VB×6†Ó""Â7G&–æt6ö×&—6öâä÷&F–æÂ’’“°Ğ¢f"Wf–FVæ6UF‚ÒF‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&v—F‡V"×VÆÂ×&WVW7Bæ§6öâ"“°Ğ¢76W'BåG'VR„f–ÆRäW†—7G2†Wf–FVæ6UF‚’Â.h‰X©ş8~8õ.8îjIÎŠ‹Îkˆ8şŠ‹Î‹z8ÎZéşŠÎŠ‰˜Ë.8¾jè¾8>8n8N8î8¾8)>8""“°Ğ¢76W'BäfÇ6R„f–ÆRäW†—7G2…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&v—F‡V"×VÆÂ×&WVW7B×VæF–æræ§6öâ"’’“°Ğ¢W6–ær‡f"6fVDWf–FVæ6RÒ§6öäFö7VÖVçBå'6R„f–ÆRå&VDÆÄ'—FW2†Wf–FVæ6UF‚’’Ğ¢76W'BåG'VR‡6fVDWf–FVæ6Rå&ö÷DVÆVÖVçBävWE&÷W'G’‚'fW&–f–VB"’ävWD&ööÆVâ‚’“°Ğ¢f"6öÖÖVçDWf–FVæ6UF‚ÒF‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&v—F‡V"×&Wf–WrÖ6öÖÖVçBæ§6öâ"“°Ğ¢76W'BåG'VR„f–ÆRäW†—7G2†6öÖÖVçDWf–FVæ6UF‚’Â.[ø^š8:Î89>8:^8;Î{YiéÎ8+>8:8;>888îŠ‹Î‹z8ÎKùŞZÙ8^8(Î8n8N8î8¾8)>8""“°Ğ¢W6–ær‡f"6öÖÖVçDWf–FVæ6RÒ§6öäFö7VÖVçBå'6R„f–ÆRå&VDÆÄ'—FW2†6öÖÖVçDWf–FVæ6UF‚’’Ğ¢°Ğ¢76W'BäWVÂ‚'&WV—&VB×"×FW7B"Â6öÖÖVçDWf–FVæ6Rå&ö÷DVÆVÖVçBävWE&÷W'G’‚''Vä–B"’ävWE7G&–ær‚’“°Ğ¢76W'BäWVÂ‚&6öFW‚Ö6Æ’×&Wf–WvW""Â6öÖÖVçDWf–FVæ6Rå&ö÷DVÆVÖVçBävWE&÷W'G’‚'&Wf–WvW$–B"’ävWE7G&–ær‚’“°Ğ¢76W'BäWVÂ‚&†VB×6†Ó""Â6öÖÖVçDWf–FVæ6Rå&ö÷DVÆVÖVçBävWE&÷W'G’‚&†VE6†"’ävWE7G&–ær‚’“°Ğ¢76W'BäWVÂ†æÖVöb…v÷&¶fÆ÷u&Wf–WtFV6—6–öâä&÷fR’Â6öÖÖVçDWf–FVæ6Rå&ö÷DVÆVÖVçBävWE&÷W'G’‚&FV6—6–öâ"’ävWE7G&–ær‚’“°Ğ¢76W'BäfÇ6R†6öÖÖVçDWf–FVæ6Rå&ö÷DVÆVÖVçBävWE&÷W'G’‚&†4f–æF–æw2"’ävWD&ööÆVâ‚’“°Ğ¢ĞĞ¢f"&W÷'BÒf–ÆRå&VDÆÅFW‡B…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â'&W÷'BæÖB"’“°Ğ¢76W'BåG'VR‡&W÷'Bä6öçF–ç2‚&‡GG3¢òöv—F‡V"æ6öÒôFVÆ–W'2ÔFWb÷FW7B÷VÆÂó’"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢ĞĞ¢f–æÆÇ’²F—&V7F÷'’äFVÆWFR‡&ö÷BÂG'VR“²ĞĞ§ĞĞ Ğ§7FF–2fö–B&WV—&VEVÆÅ&WVW7Ev÷&¶fÆ÷tf–Ç46Æ÷6VDöå&Wf–Wt6öÖÖVçDf–ÇW&R‚Ğ§°Ğ¢f÷&V6‚‡f"ÖÆf÷&ÖVE&W7öç6R–âæWuµÒ²fÇ6RÂG'VRÒĞ¢°Ğ¢f"'Vä–BÒÖÆf÷&ÖVE&W7öç6Rò'&WV—&VB×"Ö6öÖÖVçBÖ§6öâÖf–Â"¢'&WV—&VB×"Ö6öÖÖVçBÖf–Â#°Ğ¢f"&ö÷BÒF‚ä6öÖ&–æR…F‚ävWEFV×F‚‚’ÂB'·'Vä–GÒ×´wV–BäæWtwV–B‚“¤çÒ"“°Ğ¢f"'VäF—&V7F÷'’ÒF‚ä6öÖ&–æR‡&ö÷BÂ''Vâ"“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‡&ö÷B“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‡'VäF—&V7F÷'’“°Ğ¢G'Ğ¢°Ğ¢W6–ærf"WfVçG2Ò§6öæÅ'VäWfVçE7F÷&Rä7&VFTæWr…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&WfVçG2æ§6öæÂ"’Â'Vä–B“°Ğ¢f"V&Æ—6†W"ÒæWr7GV%v÷&¶fÆ÷uV&Æ—6†W Ğ¢²f–Å&Wf–Wt6öÖÖVçBÒG'VRÂf–Å&Wf–Wt6öÖÖVçEv—F„§6öâÒÖÆf÷&ÖVE&W7öç6RÓ°Ğ¢f"'VææW"ÒæWr6÷VçF–æuV&Æ–6F–öävVçE'VææW"„f¶U66Væ&–òå7V66W72“°Ğ¢f"&W7VÇBÒæWrf¶TvVçEv÷&¶fÆ÷r‚’å'Vâ…6×ÆT6öçG&7B‚’v—F€Ğ¢²v÷&¶–ætF—&V7F÷'’Ò&ö÷BÂ&W÷'F–ærÒæWr&W÷'F–æu&WV—&VÖVçG2²VÆÅ&WVW7DW‡V7FVBÒG'VRÂf–æÅ&W÷'Df÷&ÖBÒ&Ö&¶F÷vâ"ÒÒÀĞ¢&6öçG&7BÖ†6‚"Â'Vä–BÂ'VäF—&V7F÷'’Â'VææW"ÂWfVçG2ÀĞ¢6öFW„öæU6†÷C¢G'VRÂV&Æ—6†W#¢V&Æ—6†W"“°Ğ¢WfVçG2äF—7÷6R‚“°Ğ Ğ¢76W'BäWVÂ…'Vå7FFRäf–ÆVBÂ&W7VÇBå7FFR“°Ğ¢76W'BåG'VR‡&W7VÇBåW'6—7FVæ6U7V66VVFVB“°Ğ¢f"7F÷&VDWfVçG2Òf–ÆRå&VDÆÅFW‡B…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&WfVçG2æ§6öæÂ"’“°Ğ¢76W'BåG'VR‡7F÷&VDWfVçG2ä6öçF–ç2‚&v—F‡V%÷&Wf–Wu÷&W7VÇEö6öÖÖVçEöf–ÆVB"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR‡7F÷&VDWfVçG2ä6öçF–ç2‚&W‡V7FVD†VE6†Ö†VB×6†Ó"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BäfÇ6R‡7F÷&VDWfVçG2ä6öçF–ç2‚&v—F‡V%÷&Wf–Wu÷&W7VÇEö6öÖÖVçE÷÷7FVB"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR„f–ÆRäW†—7G2…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&v—F‡V"×&Wf–WrÖ6öÖÖVçB×VæF–æræ§6öâ"’’“°Ğ¢76W'BåG'VR„f–ÆRå&VDÆÅFW‡B…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â'&W÷'BæÖB"’’ä6öçF–ç2‚.h‰X©şh›8N8¾8ş8~8n8N8î8¾8)2"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢ĞĞ¢f–æÆÇ’²F—&V7F÷'’äFVÆWFR‡&ö÷BÂG'VR“²ĞĞ¢ĞĞ Ğ¢f"–çfÆ–D76W76ÖVçG2ÒæWuµĞĞ¢°Ğ¢‚'&WV—&VB×"Ö–æ6öç6—7FVçB×&Wf–Wr"Â.XŠNZé£¢h›şŠ¨ÕÆîhÈ~iiÈxJ¢8®8uÆåÆîhÈ~iƒ¥Æî˜xŞŠh[ªc¢ÆîZûî‹¢7&2ôf–ÆRæ75Æîjhº¢çVÆÎXZ^X©¾i˜.8¾Kè¾ZIn88®8(µÆîiKYhNjƒ¢XZ^X©¾jIÎŠ‹Î8).‹ûŞXª88(²"’ÀĞ¢‚'&WV—&VB×"Ö–æ6ö×ÆWFRÖf–æF–ær"Â.XŠNZé£¢h›şŠ¨ÕÆîhÈ~iiÈxJ¢8.8(¥ÆåÆîhÈ~iƒ¥Æî˜xŞŠh[ªc¢ÆîZûî‹¢7&2ôæ75Æîjhº¢8îjhºÆîiKYhNjƒ¢8).y»N8•ÆåÆîhÈ~iƒ¥Æî˜xŞŠh[ªc¢%ÆîZûî‹¢7&2ô"æ72"’ÀĞ¢‚'&WV—&VB×"Ö÷fW'6—¦VBÖf–æF–ær"Â.XŠNZé£¢h›şŠ¨ÕÆîhÈ~iiÈxJ¢8.8(¥ÆåÆîhÈ~iƒ¥Æî˜xŞŠh[ªc¢ÆîZûî‹¢7&2ôæ75Æîjhº¢8îjhºÆîiKYhNjƒ¢8).y»N8•ÆåÆîŠ›>{K¢"²æWr7G&–ær‚w‚rÂv÷&¶fÆ÷u&Wf–Wt76W76ÖVçBäÖ†–×VÕ7VÖÖ'”6†&7FW'2’Ğ¢Ó°Ğ¢f÷&V6‚‡f"‡'Vä–BÂ6öçFVçB’–â–çfÆ–D76W76ÖVçG2Ğ¢°Ğ¢f"–çfÆ–E&ö÷BÒF‚ä6öÖ&–æR…F‚ävWEFV×F‚‚’ÂB'·'Vä–GÒ×´wV–BäæWtwV–B‚“¤çÒ"“°Ğ¢f"–çfÆ–E'VäF—&V7F÷'’ÒF‚ä6öÖ&–æR†–çfÆ–E&ö÷BÂ''Vâ"“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’†–çfÆ–E&ö÷B“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’†–çfÆ–E'VäF—&V7F÷'’“°Ğ¢G'Ğ¢°Ğ¢W6–ærf"WfVçG2Ò§6öæÅ'VäWfVçE7F÷&Rä7&VFTæWr…F‚ä6öÖ&–æR†–çfÆ–E'VäF—&V7F÷'’Â&WfVçG2æ§6öæÂ"’Â'Vä–B“°Ğ¢f"V&Æ—6†W"ÒæWr7GV%v÷&¶fÆ÷uV&Æ—6†W"‚“°Ğ¢f"'VææW"ÒæWr6÷VçF–æuV&Æ–6F–öävVçE'VææW"„f¶U66Væ&–òå7V66W72Â6öçFVçB“°Ğ¢f"&W7VÇBÒæWrf¶TvVçEv÷&¶fÆ÷r‚’å'Vâ…6×ÆT6öçG&7B‚’v—F€Ğ¢²v÷&¶–ætF—&V7F÷'’Ò–çfÆ–E&ö÷BÂ&W÷'F–ærÒæWr&W÷'F–æu&WV—&VÖVçG2²VÆÅ&WVW7DW‡V7FVBÒG'VRÂf–æÅ&W÷'Df÷&ÖBÒ&Ö&¶F÷vâ"ÒÒÀĞ¢&6öçG&7BÖ†6‚"Â'Vä–BÂ–çfÆ–E'VäF—&V7F÷'’Â'VææW"ÂWfVçG2ÀĞ¢6öFW„öæU6†÷C¢G'VRÂV&Æ—6†W#¢V&Æ—6†W"“°Ğ¢WfVçG2äF—7÷6R‚“°Ğ Ğ¢76W'BäWVÂ…'Vå7FFRäf–ÆVBÂ&W7VÇBå7FFR“°Ğ¢76W'BäfÇ6R‡V&Æ—6†W"ä6ÆÇ2ä6öçF–ç2‚&7&VFR×""’Â.KˆŞjÚ>8;¾KˆŞZèÎXZ8®8:Î89>8:^8;ÎhÈ~i8u.8).KÙÎh‰8~8î8~8ş8""“°Ğ¢76W'BäfÇ6R‡V&Æ—6†W"ä6ÆÇ2ä6öçF–ç2‚'÷7B×&Wf–WrÖ6öÖÖVçB"’Â.KˆŞjÚ>8;¾KˆŞZèÎXZ8®8:Î89>8:^8;ÎhÈ~i8).8+>8:8;>88h©^z‹ş8~8î8~8ş8""“°Ğ¢f"ÆörÒf–ÆRå&VDÆÅFW‡B…F‚ä6öÖ&–æR†–çfÆ–E'VäF—&V7F÷'’Â&WfVçG2æ§6öæÂ"’“°Ğ¢76W'BåG'VR†Æörä6öçF–ç2‚&v—F‡V%÷&Wf–Wuö76W76ÖVçEöf–ÆVB"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BäfÇ6R†Æörä6öçF–ç2‚&v—F‡V%÷VÆÅ÷&WVW7Eö7&VFVB"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢ĞĞ¢f–æÆÇ’²F—&V7F÷'’äFVÆWFR†–çfÆ–E&ö÷BÂG'VR“²ĞĞ¢ĞĞ§ĞĞ Ğ§7FF–2fö–B&WV—&VEVÆÅ&WVW7Ev÷&¶fÆ÷u&WV—&W5W'6—7FVDWf–FVæ6R‚Ğ§°Ğ¢f"&ö÷BÒF‚ä6öÖ&–æR…F‚ävWEFV×F‚‚’ÂB'&WV—&VB×"ÖÖ—76–ærÖWf–FVæ6R×´wV–BäæWtwV–B‚“¤çÒ"“°Ğ¢f"'VäF—&V7F÷'’ÒF‚ä6öÖ&–æR‡&ö÷BÂ''Vâ"“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‡&ö÷B“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‡'VäF—&V7F÷'’“°Ğ¢G'Ğ¢°Ğ¢W6–ærf"WfVçG2Ò§6öæÅ'VäWfVçE7F÷&Rä7&VFTæWr…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&WfVçG2æ§6öæÂ"’Â'&WV—&VB×"ÖÖ—76–ærÖWf–FVæ6R"“°Ğ¢f"V&Æ—6†W"ÒæWr7GV%v÷&¶fÆ÷uV&Æ—6†W"²öÖ—E$Wf–FVæ6RÒG'VRÓ°Ğ¢f"'VææW"ÒæWr6÷VçF–æuV&Æ–6F–öävVçE'VææW"„f¶U66Væ&–òå7V66W72“°Ğ¢f"&W7VÇBÒæWrf¶TvVçEv÷&¶fÆ÷r‚’å'Vâ…6×ÆT6öçG&7B‚’v—F€Ğ¢²v÷&¶–ætF—&V7F÷'’Ò&ö÷BÂ&W÷'F–ærÒæWr&W÷'F–æu&WV—&VÖVçG2²VÆÅ&WVW7DW‡V7FVBÒG'VRÂf–æÅ&W÷'Df÷&ÖBÒ&Ö&¶F÷vâ"ÒÒÀĞ¢&6öçG&7BÖ†6‚"Â'&WV—&VB×"ÖÖ—76–ærÖWf–FVæ6R"Â'VäF—&V7F÷'’Â'VææW"ÂWfVçG2ÀĞ¢6öFW„öæU6†÷C¢G'VRÂV&Æ—6†W#¢V&Æ—6†W"“°Ğ¢WfVçG2äF—7÷6R‚“°Ğ Ğ¢76W'BäWVÂ…'Vå7FFRäf–ÆVBÂ&W7VÇBå7FFR“°Ğ¢76W'BäfÇ6R„f–ÆRå&VDÆÅFW‡B…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&WfVçG2æ§6öæÂ"’’ä6öçF–ç2‚&v—F‡V%÷VÆÅ÷&WVW7Eö7&VFVB"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR„f–ÆRå&VDÆÅFW‡B…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&WfVçG2æ§6öæÂ"’’ä6öçF–ç2‚&v—F‡V%÷V&Æ–6F–öåöf–ÆVB"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢ĞĞ¢f–æÆÇ’²F—&V7F÷'’äFVÆWFR‡&ö÷BÂG'VR“²ĞĞ Ğ¢f"F×W&VE&ö÷BÒF‚ä6öÖ&–æR…F‚ävWEFV×F‚‚’ÂB'&WV—&VB×"×F×W&VBÖ6öÖÖVçB×´wV–BäæWtwV–B‚“¤çÒ"“°Ğ¢f"F×W&VE'VäF—&V7F÷'’ÒF‚ä6öÖ&–æR‡F×W&VE&ö÷BÂ''Vâ"“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‡F×W&VE&ö÷B“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‡F×W&VE'VäF—&V7F÷'’“°Ğ¢G'Ğ¢°Ğ¢W6–ærf"WfVçG2Ò§6öæÅ'VäWfVçE7F÷&Rä7&VFTæWr…F‚ä6öÖ&–æR‡F×W&VE'VäF—&V7F÷'’Â&WfVçG2æ§6öæÂ"’Â'&WV—&VB×"×F×W&VBÖ6öÖÖVçB"“°Ğ¢f"V&Æ—6†W"ÒæWr7GV%v÷&¶fÆ÷uV&Æ—6†W"²F×W%&Wf–Wt6öÖÖVçDWf–FVæ6RÒG'VRÓ°Ğ¢f"'VææW"ÒæWr6÷VçF–æuV&Æ–6F–öävVçE'VææW"„f¶U66Væ&–òå7V66W72“°Ğ¢f"&W7VÇBÒæWrf¶TvVçEv÷&¶fÆ÷r‚’å'Vâ…6×ÆT6öçG&7B‚’v—F€Ğ¢²v÷&¶–ætF—&V7F÷'’ÒF×W&VE&ö÷BÂ&W÷'F–ærÒæWr&W÷'F–æu&WV—&VÖVçG2²VÆÅ&WVW7DW‡V7FVBÒG'VRÂf–æÅ&W÷'Df÷&ÖBÒ&Ö&¶F÷vâ"ÒÒÀĞ¢&6öçG&7BÖ†6‚"Â'&WV—&VB×"×F×W&VBÖ6öÖÖVçB"ÂF×W&VE'VäF—&V7F÷'’Â'VææW"ÂWfVçG2ÀĞ¢6öFW„öæU6†÷C¢G'VRÂV&Æ—6†W#¢V&Æ—6†W"“°Ğ¢WfVçG2äF—7÷6R‚“°Ğ Ğ¢76W'BäWVÂ…'Vå7FFRäf–ÆVBÂ&W7VÇBå7FFR“°Ğ¢f"ÆörÒf–ÆRå&VDÆÅFW‡B…F‚ä6öÖ&–æR‡F×W&VE'VäF—&V7F÷'’Â&WfVçG2æ§6öæÂ"’“°Ğ¢76W'BåG'VR†Æörä6öçF–ç2‚&v—F‡V%÷&Wf–Wu÷&W7VÇEö6öÖÖVçEöf–ÆVB"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BäfÇ6R†Æörä6öçF–ç2‚&v—F‡V%÷&Wf–Wu÷&W7VÇEö6öÖÖVçE÷÷7FVB"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR„f–ÆRäW†—7G2…F‚ä6öÖ&–æR‡F×W&VE'VäF—&V7F÷'’Â&v—F‡V"×&Wf–WrÖ6öÖÖVçBæ§6öâ"’’“°Ğ¢ĞĞ¢f–æÆÇ’²F—&V7F÷'’äFVÆWFR‡F×W&VE&ö÷BÂG'VR“²ĞĞ§ĞĞ Ğ§7FF–2fö–B&WV—&VEVÆÅ&WVW7Ev÷&¶fÆ÷u7F÷4GW&–æuW6‚‚Ğ§°Ğ¢f"&ö÷BÒF‚ä6öÖ&–æR…F‚ävWEFV×F‚‚’ÂB'&WV—&VB×"Ö6æ6VÂ×W6‚×´wV–BäæWtwV–B‚“¤çÒ"“°Ğ¢f"'VäF—&V7F÷'’ÒF‚ä6öÖ&–æR‡&ö÷BÂ''Vâ"“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‡&ö÷B“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‡'VäF—&V7F÷'’“°Ğ¢G'Ğ¢°Ğ¢W6–ærf"WfVçG2Ò§6öæÅ'VäWfVçE7F÷&Rä7&VFTæWr…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&WfVçG2æ§6öæÂ"’Â'&WV—&VB×"Ö6æ6VÂ×W6‚"“°Ğ¢W6–ærf"7F÷ÒæWr6æ6VÆÆF–öåFö¶Vå6÷W&6R‚“°Ğ¢f"V&Æ—6†W"ÒæWr7GV%v÷&¶fÆ÷uV&Æ—6†W"²6æ6VÄGW&–æuW6‚Ò7F÷Ó°Ğ¢f"'VææW"ÒæWr6÷VçF–æuV&Æ–6F–öävVçE'VææW"„f¶U66Væ&–òå7V66W72“°Ğ¢f"&W7VÇBÒæWrf¶TvVçEv÷&¶fÆ÷r‚’å'Vâ…6×ÆT6öçG&7B‚’v—F€Ğ¢²v÷&¶–ætF—&V7F÷'’Ò&ö÷BÂ&W÷'F–ærÒæWr&W÷'F–æu&WV—&VÖVçG2²VÆÅ&WVW7DW‡V7FVBÒG'VRÂf–æÅ&W÷'Df÷&ÖBÒ&Ö&¶F÷vâ"ÒÒÀĞ¢&6öçG&7BÖ†6‚"Â'&WV—&VB×"Ö6æ6VÂ×W6‚"Â'VäF—&V7F÷'’Â'VææW"ÂWfVçG2ÀĞ¢7F÷Fö¶Vã¢7F÷åFö¶VâÂ6öFW„öæU6†÷C¢G'VRÂV&Æ—6†W#¢V&Æ—6†W"“°Ğ¢WfVçG2äF—7÷6R‚“°Ğ¢76W'BäWVÂ…'Vå7FFRäf–ÆVBÂ&W7VÇBå7FFR“°Ğ¢76W'BäWVÂƒÂ'VææW"å&Wf–Wt6ÆÇ2“°Ğ¢76W'BåG'VR„f–ÆRå&VDÆÅFW‡B…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&WfVçG2æ§6öæÂ"’’ä6öçF–ç2‚&v—F‡V%÷V&Æ–6F–öåö6æ6VÆÆVB"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢ĞĞ¢f–æÆÇ’²F—&V7F÷'’äFVÆWFR‡&ö÷BÂG'VR“²ĞĞ§ĞĞ Ğ§7FF–2fö–B&WV—&VEVÆÅ&WVW7Ev÷&¶fÆ÷u7F÷4GW&–æu$7&VF–öâ‚Ğ§°Ğ¢f"&ö÷BÒF‚ä6öÖ&–æR…F‚ävWEFV×F‚‚’ÂB'&WV—&VB×"Ö6æ6VÂÖ7&VFR×´wV–BäæWtwV–B‚“¤çÒ"“°Ğ¢f"'VäF—&V7F÷'’ÒF‚ä6öÖ&–æR‡&ö÷BÂ''Vâ"“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‡&ö÷B“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‡'VäF—&V7F÷'’“°Ğ¢G'Ğ¢°Ğ¢W6–ærf"WfVçG2Ò§6öæÅ'VäWfVçE7F÷&Rä7&VFTæWr…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&WfVçG2æ§6öæÂ"’Â'&WV—&VB×"Ö6æ6VÂÖ7&VFR"“°Ğ¢W6–ærf"7F÷ÒæWr6æ6VÆÆF–öåFö¶Vå6÷W&6R‚“°Ğ¢f"V&Æ—6†W"ÒæWr7GV%v÷&¶fÆ÷uV&Æ—6†W"²6æ6VÄGW&–æu$7&VF–öâÒ7F÷Ó°Ğ¢f"'VææW"ÒæWr6÷VçF–æuV&Æ–6F–öävVçE'VææW"„f¶U66Væ&–òå7V66W72“°Ğ¢f"&W7VÇBÒæWrf¶TvVçEv÷&¶fÆ÷r‚’å'Vâ…6×ÆT6öçG&7B‚’v—F€Ğ¢²v÷&¶–ætF—&V7F÷'’Ò&ö÷BÂ&W÷'F–ærÒæWr&W÷'F–æu&WV—&VÖVçG2²VÆÅ&WVW7DW‡V7FVBÒG'VRÂf–æÅ&W÷'Df÷&ÖBÒ&Ö&¶F÷vâ"ÒÒÀĞ¢&6öçG&7BÖ†6‚"Â'&WV—&VB×"Ö6æ6VÂÖ7&VFR"Â'VäF—&V7F÷'’Â'VææW"ÂWfVçG2ÀĞ¢7F÷Fö¶Vã¢7F÷åFö¶VâÂ6öFW„öæU6†÷C¢G'VRÂV&Æ—6†W#¢V&Æ—6†W"“°Ğ¢WfVçG2äF—7÷6R‚“°Ğ¢76W'BäWVÂ…'Vå7FFRäf–ÆVBÂ&W7VÇBå7FFR“°Ğ¢76W'BäfÇ6R„f–ÆRå&VDÆÅFW‡B…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&WfVçG2æ§6öæÂ"’’ä6öçF–ç2‚&v—F‡V%÷VÆÅ÷&WVW7Eö7&VFVB"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR„f–ÆRå&VDÆÅFW‡B…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&WfVçG2æ§6öæÂ"’’ä6öçF–ç2‚&v—F‡V%÷V&Æ–6F–öåö6æ6VÆÆVB"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢ĞĞ¢f–æÆÇ’²F—&V7F÷'’äFVÆWFR‡&ö÷BÂG'VR“²ĞĞ§ĞĞ Ğ§7FF–2fö–B&WV—&VEVÆÅ&WVW7Ev÷&¶fÆ÷u7F÷4gFW%fW&–f–VEW6‚‚Ğ§°Ğ¢f"&ö÷BÒF‚ä6öÖ&–æR…F‚ävWEFV×F‚‚’ÂB'&WV—&VB×"Ö6æ6VÂÖgFW"×W6‚×´wV–BäæWtwV–B‚“¤çÒ"“°Ğ¢f"'VäF—&V7F÷'’ÒF‚ä6öÖ&–æR‡&ö÷BÂ''Vâ"“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‡&ö÷B“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‡'VäF—&V7F÷'’“°Ğ¢G'Ğ¢°Ğ¢W6–ærf"WfVçG2Ò§6öæÅ'VäWfVçE7F÷&Rä7&VFTæWr…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&WfVçG2æ§6öæÂ"’Â'&WV—&VB×"Ö6æ6VÂÖgFW"×W6‚"“°Ğ¢W6–ærf"7F÷ÒæWr6æ6VÆÆF–öåFö¶Vå6÷W&6R‚“°Ğ¢f"V&Æ—6†W"ÒæWr7GV%v÷&¶fÆ÷uV&Æ—6†W"²6æ6VÄgFW%W6‚Ò7F÷Ó°Ğ¢f"'VææW"ÒæWr6÷VçF–æuV&Æ–6F–öävVçE'VææW"„f¶U66Væ&–òå7V66W72“°Ğ¢f"&W7VÇBÒæWrf¶TvVçEv÷&¶fÆ÷r‚’å'Vâ…6×ÆT6öçG&7B‚’v—F€Ğ¢²v÷&¶–ætF—&V7F÷'’Ò&ö÷BÂ&W÷'F–ærÒæWr&W÷'F–æu&WV—&VÖVçG2²VÆÅ&WVW7DW‡V7FVBÒG'VRÂf–æÅ&W÷'Df÷&ÖBÒ&Ö&¶F÷vâ"ÒÒÀĞ¢&6öçG&7BÖ†6‚"Â'&WV—&VB×"Ö6æ6VÂÖgFW"×W6‚"Â'VäF—&V7F÷'’Â'VææW"ÂWfVçG2ÀĞ¢7F÷Fö¶Vã¢7F÷åFö¶VâÂ6öFW„öæU6†÷C¢G'VRÂV&Æ—6†W#¢V&Æ—6†W"“°Ğ¢WfVçG2äF—7÷6R‚“°Ğ¢f"ÆörÒf–ÆRå&VDÆÅFW‡B…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&WfVçG2æ§6öæÂ"’“°Ğ¢76W'BäWVÂ…'Vå7FFRäf–ÆVBÂ&W7VÇBå7FFR“°Ğ¢76W'BäWVÂƒÂ'VææW"å&Wf–Wt6ÆÇ2“°Ğ¢76W'BåG'VR†Æörä6öçF–ç2‚&v—F‡V%÷W6…÷fW&–f–VB"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR†Æörä6öçF–ç2‚&v—F‡V%÷V&Æ–6F–öåö6æ6VÆÆVB"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR†Æörä6öçF–ç2‚&†VB×6†Ó"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢ĞĞ¢f–æÆÇ’²F—&V7F÷'’äFVÆWFR‡&ö÷BÂG'VR“²ĞĞ§ĞĞ Ğ§7FF–2fö–B&WV—&VEVÆÅ&WVW7Ev÷&¶fÆ÷tf–Ç46Æ÷6VDöåW6„f–ÇW&R‚Ğ§°Ğ¢f"&ö÷BÒF‚ä6öÖ&–æR…F‚ävWEFV×F‚‚’ÂB'&WV—&VB×"Öf–Â×´wV–BäæWtwV–B‚“¤çÒ"“°Ğ¢f"'VäF—&V7F÷'’ÒF‚ä6öÖ&–æR‡&ö÷BÂ''Vâ"“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‡&ö÷B“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‡'VäF—&V7F÷'’“°Ğ¢G'Ğ¢°Ğ¢W6–ærf"WfVçG2Ò§6öæÅ'VäWfVçE7F÷&Rä7&VFTæWr…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&WfVçG2æ§6öæÂ"’Â'&WV—&VB×"Öf–Â×FW7B"“°Ğ¢f"V&Æ—6†W"ÒæWr7GV%v÷&¶fÆ÷uV&Æ—6†W"²f–ÅW6‚ÒG'VRÓ°Ğ¢f"'VææW"ÒæWr6÷VçF–æuV&Æ–6F–öävVçE'VææW"„f¶U66Væ&–òå7V66W72“°Ğ¢f"&W7VÇBÒæWrf¶TvVçEv÷&¶fÆ÷r‚’å'Vâ…6×ÆT6öçG&7B‚’v—F€Ğ¢²v÷&¶–ætF—&V7F÷'’Ò&ö÷BÂ&W÷'F–ærÒæWr&W÷'F–æu&WV—&VÖVçG2²VÆÅ&WVW7DW‡V7FVBÒG'VRÂf–æÅ&W÷'Df÷&ÖBÒ&Ö&¶F÷vâ"ÒÒÀĞ¢&6öçG&7BÖ†6‚"Â'&WV—&VB×"Öf–Â×FW7B"Â'VäF—&V7F÷'’Â'VææW"ÂWfVçG2ÀĞ¢6öFW„öæU6†÷C¢G'VRÂV&Æ—6†W#¢V&Æ—6†W"“°Ğ¢WfVçG2äF—7÷6R‚“°Ğ Ğ¢76W'BäWVÂ…'Vå7FFRäf–ÆVBÂ&W7VÇBå7FFR“°Ğ¢76W'BåG'VR‡&W7VÇBåW'6—7FVæ6U7V66VVFVB“°Ğ¢76W'BäWVÂ‚'7F'BÇW6‚"Â7G&–ærä¦ö–â‚rÂrÂV&Æ—6†W"ä6ÆÇ2’“°Ğ¢76W'BäWVÂƒÂ'VææW"å&Wf–Wt6ÆÇ2“°Ğ¢76W'BäfÇ6R„f–ÆRäW†—7G2…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&v—F‡V"×VÆÂ×&WVW7Bæ§6öâ"’’“°Ğ¢76W'BåG'VR„f–ÆRå&VDÆÅFW‡B…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â'&W÷'BæÖB"’’ä6öçF–ç2‚.h‰X©şh›8N8¾8ş8~8n8N8î8¾8)2"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢ĞĞ¢f–æÆÇ’²F—&V7F÷'’äFVÆWFR‡&ö÷BÂG'VR“²ĞĞ§ĞĞ Ğ§7FF–2fö–B&WV—&VEVÆÅ&WVW7Ev÷&¶fÆ÷tf–Ç46Æ÷6VDöå$f–ÇW&R‚Ğ§°Ğ¢f"&ö÷BÒF‚ä6öÖ&–æR…F‚ävWEFV×F‚‚’ÂB'&WV—&VB×"Ö7&VFRÖf–Â×´wV–BäæWtwV–B‚“¤çÒ"“°Ğ¢f"'VäF—&V7F÷'’ÒF‚ä6öÖ&–æR‡&ö÷BÂ''Vâ"“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‡&ö÷B“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‡'VäF—&V7F÷'’“°Ğ¢G'Ğ¢°Ğ¢W6–ærf"WfVçG2Ò§6öæÅ'VäWfVçE7F÷&Rä7&VFTæWr…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&WfVçG2æ§6öæÂ"’Â'&WV—&VB×"Ö7&VFRÖf–Â×FW7B"“°Ğ¢f"V&Æ—6†W"ÒæWr7GV%v÷&¶fÆ÷uV&Æ—6†W"²f–Ä7&VFUVÆÅ&WVW7BÒG'VRÓ°Ğ¢f"'VææW"ÒæWr6÷VçF–æuV&Æ–6F–öävVçE'VææW"„f¶U66Væ&–òå7V66W72“°Ğ¢f"&W7VÇBÒæWrf¶TvVçEv÷&¶fÆ÷r‚’å'Vâ…6×ÆT6öçG&7B‚’v—F€Ğ¢²v÷&¶–ætF—&V7F÷'’Ò&ö÷BÂ&W÷'F–ærÒæWr&W÷'F–æu&WV—&VÖVçG2²VÆÅ&WVW7DW‡V7FVBÒG'VRÂf–æÅ&W÷'Df÷&ÖBÒ&Ö&¶F÷vâ"ÒÒÀĞ¢&6öçG&7BÖ†6‚"Â'&WV—&VB×"Ö7&VFRÖf–Â×FW7B"Â'VäF—&V7F÷'’Â'VææW"ÂWfVçG2ÀĞ¢6öFW„öæU6†÷C¢G'VRÂV&Æ—6†W#¢V&Æ—6†W"“°Ğ¢WfVçG2äF—7÷6R‚“°Ğ Ğ¢76W'BäWVÂ…'Vå7FFRäf–ÆVBÂ&W7VÇBå7FFR“°Ğ¢76W'BåG'VR‡&W7VÇBåW'6—7FVæ6U7V66VVFVB“°Ğ¢76W'BäWVÂ‚'7F'BÇW6‚Æ7&VFR×""Â7G&–ærä¦ö–â‚rÂrÂV&Æ—6†W"ä6ÆÇ2’“°Ğ¢76W'BäfÇ6R„f–ÆRäW†—7G2…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&v—F‡V"×VÆÂ×&WVW7Bæ§6öâ"’’“°Ğ¢76W'BäfÇ6R„f–ÆRå&VDÆÅFW‡B…F‚ä6öÖ&–æR‡'VäF—&V7F÷'’Â&WfVçG2æ§6öæÂ"’’ä6öçF–ç2‚&v—F‡V%÷VÆÅ÷&WVW7Eö7&VFVB"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢ĞĞ¢f–æÆÇ’²F—&V7F÷'’äFVÆWFR‡&ö÷BÂG'VR“²ĞĞ§ĞĞ Ğ§7FF–2–çB'Väf¶T6öFW„f—‡GW&R‡7G&–æuµÒ&w2Ğ§°Ğ¢6öç6öÆRä–çWDVæ6öF–ærÒæWr7—7FVÒåFW‡BåUDc„Væ6öF–ær†fÇ6R“°Ğ¢6öç6öÆRä÷WGWDVæ6öF–ærÒæWr7—7FVÒåFW‡BåUDc„Væ6öF–ær†fÇ6R“°Ğ¢f"ÖöFRÒ&w2äÆVæwF‚âò&w5³Ò¢'7V66W72#°Ğ¢–b†ÖöFRÓÒ&6†–ÆB×6ÆVWW""’²F‡&VBå6ÆVWƒó“²&WGW&â²ĞĞ¢–b†&w5µãÒÓÒ"Ò×fW'6–öâ"Ğ¢°Ğ¢–b†ÖöFRÓÒ'fW'6–öâ×F–ÖV÷WB"’F‡&VBå6ÆVWƒeó“°Ğ¢6öç6öÆRåw&—FTÆ–æR‚&6öFW‚Ö6Æ’f—‡GW&RÓ"“°Ğ¢&WGW&â°Ğ¢ĞĞ¢W6–ærf"&ö×D'VffW"ÒæWrÖVÖ÷'•7G&VÒ‚“°Ğ¢6öç6öÆRä÷Vå7FæF&D–çWB‚’ä6÷•Fò‡&ö×D'VffW"“°Ğ¢f"&ö×D'—FW2Ò&ö×D'VffW"åFô'&’‚“°Ğ¢f"&ö×BÒæWrUDc„Væ6öF–ær†fÇ6RÂG'VR’ävWE7G&–ær‡&ö×D'—FW2“°Ğ¢–b‡&ö×Bä6öçF–ç2‚%$ôÄSÔ”ÕÄTÔTåDU""Â7G&–æt6ö×&—6öâä÷&F–æÂ’ÇÂ&ö×Bä6öçF–ç2‚%$ôÄSÕ$Ud”UtU""Â7G&–æt6ö×&—6öâä÷&F–æÂ’Ğ¢°Ğ¢f"6öçG&7DÖ&¶W"Ò.ZY{HC¥Æâ#°Ğ¢f"6öçG&7E7F'BÒ&ö×Bä–æFW„öb†6öçG&7DÖ&¶W"Â7G&–æt6ö×&—6öâä÷&F–æÂ“°Ğ¢–b†6öçG&7E7F'BÂ’F‡&÷ræWr–çfÆ–D÷W&F–öäW†6WF–öâ‚$f¶R6öFW89~8:Ş8;>89~888¾ZY{HD¥4ôî8Î8.8(®8î8¾8)>8""“°Ğ¢6öçG&7E7F'B³Ò6öçG&7DÖ&¶W"äÆVæwFƒ°Ğ¢f"6öçG&7DVæBÒ&ö×Bä–æFW„öb‚%ÆåÆîY»®Zé®h‰iéÎxš“¢"Â6öçG&7E7F'BÂ7G&–æt6ö×&—6öâä÷&F–æÂ“°Ğ¢f"&Wf–Wtf–æF–æu7F'BÒ&ö×Bä–æFW„öb‚%ÆîX˜ŞY¹î8:Î89>8:^8;ÎhÈ~iƒ¢"Â6öçG&7E7F'BÂ7G&–æt6ö×&—6öâä÷&F–æÂ“°Ğ¢–b‡&Wf–Wtf–æF–æu7F'BãÒbb†6öçG&7DVæBÂÇÂ&Wf–Wtf–æF–æu7F'BÂ6öçG&7DVæB’Ğ¢6öçG&7DVæBÒ&Wf–Wtf–æF–æu7F'C°Ğ¢–b†6öçG&7DVæBÂ’6öçG&7DVæBÒ&ö×BäÆVæwFƒ°Ğ¢W6–ærf"6öçG&7D§6öâÒ§6öäFö7VÖVçBå'6R‡&ö×E¶6öçG&7E7F'Bâæ6öçG&7DVæEÒ“°Ğ¢f"66÷RÒ6öçG&7D§6öâå&ö÷DVÆVÖVçBävWE&÷W'G’‚%66÷R"“°Ğ¢f"–æ6ÇVFVBÒ66÷RävWE&÷W'G’‚$–æ6ÇVFVB"’äVçVÖW&FT'&’‚’å6VÆV7B‡fÇVRÓâfÇVRävWE7G&–ær‚’óòF‡&÷ræWr–çfÆ–D÷W&F–öäW†6WF–öâ‚$–æ6ÇVFVN8¾ih~ZÙ~X‰~Kº^ZIn8îX
+N8Î8.8(®8î88""’’åFô'&’‚“°Ğ¢f"W†6ÇVFVBÒ66÷RävWE&÷W'G’‚$W†6ÇVFVB"’äVçVÖW&FT'&’‚’å6VÆV7B‡fÇVRÓâfÇVRävWE7G&–ær‚’óòF‡&÷ræWr–çfÆ–D÷W&F–öäW†6WF–öâ‚$W†6ÇVFVN8¾ih~ZÙ~X‰~Kº^ZIn8îX
+N8Î8.8(®8î88""’’åFô'&’‚“°Ğ¢f"öÆ–7’ÒæWpĞ¢°Ğ¢66÷Uö–æ6ÇVFVBÒ–æ6ÇVFVBÀĞ¢66÷UöW†6ÇVFVBÒW†6ÇVFVBÀĞ¢÷5ö&÷VæF'•öF—66Æ–ÖVBÒ&ö×Bä6öçF–ç2‚.KÙÎjZŞzøNY».8ôvVçN88îhÈ~zK®8~8.8(®8õ>8:Î898:¾8~zøNY».ZIn8*.8*ş8+¾8+8).ZèÎXZ8¾™‹.8KùŞŠ‹Î8~8ş8.8(®8î8¾8)>8""Â7G&–æt6ö×&—6öâä÷&F–æÂ’ÀĞ¢WFc…ö&öÕ÷&W6VçBÒ&ö×D'—FW2ä57â‚’å7F'G5v—F‚„Væ6öF–æråUDc‚ävWE&VÖ&ÆR‚’Ğ¢Ó°Ğ¢6öç6öÆRåw&—FTÆ–æR‚B'·µÂ'G—UÂ#¥Â&f—‡GW&Rç&ö×E÷öÆ–7•Â"ÅÂ'öÆ–7•Â#§´§6öå6W&–Æ—¦W"å6W&–Æ—¦R‡öÆ–7’—××Ò"“°Ğ¢ĞĞ¢6öç6öÆRäW'&÷"åw&—FTÆ–æR‚&f—‡GW&Rv&æ–æs¢7FFW'"—2–æFWVæFVçBg&öÒF†RFW&Ö–æÂ7FGW2"“°Ğ¢f"&÷‡’ÒæWuµÒ²$…EE5õ$õ…’"Â$…EEõ$õ…’"Â$ÄÅõ$õ…’"Â&‡GG5÷&÷‡’"Â&‡GG÷&÷‡’"Â&ÆÅ÷&÷‡’"ĞĞ¢å6VÆV7B„Vçf—&öæÖVçBävWDVçf—&öæÖVçEf&–&ÆR’äf—'7D÷$FVfVÇB‡fÇVRÓâ7G&–ærä—4çVÆÄ÷%v†—FU76R‡fÇVR’“°Ğ¢–b†ÖöFRÓÒ'&÷‡’Ö÷WGWB"Ğ¢°Ğ¢6öç6öÆRåw&—FTÆ–æR‚'µÂ'G—UÂ#¥Â&f—‡GW&Rç&÷‡•÷W6W&æÖUÂ"ÅÂ'W6W&æÖUÂ#¥Â'7Æ—B×&÷‡’×W6W%Â'Ò"“°Ğ¢6öç6öÆRäW'&÷"åw&—FTÆ–æR‚'&÷‡’F–væ÷7F–277v÷&C¢7Æ—B×&÷‡’×77v÷&B"“°Ğ¢6öç6öÆRåw&—FTÆ–æR‚B'·µÂ'G—UÂ#¥Â&f—‡GW&Rç&÷‡•öF–væ÷7F–5Â"ÅÂ&ÖW76vUÂ#§´§6öå6W&–Æ—¦W"å6W&–Æ—¦R‚B'&÷‡’F–væ÷7F–2U$Ã¢·&÷‡—Ò"—××Ò"“°Ğ¢ĞĞ¢–b†ÖöFRÓÒ'F–ÖV÷WB×v—F‚Ö6†–ÆB"Ğ¢°Ğ¢f"6†–ÆBÒ&ö6W72å7F'B†æWr&ö6W757F'D–æfò„Vçf—&öæÖVçBå&ö6W75F‚Ğ¢°Ğ¢W6U6†VÆÄW†V7WFRÒfÇ6RÀĞ¢&wVÖVçDÆ—7BÒ²"ÒÖf¶RÖ6öFW‚Öf—‡GW&R"Â&6†–ÆB×6ÆVWW""ĞĞ¢Ò’óòF‡&÷ræWr–çfÆ–D÷W&F–öäW†6WF–öâ‚&f—‡GW&R6†–ÆB&ö6W72F–Bæ÷B7F'B"“°Ğ¢6öç6öÆRåw&—FTÆ–æR‚B'·µÂ'G—UÂ#¥Â&f—‡GW&Ræ6†–ÆEÂ"ÅÂ'&ö6W75ö–EÂ#§¶6†–ÆBä–G××Ò"“°Ğ¢6öç6öÆRä÷WBäfÇW6‚‚“°Ğ¢F‡&VBå6ÆVWƒó“°Ğ¢&WGW&â°Ğ¢ĞĞ¢–b†ÖöFRÓÒ'F–ÖV÷WB"’²F‡&VBå6ÆVWƒUó“²&WGW&â²ĞĞ¢–b†ÖöFRÓÒ&6æ6VÂ"Ğ¢°Ğ¢f"6–væÅF‚ÒF‚ä6öÖ&–æR„Vçf—&öæÖVçBä7W'&VçDF—&V7F÷'’Â&f¶RÖ6öFW‚×7F'FVBç6–væÂ"“°Ğ¢f"FV×÷&'•6–væÅF‚Ò6–væÅF‚²"çF×#°Ğ¢f–ÆRåw&—FTÆÅFW‡B‡FV×÷&'•6–væÅF‚Â'7F'FVB"“°Ğ¢f–ÆRäÖ÷fR‡FV×÷&'•6–væÅF‚Â6–væÅF‚“°Ğ¢F‡&VBå6ÆVWƒUó“°Ğ¢&WGW&â°Ğ¢ĞĞ¢–b†ÖöFRÓÒ&¶–ÆÂÖf–ÇW&R"’²F‡&VBå6ÆVWƒS“²&WGW&â²ĞĞ¢–b‡&ö×Bä6öçF–ç2‚%$ôÄSÔ”ÕÄTÔTåDU""Â7G&–æt6ö×&—6öâä÷&F–æÂ’’f–ÆRåw&—FTÆÅFW‡B‚&W†×ÆRçG‡B"Â&f—‡GW&R6†ævUÆâ"“°Ğ¢–b†ÖöFRÓÒ&W†V7WF&ÆRÖÖöFRÖ6†ævR"bb&ö×Bä6öçF–ç2‚%$ôÄSÔ”ÕÄTÔTåDU""Â7G&–æt6ö×&—6öâä÷&F–æÂ’bb÷W&F–æu7—7FVÒä—5v–æF÷w2‚’Ğ¢f–ÆRå6WEVæ—„f–ÆTÖöFR‚&W†×ÆRçG‡B"ÂVæ—„f–ÆTÖöFRåW6W%&VBÂVæ—„f–ÆTÖöFRåW6W%w&—FRÂVæ—„f–ÆTÖöFRåW6W$W†V7WFR“°Ğ¢–b†ÖöFRÓÒ&æWrÖW†V7WF&ÆR"bb&ö×Bä6öçF–ç2‚%$ôÄSÔ”ÕÄTÔTåDU""Â7G&–æt6ö×&—6öâä÷&F–æÂ’bb÷W&F–æu7—7FVÒä—5v–æF÷w2‚’Ğ¢°Ğ¢f–ÆRåw&—FTÆÅFW‡B‚&æWr×67&—Bç6‚"Â"2ö&–â÷6…ÆæV6†òf—‡GW&UÆâ"“°Ğ¢f–ÆRå6WEVæ—„f–ÆTÖöFR‚&æWr×67&—Bç6‚"ÂVæ—„f–ÆTÖöFRåW6W%&VBÂVæ—„f–ÆTÖöFRåW6W%w&—FRÂVæ—„f–ÆTÖöFRåW6W$W†V7WFR“°Ğ¢ĞĞ¢–b†ÖöFRÓÒ'VçG&6¶VBÖ&–æ'’"bb&ö×Bä6öçF–ç2‚%$ôÄSÔ”ÕÄTÔTåDU""Â7G&–æt6ö×&—6öâä÷&F–æÂ’Ğ¢f–ÆRåw&—FTÆÄ'—FW2‚&f—‡GW&RÖ66†RæF""Â³ƒC2ÂƒSbÂƒCRÂƒS"ÂƒS2ÂƒC’ÂƒFbÂƒFRÂƒS2ÂƒÂƒÒ“°Ğ¢–b‡&ö×Bä6öçF–ç2‚%$ôÄSÕ$Ud”UtU""Â7G&–æt6ö×&—6öâä÷&F–æÂ’bbÖöFR—2'v÷&¶fÆ÷r"÷"&'F–f7BÖöæÇ’"Ğ¢°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‚&'F–f7G2"“°Ğ¢f–ÆRåw&—FTÆÅFW‡B…F‚ä6öÖ&–æR‚&'F–f7G2"Â'&Wf–WrÖæ÷FW2çG‡B"’Â&f—‡GW&R7WÆVÖVçFÂ'F–f7B"“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’…F‚ä6öÖ&–æR‚&'F–f7G2"Â&æÇ—6—2"’“°Ğ¢f–ÆRåw&—FTÆÅFW‡B…F‚ä6öÖ&–æR‚&'F–f7G2"Â&æÇ—6—2"Â'&÷÷6Âæ§6öâ"’Â'µÂ'&÷÷6ÅÂ#§G'VWÒ"“°Ğ¢ĞĞ¢6öç6öÆRåw&—FTÆ–æR‚B'·µÂ'G—UÂ#¥Â&f—‡GW&Ræ&wVÖVçG5Â"ÅÂ&&wVÖVçG5Â#§´§6öå6W&–Æ—¦W"å6W&–Æ—¦R†&w2—××Ò"“°Ğ¢6öç6öÆRåw&—FTÆ–æR‚B'·µÂ'G—UÂ#¥Â&f—‡GW&RæVçf—&öæÖVçEÂ"ÅÂ&÷Væ•ö¶W•÷&W6VçEÂ#§²„Vçf—&öæÖVçBävWDVçf—&öæÖVçEf&–&ÆR‚$õTä•ô•ô´U’"’—2çVÆÂò&fÇ6R"¢'G'VR"—ÒÅÂ&‡GG5÷&÷‡•÷&W6VçEÂ#§²„Vçf—&öæÖVçBävWDVçf—&öæÖVçEf&–&ÆR‚$…EE5õ$õ…’"’—2çVÆÂò&fÇ6R"¢'G'VR"—××Ò"“°Ğ¢f"Vçf—&öæÖVçEF‡2ÒæWrF–7F–öæ'“Ç7G&–ærÂ7G&–æsóàĞ¢°Ğ¢²$4ôDU…ô„ôÔR%ÒÒVçf—&öæÖVçBävWDVçf—&öæÖVçEf&–&ÆR‚$4ôDU…ô„ôÔR"’ÀĞ¢²$„ôÔR%ÒÒVçf—&öæÖVçBävWDVçf—&öæÖVçEf&–&ÆR‚$„ôÔR"’ÀĞ¢²%U4U%$ôd”ÄR%ÒÒVçf—&öæÖVçBävWDVçf—&öæÖVçEf&–&ÆR‚%U4U%$ôd”ÄR"’ÀĞ¢²$DD%ÒÒVçf—&öæÖVçBävWDVçf—&öæÖVçEf&–&ÆR‚$DD"’ÀĞ¢²$Äô4ÄDD%ÒÒVçf—&öæÖVçBävWDVçf—&öæÖVçEf&–&ÆR‚$Äô4ÄDD"’ÀĞ¢²%DTÕ%ÒÒVçf—&öæÖVçBävWDVçf—&öæÖVçEf&–&ÆR‚%DTÕ"’ÀĞ¢²%DÕ%ÒÒVçf—&öæÖVçBävWDVçf—&öæÖVçEf&–&ÆR‚%DÕ"’ÀĞ¢²%DÕD•"%ÒÒVçf—&öæÖVçBävWDVçf—&öæÖVçEf&–&ÆR‚%DÕD•""’ÀĞ¢²%7—7FVÔG&—fR%ÒÒVçf—&öæÖVçBävWDVçf—&öæÖVçEf&–&ÆR‚%7—7FVÔG&—fR"Ğ¢Ó°Ğ¢6öç6öÆRåw&—FTÆ–æR‚B'·µÂ'G—UÂ#¥Â&f—‡GW&RæVçf—&öæÖVçE÷F‡5Â"ÅÂ'F‡5Â#§´§6öå6W&–Æ—¦W"å6W&–Æ—¦R†Vçf—&öæÖVçEF‡2—××Ò"“°Ğ¢–b‡&ö×Bä6öçF–ç2‚%$ôÄSÕ$Ud”UtU""Â7G&–æt6ö×&—6öâä÷&F–æÂ’Ğ¢6öç6öÆRåw&—FTÆ–æR‚B'·µÂ'G—UÂ#¥Â&f—‡GW&Rç&Wf–WvW%ö–çWEÂ"ÅÂ'6VÆeö76W76ÖVçE÷&W6VçEÂ#§·&ö×Bä6öçF–ç2‚$”ÕÄTÔTåDU"Õ4TÄbÔ54U54ÔTåBÕ4T5$UB"Â7G&–æt6ö×&—6öâä÷&F–æÂ’åFõ7G&–ær‚’åFôÆ÷vW$–çf&–çB‚—××Ò"“°Ğ¢–b†ÖöFRÓÒ&ÖÆf÷&ÖVB"’6öç6öÆRåw&—FTÆ–æR‚'¶æ÷BÖ§6öâ"“°Ğ¢f"F‡&VD–BÒ&ö×Bä6öçF–ç2‚%$ôÄSÕ$Ud”UtU""Â7G&–æt6ö×&—6öâä÷&F–æÂĞ¢ò&ö×Bä6öçF–ç2‚%$Ud”UuôEDTÕC¢"Â7G&–æt6ö×&—6öâä÷&F–æÂ’ò'F‡&VBÖf—‡GW&R×&Wf–WvW"Ó"¢'F‡&VBÖf—‡GW&R×&Wf–WvW"Ó" Ğ¢¢'F‡&VBÖf—‡GW&RÖ–×ÆVÖVçFW"#°Ğ¢6öç6öÆRåw&—FTÆ–æR‚B'·µÂ'G—UÂ#¥Â'F‡&VBç7F'FVEÂ"ÅÂ'F‡&VEö–EÂ#¥Â'·F‡&VD–GÕÂ'×Ò"“°Ğ¢6öç6öÆRåw&—FTÆ–æR‚'µÂ'G—UÂ#¥Â&gWGW&RçVæ¶æ÷våÂ"ÅÂ&W‡G&Â#§G'VWÒ"“°Ğ¢–b†ÖöFRÒ&V×G’"bb†ÖöFRÓÒ&'F–f7BÖöæÇ’"bb&ö×Bä6öçF–ç2‚%$ôÄSÕ$Ud”UtU""Â7G&–æt6ö×&—6öâä÷&F–æÂ’’Ğ¢°Ğ¢f"ÖW76vRÒÖöFRÓÒ'&÷‡’Ö÷WGWB"bb&ö×Bä6öçF–ç2‚%$ôÄSÕ$Ud”UtU""Â7G&–æt6ö×&—6öâä÷&F–æÂĞ¢ò.8:Î89>8:^8;ÎYjÃ¢&÷‡’7&VFVçF–Ç27Æ—B×&÷‡’×W6W"ò7Æ—B×&÷‡’×77v÷&B Ğ¢¢ÖöFRÓÒ'&÷‡’Ö÷WGWB"ò'&÷‡’7&VFVçF–Ç27Æ—B×&÷‡’×W6W"ò7Æ—B×&÷‡’×77v÷&B Ğ¢¢ÖöFRÓÒ'v÷&¶fÆ÷r"bb&ö×Bä6öçF–ç2‚%$ôÄSÕ$Ud”UtU""Â7G&–æt6ö×&—6öâä÷&F–æÂĞ¢ò&ö×Bä6öçF–ç2‚%$Ud”UuôEDTÕC¢"Â7G&–æt6ö×&—6öâä÷&F–æÂ’ò.hÈ~iƒ¢88n8+88{YiéÎ8).iˆîŠ‰8~8n8ş88^8N8""¢.8:Î89>8:^8;ÎYjÃ¢hÈ~i8®8~8&f—‡GW&R&Wf–WvVBf—†VB'F–f7B Ğ¢¢†ÖöFR—2'v÷&¶fÆ÷r"÷"&'F–f7BÖöæÇ’"’bb&ö×Bä6öçF–ç2‚%$ôÄSÔ”ÕÄTÔTåDU""Â7G&–æt6ö×&—6öâä÷&F–æÂĞ¢ò$”ÕÄTÔTåDU"Õ4TÄbÔ54U54ÔTåBÕ4T5$UB"¢&f—‡GW&R&W7öç6R#°Ğ¢f"6W&–Æ—¦VDÖW76vRÒ§6öå6W&–Æ—¦W"å6W&–Æ—¦R†ÖW76vR“°Ğ¢6öç6öÆRåw&—FTÆ–æR‚B'·µÂ'G—UÂ#¥Â&—FVÒæ6ö×ÆWFVEÂ"ÅÂ&—FVÕÂ#§·µÂ'G—UÂ#¥Â&vVçEöÖW76vUÂ"ÅÂ'FW‡EÂ#§·6W&–Æ—¦VDÖW76vW××××Ò"“°Ğ¢ĞĞ¢6öç6öÆRåw&—FTÆ–æR‚'µÂ'G—UÂ#¥Â'GW&âæ6ö×ÆWFVEÂ"ÅÂ'W6vUÂ#§µÂ&–çWE÷Fö¶Vç5Â#£"ÅÂ&÷WGWE÷Fö¶Vç5Â#£7×Ò"“°Ğ¢&WGW&âÖöFRÓÒ&W†—BÖÖ—6ÖF6‚"òr¢°Ğ§ĞĞ Ğ§7FF–2fö–B6öFW„æöåVÆÅ&WVW7DÆÆ÷w4W†V7WF&ÆTÖöFT6†ævR‚Ğ§°Ğ¢–b„÷W&F–æu7—7FVÒä—5v–æF÷w2‚’’76W'Bå6¶—‚%Væ—8îZéşŠÎ[îh
+~8).z+®Š¨Ş88(¾88n8+888õv–æF÷w>8~8şZéşŠÎ8~8Ş8î8¾8)>8""“°Ğ¢f"‡'VææW"Â&WVW7BÂ&ö÷B’Ò7&VFT6öFW„f—‡GW&R‚&W†V7WF&ÆRÖÖöFRÖ6†ævR"“°Ğ¢W6–ær‡&ö÷BĞ¢°Ğ¢f"&W7öç6RÒ'VææW"ä–×ÆVÖVçB‡&WVW7Bv—F€Ğ¢²6öçG&7BÒ&WVW7Bä6öçG&7Bv—F‚²&W÷'F–ærÒ&WVW7Bä6öçG&7Bå&W÷'F–ærv—F‚²VÆÅ&WVW7DW‡V7FVBÒfÇ6RÒÒÒ“°Ğ¢76W'BåG'VR‡&W7öç6Rå7V66VVFVBÂ&W7öç6RäW†V7WF–öäWf–FVæ6SòäW'&÷"óò%.KˆŞŠh8ç'Vî8~ZéşŠÆ&—NZHi»N8).Š‹Xúş8~8î8¾8)>8~8~8ş8""“°Ğ¢76W'BåG'VR‡&W7öç6Råv÷&·76U6æ6†÷E&VfW&Væ6R—2çVÆÂ“°Ğ¢ĞĞ§ĞĞ Ğ§7FF–2fö–B6öFW…VÆÅ&WVW7E6æ6†÷E&W6W'fW4æWtW†V7WF&ÆTÖöFR‚Ğ§°Ğ¢–b„÷W&F–æu7—7FVÒä—5v–æF÷w2‚’’76W'Bå6¶—‚%Væ—‚ÖöF^K¹8Ş89^8*8*N8:¾8ç6æ6†÷NjIÎŠ‹Î8õVæ—‚'VææW.8~ZéşŠÎ8~8î88""“°Ğ¢f"‡'VææW"Â&WVW7BÂ&ö÷B’Ò7&VFT6öFW„f—‡GW&R‚&æWrÖW†V7WF&ÆR"“°Ğ¢W6–ær‡&ö÷BĞ¢°Ğ¢f"&W7öç6RÒ'VææW"ä–×ÆVÖVçB‡&WVW7Bv—F€Ğ¢²6öçG&7BÒ&WVW7Bä6öçG&7Bv—F‚²&W÷'F–ærÒ&WVW7Bä6öçG&7Bå&W÷'F–ærv—F‚²VÆÅ&WVW7DW‡V7FVBÒG'VRÒÒÒ“°Ğ¢76W'BåG'VR‡&W7öç6Rå7V66VVFVBÂ&W7öç6RäW†V7WF–öäWf–FVæ6SòäW'&÷"óò.ZéşŠÎ89^8*8*N8:·6æ6†÷N8).KÙÎh‰8~8Ş8î8¾8)>8~8~8ş8""“°Ğ¢76W'BåG'VR‡&W7öç6Råv÷&·76U6æ6†÷E&VfW&Væ6R—2æ÷BçVÆÂbb&W7öç6Råv÷&·76U6æ6†÷E6†#Sb—2æ÷BçVÆÂ“°Ğ¢f"6æ6†÷EF‚ÒF‚ä6öÖ&–æR‡&WVW7Bå'VäF—&V7F÷'’Â&W7öç6Råv÷&·76U6æ6†÷E&VfW&Væ6R“°Ğ¢W6–ærf"6æ6†÷BÒ§6öäFö7VÖVçBå'6R„f–ÆRå&VDÆÄ'—FW2‡6æ6†÷EF‚’“°Ğ¢f"W†V7WF&ÆRÒ6æ6†÷Bå&ö÷DVÆVÖVçBävWE&÷W'G’‚$VçG&–W2"’äVçVÖW&FT'&’‚Ğ¢å6–ævÆR†VçG'’ÓâVçG'’ävWE&÷W'G’‚%F‚"’ävWE7G&–ær‚’ÓÒ&æWr×67&—Bç6‚"“°Ğ¢76W'BäWVÂ‚#sSR"ÂW†V7WF&ÆRävWE&÷W'G’‚$ÖöFR"’ävWE7G&–ær‚’“°Ğ¢ĞĞ§ĞĞ Ğ§7FF–2–çB'VäW‡FW&æÅ&ö6W74f—‡GW&R‡7G&–æuµÒ&w2Ğ§°Ğ¢f"ÖöFRÒ&w2äÆVæwF‚âò&w5³Ò¢'7V66W72#°Ğ¢–b†ÖöFRÓÒ'6ÆVW"’²F‡&VBå6ÆVWƒUó“²&WGW&â²ĞĞ¢6öç6öÆRåw&—FTÆ–æR‚$3¥ÅÅW6W'5ÅÄÆö6ÂW6W%ÅÇ&—fFRÖ÷WGWBçG‡Bö†öÖRöÆö6Â×W6W"÷&—fFRÖ÷WGWBçG‡B"“°Ğ¢6öç6öÆRäW'&÷"åw&—FTÆ–æR‚$3¥ÅÅW6W'5ÅÄÆö6ÂW6W%ÅÇ&—fFRÖW'&÷"çG‡Bö†öÖRöÆö6Â×W6W"÷&—fFRÖW'&÷"çG‡B"“°Ğ¢&WGW&âÖöFRÓÒ&f–Â"òr¢°Ğ§ĞĞ Ğ§7FF–2–çB'VäÆ–fV7–6ÆUw&—FW$f—‡GW&R‡7G&–æuµÒ&w2Ğ§°Ğ¢–b†&w2äÆVæwF‚ÒBÇÂ–çBåG'•'6R†&w5³5ÒÂ÷WBf"6÷VçB’ÇÂ6÷VçBÂ’&WGW&â#°Ğ¢f"w&—FW"ÒæWr§6öæÄÆ–fV7–6ÆTWfVçEw&—FW"†&w5³Ò“°Ğ¢f÷"‡f"–æFW‚Ò²–æFW‚Â6÷VçC²–æFW‚²²Ğ¢°Ğ¢–b‚w&—FW"åG'”VæB†æWrÆ–fV7–6ÆTWfVç@Ğ¢°Ğ¢'Vä–BÒ&w5³%ÒÀĞ¢F–ÖW7F×WF2ÒFFUF–ÖTöfg6WBåWF4æ÷rÀĞ¢&öÆRÒ$–×ÆVÖVçFW""ÀĞ¢WfVçEG—RÒ&6ö×ÆWFVB"ÀĞ¢7FGW2Ò'7V66VVFVB"ÀĞ¢7FFRÒ$–×ÆVÖVçF–ær"ÀĞ¢&VÆFVD–BÒB&GFV×C§¶–æFW‚²Ò"ÀĞ¢7VÖÖ'’Ò$f—‡GW&RWfVçBâ Ğ¢Ò’’&WGW&â3°Ğ¢ĞĞ¢&WGW&â°Ğ§ĞĞ Ğ§7FF–2fö–B6öFW…&÷‡”7&VFVçF–Ç4&U&VF7FVDg&öÕW'6—7FVD÷WGWG2‚Ğ§°Ğ¢6öç7B7G&–ærW6W&æÖRÒ'7Æ—B×&÷‡’×W6W"#°Ğ¢6öç7B7G&–ær77v÷&BÒ'7Æ—B×&÷‡’×77v÷&B#°Ğ¢f"&÷‡•f&–&ÆW2ÒæWuµÒ²$…EE5õ$õ…’"Â$…EEõ$õ…’"Â$ÄÅõ$õ…’"Â&‡GG5÷&÷‡’"Â&‡GG÷&÷‡’"Â&ÆÅ÷&÷‡’"Ó°Ğ¢f"÷&–v–æÅfÇVW2Ò&÷‡•f&–&ÆW2åFôF–7F–öæ'’†æÖRÓâæÖRÂVçf—&öæÖVçBävWDVçf—&öæÖVçEf&–&ÆRÂ7G&–æt6ö×&W"ä÷&F–æÂ“°Ğ¢G'Ğ¢°Ğ¢f÷&V6‚‡f"æÖR–â&÷‡•f&–&ÆW2Ğ¢°Ğ¢f÷&V6‚‡f"&÷‡•f&–&ÆR–â&÷‡•f&–&ÆW2’Vçf—&öæÖVçBå6WDVçf—&öæÖVçEf&–&ÆR‡&÷‡•f&–&ÆRÂçVÆÂ“°Ğ¢f"&÷‡•W&ÂÒB&‡GG¢ò÷·W6W&æÖWÓ§·77v÷&GÔ¶æÖRåFôÆ÷vW$–çf&–çB‚—Òç&÷‡’æW†×ÆRæ–çfÆ–C£ƒƒ#°Ğ¢Vçf—&öæÖVçBå6WDVçf—&öæÖVçEf&–&ÆR†æÖRÂ&÷‡•W&Â“°Ğ¢f"‡'VææW"Â&WVW7BÂ&ö÷B’Ò7&VFT6öFW„f—‡GW&R‚'&÷‡’Ö÷WGWB"“°Ğ¢W6–ær‡&ö÷BĞ¢°Ğ¢f"WfVçEF‚ÒF‚ä6öÖ&–æR‡&WVW7Bå'VäF—&V7F÷'’Â&WfVçG2æ§6öæÂ"“°Ğ¢f¶Uv÷&¶fÆ÷u&W7VÇB&W7VÇC°Ğ¢W6–ær‡f"WfVçG2Ò§6öæÅ'VäWfVçE7F÷&Rä7&VFTæWr†WfVçEF‚Â&WVW7Bå'Vä–B’Ğ¢&W7VÇBÒæWrf¶TvVçEv÷&¶fÆ÷r‚’å'Vâ‡&WVW7Bä6öçG&7BÂæWr7G&–ær‚vBrÂcB’Â&WVW7Bå'Vä–BÀĞ¢&WVW7Bå'VäF—&V7F÷'’Â'VææW"ÂWfVçG2Â6öFW„öæU6†÷C¢G'VR“°Ğ Ğ¢76W'BäWVÂ…'Vå7FFRäæVVG4‡VÖä–çWBÂ&W7VÇBå7FFR“°Ğ¢f"W'6—7FVDf–ÆW2ÒF—&V7F÷'’äVçVÖW&FTf–ÆW2‡&WVW7Bå'VäF—&V7F÷'’Â"¢"Â6V&6„÷F–öâäÆÄF—&V7F÷&–W2“°Ğ¢f÷&V6‚‡f"f–ÆR–âW'6—7FVDf–ÆW2Ğ¢°Ğ¢f"6öçFVçG2Òf–ÆRå&VDÆÅFW‡B†f–ÆR“°Ğ¢76W'BäfÇ6R†6öçFVçG2ä6öçF–ç2‡W6W&æÖRÂ7G&–æt6ö×&—6öâä÷&F–æÂ’ÂB.8:n8;Î8+n8;ÎYŞ8ÎŠ‰˜Ë.8¾jè¾8>8n8N8î8’‡¶æÖWÒ“¢µF‚ävWDf–ÆTæÖR†f–ÆR—Ò"“°Ğ¢76W'BäfÇ6R†6öçFVçG2ä6öçF–ç2‡77v÷&BÂ7G&–æt6ö×&—6öâä÷&F–æÂ’ÂB.898+8:ş8;Î888ÎŠ‰˜Ë.8¾jè¾8>8n8N8î8’‡¶æÖWÒ“¢µF‚ävWDf–ÆTæÖR†f–ÆR—Ò"“°Ğ¢76W'BäfÇ6R†6öçFVçG2ä6öçF–ç2‡&÷‡•W&ÂÂ7G&–æt6ö×&—6öâä÷&F–æÂ’ÂB.89~8:Ş8*Ş8+uU$Î8ÎŠ‰˜Ë.8¾jè¾8>8n8N8î8’‡¶æÖWÒ“¢µF‚ävWDf–ÆTæÖR†f–ÆR—Ò"“°Ğ¢ĞĞ¢f"7FF÷WBÒf–ÆRå&VDÆÅFW‡B…F‚ä6öÖ&–æR‡&WVW7Bå'VäF—&V7F÷'’Â&W†6†ævW2"Â&–×ÆVÖVçFW"Ó"Â&6öFW‚ç7FF÷WBæ§6öæÂ"’“°Ğ¢f"7FFW'"Òf–ÆRå&VDÆÅFW‡B…F‚ä6öÖ&–æR‡&WVW7Bå'VäF—&V7F÷'’Â&W†6†ævW2"Â&–×ÆVÖVçFW"Ó"Â&6öFW‚ç7FFW'"çG‡B"’“°Ğ¢76W'BåG'VR‡7FF÷WBä6öçF–ç2‚%µ$TD5DTEõ$õ…•Ò"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR‡7FFW'"ä6öçF–ç2‚%µ$TD5DTEõ$õ…•Ò"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢f"6VÆd76W76ÖVçEF‚ÒF‚ä6öÖ&–æR‡&WVW7Bå'VäF—&V7F÷'’Â&W†6†ævW2"Â&–×ÆVÖVçFW"Ó"Â'6VÆbÖ76W76ÖVçBæÖB"“°Ğ¢76W'BåG'VR„f–ÆRäW†—7G2‡6VÆd76W76ÖVçEF‚’ÂB$–×ÆVÖVçFW.ˆz®[{Š™^Kê8ÎKùŞZÙ8^8(Î8n8N8î8¾8)2‡¶æÖWÒ“¢´f–ÆRå&VDÆÅFW‡B…F‚ä6öÖ&–æR‡&WVW7Bå'VäF—&V7F÷'’Â&W7VÇBå&W÷'E&VfW&Væ6R’—Ò"“°Ğ¢f"6VÆd76W76ÖVçBÒf–ÆRå&VDÆÅFW‡B‡6VÆd76W76ÖVçEF‚“°Ğ¢76W'BåG'VR‡6VÆd76W76ÖVçBä6öçF–ç2‚%µ$TD5DTEõ$õ…•Ò"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR„f–ÆRäW†—7G2…F‚ä6öÖ&–æR‡&WVW7Bå'VäF—&V7F÷'’Â&W7VÇBå&W÷'E&VfW&Væ6R’’“°Ğ¢ĞĞ¢ĞĞ¢ĞĞ¢f–æÆÇĞ¢°Ğ¢f÷&V6‚‡f"†æÖRÂfÇVR’–â÷&–v–æÅfÇVW2’Vçf—&öæÖVçBå6WDVçf—&öæÖVçEf&–&ÆR†æÖRÂfÇVR“°Ğ¢ĞĞ§ĞĞ Ğ§7FF–2fö–B6öFW…&ö6W746GW&W4§6öæÄæE6W&FW57G&V×2‚Ğ§°Ğ¢f"‡'VææW"Â&WVW7BÂ&ö÷B’Ò7&VFT6öFW„f—‡GW&R‚'7V66W72"“°Ğ¢W6–ær‡&ö÷BĞ¢°Ğ¢f"&W7öç6RÒ'VææW"ä–×ÆVÖVçB‡&WVW7B“°Ğ¢76W'BåG'VR‡&W7öç6Rå7V66VVFVBÂ&W7öç6RäW†V7WF–öäWf–FVæ6SòäW'&÷"óò.jÚ>[‹‡FW&Ö–æÂWfVçN8{X.K¨n8+>8;Î88“8).h‰X©şh›8N8~8î8¾8)>8~8~8ş8""“°Ğ¢76W'BåG'VR‡&W7öç6Rä6öçFVçBä6öçF–ç2‚&f—‡GW&R6†ævR"Â7G&–æt6ö×&—6öâä÷&F–æÂ’Â$v—NKÙÎjZŞš	Yùş8îZéş[zîXˆn8ÎY»®Zé®h‰iéÎxš8¾Y
+¾8î8(Î8n8N8î8¾8)>8""“°Ğ¢76W'BäfÇ6R‡&W7öç6Rä6öçFVçBä6öçF–ç2‚&f—‡GW&R&W7öç6R"Â7G&–æt6ö×&—6öâä÷&F–æÂ’Â$–×ÆVÖVçFW.8îˆz®[{yK>Y®8Å&Wf–WvW.Y	8Y»®Zé®h‰iéÎxš8k{~XZ^8~8î8~8ş8""“°Ğ¢76W'BäWVÂ‚&f—‡GW&R&W7öç6R"Â&W7öç6Rå6VÆd76W76ÖVçB“°Ğ¢76W'BäWVÂ‚'F‡&VBÖf—‡GW&RÖ–×ÆVÖVçFW""Â&W7öç6RäW†V7WF–öäWf–FVæ6RåF‡&VD–B“°Ğ¢76W'BäWVÂ‚'GW&âæ6ö×ÆWFVB"Â&W7öç6RäW†V7WF–öäWf–FVæ6RåFW&Ö–æÄWfVçB“°Ğ¢76W'BåG'VR‡&W7öç6RäW†V7WF–öäWf–FVæ6RåW6vT§6öâä6öçF–ç2‚&–çWE÷Fö¶Vç2"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢f"&tWfVçG2Òf–ÆRå&VDÆÅFW‡B…F‚ä6öÖ&–æR‡&WVW7Bå'VäF—&V7F÷'’Â&W7öç6RäW†V7WF–öäWf–FVæ6Rå7FæF&D÷WGWE&VfW&Væ6R’“°Ğ¢76W'BåG'VR‡&tWfVçG2ä6öçF–ç2‚&gWGW&RçVæ¶æ÷vâ"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR‡&tWfVçG2ä6öçF–ç2‚&æWfW""Â7G&–æt6ö×&—6öâä÷&F–æÂ’Â.™ÙîZûîŠ›89~8:Ş8+¾8+8æ&÷fÂöÆ–7[É^i[8Î8.8(®8î8¾8)>8""“°Ğ¢76W'BäfÇ6R‡&tWfVçG2ä6öçF–ç2‚"ÒÖW†VÖW&Â"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR„f–ÆRå&VDÆÅFW‡B…F‚ä6öÖ&–æR‡&WVW7Bå'VäF—&V7F÷'’Â&W7öç6RäW†V7WF–öäWf–FVæ6Rå7FæF&DW'&÷%&VfW&Væ6R’’ä6öçF–ç2‚&f—‡GW&Rv&æ–ær"Â7G&–æt6ö×&—6öâä÷&F–æÂ’“°Ğ¢76W'BåG'VR‡&W7öç6RäW†V7WF–öäWf–FVæ6Rä6Æ•fW'6–öâ—2çVÆÂÂ%ô>8~Xùn[é~8~8n8N8®8D4Äx˜8ÎX
+N8).hÈ8>8n8N8î88""“°Ğ¢76W'BäfÇ6R„F—&V7F÷'’äVçVÖW&FTf–ÆW2…F‚ä6öÖ&–æR‡&WVW7Bå'VäF—&V7F÷'’Â&W†6†ævW2"Â&–×ÆVÖVçFW"Ó"’Â"§fW'6–öâ¢"Â6V&6„÷F–öâäÆÄF—&V7F÷&–W2’äç’‚’ÀĞ¢.KÙXˆn8¤4Äx˜z+®Š¨Ş89~8:Ş8+¾8+8îŠ‹Î‹z8ÎKÙÎ8(8(Î8n8N8î88""“°Ğ¢76W'BäfÇ6R‡&tWfVçG2ä6öçF–ç2‚"Ò×fW'6–öâ"Â7G&–æt6ö×&—6öâä÷&F–æÂ’Â&6öFW‚Ò×fW'6–öâ8Î‹[~X¹^[É^i[8¾Y
+¾8î8(Î8n8N8î88""“°Ğ¢76W'BåG'VR‡&W7öç6RäW†V7WF–öäWf–FVæ6Rå&ö6W74–Bâ“°Ğ¢76W'BåG'VR‡&W7öç6RäW†V7WF–öäWf–FVæ6Rå&ö6W74W†—Dö'6W'fVBÓÒG'VRbb&W7öç6RäW†V7WF–öäWf–FVæ6Rå7G&V×46Æ÷6VBÓÒG'VR“°Ğ¢ĞĞ§ĞĞ Ğ§7FF–2fö–B6öFW…&ö×D—576VD5WFc‚‚Ğ§°Ğ¢f"‡'VææW"Â&WVW7BÂ&ö÷B’Ò7&VFT6öFW„f—‡GW&R‚'7V66W72"“°Ğ¢W6–ær‡&ö÷BĞ¢°Ğ¢f"&W7öç6RÒ'VææW"ä–×ÆVÖVçB‡&WVW7B“°Ğ¢76W'BåG'VR‡&W7öç6Rå7V66VVFVBÂ&W7öç6RäW†V7WF–öäWf–FVæ6SòäW'&÷"óò$f¶R6öFW‚'Vî8Îh‰X©ş8~8î8¾8)>8~8~8ş8""“°Ğ¢f"÷WGWBÒf–ÆRå&VDÆÅFW‡B…F‚ä6öÖ&–æR‡&WVW7Bå'VäF—&V7F÷'’Â&W7öç6RäW†V7WF–öäWf–FVæ6Rå7FæF&D÷WGWE&VfW&Væ6R’“°Ğ¢76W'BåG'VR†÷WGWBä6öçF–ç2‚%Â&÷5ö&÷VæF'•öF—66Æ–ÖVEÂ#§G'VR"Â7G&–æt6ö×&—6öâä÷&F–æÂ’ÀĞ¢$6öFWZÙ89~8:Ş8+¾8+8Îiz^iÊÎŠ©î8).Y
+¾8(89~8:Ş8;>89~888)%UDbÓ88~8nXù~8Xùn8(Î8î8¾8)>8~8~8ş8""“°Ğ¢76W'BåG'VR†÷WGWBä6öçF–ç2‚%Â'WFc…ö&öÕ÷&W6VçEÂ#¦fÇ6R"Â7G&–æt6ö×&—6öâä÷&F–æÂ’ÀĞ¢$6öFWZÙ89~8:Ş8+¾8+8îj‰k©nXZ^X©¾8µUDbÓ‚$ôŞ8ÎY
+¾8î8(Î8n8N8î8~8ş8""“°Ğ¢ĞĞ§ĞĞ Ğ§7FF–2fö–B6öFW„çÕ6†–×5&V6V—fUWFc…&ö×B‚Ğ§°Ğ¢f÷&V6‚‡f"W‡FVç6–öâ–âæWuµÒ²"æ6ÖB"Â"ç3"ÒĞ¢°Ğ¢f"…òÂ&WVW7BÂ&ö÷B’Ò7&VFT6öFW„f—‡GW&R‚'7V66W72"“°Ğ¢W6–ær‡&ö÷BĞ¢°Ğ¢f"W†V7WF&ÆRÒVçf—&öæÖVçBå&ö6W75F‚°Ğ¢f"–×ÆVÖVçFW$†öÖRÒF‚ä6öÖ&–æR‡&ö÷BåF‚Â&–×ÆVÖVçFW"×&öf–ÆR"“°Ğ¢f"&Wf–WvW$†öÖRÒF‚ä6öÖ&–æR‡&ö÷BåF‚Â'&Wf–WvW"×&öf–ÆR"“°Ğ¢f"6†–ÕF‚ÒF‚ä6öÖ&–æR‡&ö÷BåF‚ÂB&6öFW‡¶W‡FVç6–öçÒ"“°Ğ¢f"6†–ÒÒW‡FVç6–öâÓÒ"æ6ÖB Ğ¢òB$V6†òöfeÇ%ÆåÂ'¶W†V7WF&ÆWÕÂ"ÒÖf¶RÖ6öFW‚Öf—‡GW&R7V66W72R¥Ç%Æâ Ğ¢¢B"bw¶W†V7WF&ÆRå&WÆ6R‚"r"Â"rr"Â7G&–æt6ö×&—6öâä÷&F–æÂ—ÒrÒÖf¶RÖ6öFW‚Öf—‡GW&R7V66W72&w5Ç%Æâ#°Ğ¢f–ÆRåw&—FTÆÅFW‡B‡6†–ÕF‚Â6†–ÒÂæWrUDc„Væ6öF–ær†fÇ6R’“°Ğ¢f"÷F–öç2ÒæWr6öFW„6Æ•'VææW$÷F–öç2‡6†–ÕF‚Â–×ÆVÖVçFW$†öÖRÂ&Wf–WvW$†öÖR“°Ğ¢f"&W7öç6RÒæWr6öFW„6Æ”vVçE'VææW"†÷F–öç2’ä–×ÆVÖVçB‡&WVW7B“°Ğ¢76W'BåG'VR‡&W7öç6Rå7V66VVFVBÂB'¶W‡FVç6–öçÒ6†–Ó¢·&W7öç6RäW†V7WF–öäWf–FVæ6SòäW'&÷"óò''Vâf–ÆVB'Ò"“°Ğ¢f"÷WGWBÒf–ÆRå&VDÆÅFW‡B…F‚ä6öÖ&–æR‡&WVW7Bå'VäF—&V7F÷'’Â&W7öç6RäW†V7WF–öäWf–FVæ6Rå7FæF&D÷WGWE&VfW&Væ6R’“°Ğ¢76W'BåG'VR†÷WGWBä6öçF–ç2‚%Â&÷5ö&÷VæF'•öF—66Æ–ÖVEÂ#§G'VR"Â7G&–æt6ö×&—6öâä÷&F–æÂ’ÀĞ¢B'¶W‡FVç6–öçÒ6†–Ş8~iz^iÊÎŠ©î89~8:Ş8;>89~888ÅUDbÓ88~8nZÙ89~8:Ş8+¾8+8[®8Ş8î8¾8)>8~8~8ş8""“°Ğ¢76W'BåG'VR†÷WGWBä6öçF–ç2‚%Â'WFc…ö&öÕ÷&W6VçEÂ#¦fÇ6R"Â7G&–æt6ö×&—6öâä÷&F–æÂ’ÀĞ¢B'¶W‡FVç6–öçÒ6†–Ş8uUDbÓ‚$ôŞ8ÎjIÎX{®8^8(Î8î8~8ş8""“°Ğ¢ĞĞ¢ĞĞ§ĞĞ Ğ§7FF–2fö–B6öFW…fW'6–öå&ö&T¶–ÆÄf–ÇW&T—5&V6÷&FVB‚Ğ§°Ğ¢f"¶–ÆÄ6ÆÇ2Ò°Ğ¢f"‡'VææW"Â&WVW7BÂ&ö÷B’Ò7&VFT6öFW„f—‡GW&R‚'7V66W72"Â¶–ÆÄ÷fW'&–FS¢òÓàĞ¢²¶–ÆÄ6ÆÇ2²³²F‡&÷ræWr–çfÆ–D÷W&F–öäW†6WF–öâ‚'VæW‡V7FVB¶–ÆÂ–çfö6F–öâ"“²Ò“°Ğ¢W6–ær‡&ö÷BĞ¢°Ğ¢f"&W7öç6RÒ'VææW"ä–×ÆVÖVçB‡&WVW7B“°Ğ¢76W'BåG'VR‡&W7öç6Rå7V66VVFVBÂ&W7öç6RäW†V7WF–öäWf–FVæ6SòäW'&÷"óò$f¶RvVçB'Vî8Îh‰X©ş8~8î8¾8)>8~8~8ş8""“°Ğ¢76W'BäWVÂƒÂ¶–ÆÄ6ÆÇ2Â.˜	®[‹{X.K¨ni˜.8¾XÎjÚ.Xznyn8ÎYÎ8>X{®8^8(Î8î8~8ş8""“°Ğ¢76W'BåG'VR‡&W7öç6RäW†V7WF–öäWf–FVæ6Rä6Æ•fW'6–öâ—2çVÆÂ“°Ğ¢76W'BäfÇ6R„F—&V7F÷'’äVçVÖW&FTf–ÆW2…F‚ä6öÖ&–æR‡&WVW7Bå'VäF—&V7F÷'’Â&W†6†ævW2"’Â"§fW'6–öâ¢"Â6V&6„÷F–öâäÆÄF—&V7F÷&–W2’äç’‚’“°Ğ¢ĞĞ§ĞĞ Ğ§7FF–2fö–B6öFW…fW'6–öå&ö&U7F'Df–ÇW&U7F÷4&Vf÷&TW†V7WF–öâ‚Ğ§°Ğ¢W6–ærf"&ö÷BÒæWrFV×÷&'”F—&V7F÷'’‚“°Ğ¢f"–×ÆVÖVçFW"ÒF‚ä6öÖ&–æR‡&ö÷BåF‚Â&–×ÆVÖVçFW"×&öf–ÆR"“°Ğ¢f"&Wf–WvW"ÒF‚ä6öÖ&–æR‡&ö÷BåF‚Â'&Wf–WvW"×&öf–ÆR"“°Ğ¢f÷&V6‚‡f"†öÖR–âæWuµÒ²–×ÆVÖVçFW"Â&Wf–WvW"ÒĞ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’††öÖR“°Ğ¢f"–çfÆ–DW†V7WF&ÆRÒF‚ä6öÖ&–æR‡&ö÷BåF‚Â&æ÷BÖâÖW†V7WF&ÆRæW†R"“°Ğ¢f–ÆRåw&—FTÆÅFW‡B†–çfÆ–DW†V7WF&ÆRÂ&f—‡GW&RöæÇ’"“°Ğ¢f"v÷&·76RÒF‚ä6öÖ&–æR„Vçf—&öæÖVçBä7W'&VçDF—&V7F÷'’Â"çFW7B×v÷&·76W2"ÂwV–BäæWtwV–B‚’åFõ7G&–ær‚$â"’“°Ğ¢&ö÷BäFF—F–öæÅF‚Òv÷&·76S°Ğ¢f"'VäF—&V7F÷'’ÒF‚ä6öÖ&–æR‡&ö÷BåF‚Â''Vâ"“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‡v÷&·76R“°Ğ¢F—&V7F÷'’ä7&VFTF—&V7F÷'’‡'VäF—&V7F÷'’“°Ğ¢f–ÆRåw&—FTÆÅFW‡B…F‚ä6öÖ&–æR‡v÷&·76RÂ&W†×ÆRçG‡B"’Â&&6VÆ–æUÆâ"“°Ğ¢'Väv—Df—‡GW&R‡v÷&·76RÂ&–æ—B"Â"×"“°Ğ¢'Väv—Df—‡GW&R‡v÷&·76RÂ&FB"Â&W†×ÆRçG‡B"“°Ğ¢'Väv—Df—‡GW&R‡v÷&·76RÂ"Ö2"Â'W6W"ææÖSÔ÷&6†W7G&F÷"FW7B"Â"Ö2"Â'W6W"æVÖ–ÃÖ÷&6†W7G&F÷"×FW7DW†×ÆRæ–çfÆ–B"Â&6öÖÖ—B"Â"×Ò"Â&&6VÆ–æR"“°Ğ¢f"÷F–öç2ÒæWr6öFW„6Æ•'VææW$÷F–öç2†–çfÆ–DW†V7WF&ÆRÂ–×ÆVÖVçFW"Â&Wf–WvW"“°Ğ¢f"&WVW7BÒæWrvVçE&WVW7B‚&f—‡GW&R×'Vâ"Â$–×ÆVÖVçFW""Â6×ÆT6öçG&7B‚’v—F‚²v÷&¶–ætF—&V7F÷'’Òv÷&·76RÒÂÀĞ¢'VäF—&V7F÷'“¢'VäF—&V7F÷'’Â&VÖ–æ–æuF–ÖS¢F–ÖU7âäg&öÕ6V6öæG2ƒR’“°Ğ Ğ¢f"&W7öç6RÒæWr6öFW„6Æ”vVçE'VææW"†÷F–öç2’ä–×ÆVÖVçB‡&WVW7B“°Ğ¢76W'BäfÇ6R‡&W7öç6Rå7V66VVFVB“°Ğ¢76W'BåG'VR‡&W7öç6RäW†V7WF–öäWf–FVæ6Rå&ö6W74–B—2çVÆÂÀĞ¢.‹[~X¹^8¾ZKiY~8~8ô4Ä8ç&ö6W72”N8ÎŠ‰˜Ë.8^8(Î8î8~8ş8""“°Ğ¢76W'BåG'VR‡&W7öç6RäW†V7WF–öäWf–FVæ6RäW'&÷"—2æ÷BçVÆÂÀĞ¢$f¶R4ÄZéşŠÎ89^8*8*N8:¾8î‹[~X¹^8*8:8;Î8ÎŠ‰˜Ë.8^8(Î8n8N8î8¾8)>8""“°Ğ¢76W'BåG'VR‡&W7öç6RäW†V7WF–öäWf–FVæ6Rä6Æ•fW'6–öâ—2çVÆÂ“°Ğ§ĞĞ Ğ§7FF–2fö–B6öFW…FW&Ö–æÄæDW†—D6öFT×W7Dw&VR‚Ğ§°Ğ¢f"‡'VææW"Â&WVW7BÂ&ö÷B’Ò7&VFT6öFW„f—‡GW&R‚&W†—BÖÖ—6ÖF6‚"“°Ğ¢W6–ær‡&ö÷BĞ¢°Ğ¢f"&W7öç6RÒ'VææW"ä–×ÆVÖVçB‡&WVW7B“°Ğ¢76W'BäfÇ6R‡&W7öç6Rå7V66VVFVB“°Ğ¢76W'BäWVÂƒrÂ&W7öç6RäW†V7WF–öäWf–FVæ6RäW†—D6öFR“°Ğ¢76W'BäWVÂ‚'GW&âæ6ö×ÆWFVB"Â&W7öç6RäW†V7WF–öäWf–FVæ6RåFW&Ö–æÄWfVçB“°Ğ¢76W'BåG'VR‡&W7öç6RäW†V7WF–öäWf–FVæ6RäW'&÷"ä6öçF–ç2‚.{X.K¨n8+>8;Î88’r"Â7G&–æt6ö×&—6öâä÷&F–æÂ’ÀĞ¢.™Ùî8+Î8:Ş{X.K¨n8+>8;Î888ÎŠ‹®ijŞh8^Z8¾8.8(®8î8¾8)>8""“°Ğ¢76W'BåG'VR‡&W7öç6RäW†V7WF–öäWf–FVæ6RäW'&÷"ä6öçF–ç2‚'FW&Ö–æÃ×GW&âæ6ö×ÆWFVB"Â7G&–æt6ö×&—6öâä÷&F–æÂ’ÀĞ¢.{X.zºş8*N898;>888ÎŠ‹®ijŞh8^Z8¾8.8(®8î8¾8)>8""“°Ğ¢76W'BäfÇ6R‡&W7öç6RäW†V7WF–öäWf–FVæ6RäW'&÷"ä6öçF–ç2‚&f—‡GW&Rv&æ–ær"Â7G&–æt6ö×&—6öâä÷&F–æÂ’ÀĞ¢'7FFW'.iÊÎih~8ÎKˆ®KØŞ8î8*8:8;ÎŠ‹®ijŞ8ŠH~Š;Ş8^8(Î8n8N8î88""“°Ğ¢f"7FFW'%F‚ÒF‚ä6öÖ&–æR‡&WVW7Bå'VäF—&V7F÷'’Â&W7öç6RäW†V7WF–öäWf–FVæ6Rå7FæF&DW'&÷%&VfW&Væ6R“°Ğ¢76W'BåG'VR„f–ÆRå&VDÆÅFW‡B‡7FFW'%F‚’ä6öçF–ç2‚&f—‡GW&Rv&æ–ær"Â7G&–æt6ö×&—6öâä÷&F–æÂ’ÀĞ¢.Š›>{K8§7FFW'.8Î[.yJŠ‹Î‹z89^8*8*N8:¾8¾KùŞZÙ8^8(Î8n8N8î8¾8)>8""“°Ğ¢ĞĞ§ĞĞ Ğ§7FF–2fö–B6öFW„ÖÆf÷&ÖVDæDV×G•&W7öç6W4f–Â‚Ğ§°Ğ¢f÷&V6‚‡f"66Væ&–ò–âæWuµÒ²&ÖÆf÷&ÖVB"Â&V×G’"ÒĞ¢°Ğ¢f"‡'VææW"Â&WVW7BÂ&ö÷B’Ò7&VFT6öFW„f—‡GW&R‡66Væ&–ò“°Ğ¢W6–ær‡&ö÷BĞ¢°Ğ¢f"&W7öç6RÒ'VææW"ä–×ÆVÖVçB‡&WVW7B“°Ğ¢76W'BäfÇ6R‡&W7öç6Rå7V66VVFVBÂB'·66Væ&–÷Ò8Îh‰X©şh›8N8^8(Î8î8~8ş8""“°Ğ¢76W'BåG'VR„f–ÆRäW†—7G2…F‚ä6öÖ&–æR‡&WVW7Bå'VäF—&V7F÷'’Â&W7öç6RäW†V7WF–öäWf–FVæ6Rå7FæF&D÷WGWE&VfW&Væ6R’’“°Ğ¢–b‡66Væ&–òÓÒ&V×G’"Ğ¢°Ğ¢f"'F–f7EF‚ÒF‚ä6öÖ&–æR‡&WVW7Bå'VäF—&V7F÷'’Â&f—‡GW&RÖ'F–f7BæÖB"“°Ğ¢f–ÆRåw&—FTÆÅFW‡B†'F–f7EF‚Â&f—†VB&Wf–WvW"–çWB"“°Ğ¢vëm¢G§²ÚîÆ­yÖecycleEventWriter(lifecyclePath));
     var allLines = File.ReadAllLines(lifecyclePath);
     Assert.True(allLines.Any(line => line.Contains("\"runId\":\"lifecycle-failed\"", StringComparison.Ordinal) &&
         line.Contains("\"role\":\"Implementer\"", StringComparison.Ordinal) && line.Contains("\"eventType\":\"failed\"", StringComparison.Ordinal)),
