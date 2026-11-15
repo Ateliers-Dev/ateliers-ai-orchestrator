@@ -149,21 +149,44 @@ static void PublisherIsolatesInheritedGitConfigAndRejectsLocalFilters()
     RunGitFixture(repository, "init", "-q");
     var isolatedConfig = Path.Combine(temp.Path, "isolated-config");
     File.WriteAllText(isolatedConfig, string.Empty);
+    RunGitFixture(repository, "config", "--file", isolatedConfig, "--add", "credential.https://github.com.helper", string.Empty);
+    RunGitFixture(repository, "config", "--file", isolatedConfig, "--add", "credential.https://github.com.helper", "!gh auth git-credential");
 
+    // The publisher's exact two-value helper is trusted only when it comes from its isolated global config.
     Assert.False(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
+    var alteredIsolatedConfig = Path.Combine(temp.Path, "altered-isolated-config");
+    File.WriteAllText(alteredIsolatedConfig, string.Empty);
+    RunGitFixture(repository, "config", "--file", alteredIsolatedConfig, "--add", "credential.https://github.com.helper", "!unexpected-helper");
+    var alteredEntries = GitHubWorkflowPublisher.GetUnsafeEffectiveGitConfig(repository, Path.GetFullPath(
+        RunGitFixture(repository, "rev-parse", "--git-path", "config").Trim(), repository), alteredIsolatedConfig, CancellationToken.None);
+    Assert.True(alteredEntries.Any(entry => entry.Key == "credential.https://github.com.helper" && entry.Source == "isolated-global"));
+
+    RunGitFixture(repository, "config", "--local", "credential.https://github.com.helper", "!untrusted-helper-secret");
+    var localConfigPath = Path.GetFullPath(RunGitFixture(repository, "rev-parse", "--git-path", "config").Trim(), repository);
+    var unsafeHelpers = GitHubWorkflowPublisher.GetUnsafeEffectiveGitConfig(repository, localConfigPath, isolatedConfig, CancellationToken.None);
+    Assert.True(unsafeHelpers.Any(entry => entry.Key == "credential.<redacted>.helper" && entry.Source == "repository-local"),
+        string.Join(",", unsafeHelpers.Select(entry => $"{entry.Key}:{entry.Source}")));
+    Assert.False(string.Join(" ", unsafeHelpers.Select(entry => entry.Key + entry.Source)).Contains("untrusted-helper-secret", StringComparison.Ordinal));
+    RunGitFixture(repository, "config", "--local", "--unset-all", "credential.https://github.com.helper");
+
     RunGitFixture(repository, "config", "--local", "filter.lfs.clean", "git-lfs clean -- %f");
     Assert.True(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
     RunGitFixture(repository, "config", "--local", "--unset-all", "filter.lfs.clean");
     Assert.False(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
 
-    RunGitFixture(repository, "config", "--local", "credential.https://github.com.helper", "!untrusted-helper");
-    Assert.True(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
-    RunGitFixture(repository, "config", "--local", "--unset-all", "credential.https://github.com.helper");
-    Assert.False(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
-
     RunGitFixture(repository, "config", "--local", "core.fsmonitor", "untrusted-monitor");
     Assert.True(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
     RunGitFixture(repository, "config", "--local", "--unset-all", "core.fsmonitor");
+    RunGitFixture(repository, "config", "--local", "core.hooksPath", "C:/private/untrusted-hooks");
+    var unsafeHooks = GitHubWorkflowPublisher.GetUnsafeEffectiveGitConfig(repository, localConfigPath, isolatedConfig, CancellationToken.None);
+    Assert.True(unsafeHooks.Any(entry => entry.Key == "core.hooksPath" && entry.Source == "repository-local"));
+    Assert.False(string.Join(" ", unsafeHooks.Select(entry => entry.Key + entry.Source)).Contains("C:/private/untrusted-hooks", StringComparison.Ordinal));
+    RunGitFixture(repository, "config", "--local", "--unset-all", "core.hooksPath");
+    RunGitFixture(repository, "config", "--local", "include.path", "C:/private/untrusted-config");
+    var unsafeIncludes = GitHubWorkflowPublisher.GetUnsafeEffectiveGitConfig(repository, localConfigPath, isolatedConfig, CancellationToken.None);
+    Assert.True(unsafeIncludes.Any(entry => entry.Key == "include.<redacted>" && entry.Source == "repository-local"));
+    Assert.False(string.Join(" ", unsafeIncludes.Select(entry => entry.Key + entry.Source)).Contains("C:/private/untrusted-config", StringComparison.Ordinal));
+    RunGitFixture(repository, "config", "--local", "--unset-all", "include.path");
     RunGitFixture(repository, "config", "--local", "extensions.worktreeConfig", "true");
     Assert.True(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
 
@@ -2822,5 +2845,6 @@ sealed class FailingEventWriter(string failureEventType, bool failReadyTransitio
 sealed class DiagnosticTestFailure(string details) : Exception(details)
 {
 }
+
 
 
