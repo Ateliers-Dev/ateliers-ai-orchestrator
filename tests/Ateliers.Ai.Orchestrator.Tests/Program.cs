@@ -29,7 +29,7 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("確認待ちはIssue #3では到達不能", ReviewReadyIsUnavailableUntilEvidenceIntegration);
     suite.Add("origin URL検証はGitHubホストとrepository pathを厳密に照合する", GitHubRemoteUrlRequiresExactHostAndPath);
     suite.Add("トップレベルと各コマンドのhelpは成功出力し入力エラーは標準エラーへ分離する", CliHelpAndInputErrorsAreSeparated);
-    suite.Add("Publisherはsystem/global Git設定を隔離しローカルfilter等を拒否する", PublisherIsolatesInheritedGitConfigAndRejectsLocalFilters);
+    suite.Add("PublisherはGit設定・SSH実行環境を隔離しローカルfilter等を拒否する", PublisherIsolatesInheritedGitConfigAndRejectsLocalFilters);
     suite.Add("PublisherはPR証跡の保存確認後にpendingだけを削除する", PublisherPersistsVerifiedPrEvidenceBeforeRemovingPending);
     suite.Add("PRレビューコメントは判定・指摘項目を記録し同一Run/SHAの再投稿を防ぐ", ReviewCommentIsStructuredAndIdempotent);
     suite.Add("JSONLイベントに連番とUTC時刻を記録する", EventLogIsSequencedAndUtc);
@@ -147,25 +147,135 @@ static void PublisherIsolatesInheritedGitConfigAndRejectsLocalFilters()
     var repository = Path.Combine(temp.Path, "repo");
     Directory.CreateDirectory(repository);
     RunGitFixture(repository, "init", "-q");
-    var isolatedConfig = Path.Combine(temp.Path, "isolated-config");
-    File.WriteAllText(isolatedConfig, string.Empty);
+    var isolatedConfig = new GitHubWorkflowPublisher.GitConfigOverlay(
+        [new("credential.https://github.com.helper", string.Empty),
+         new("credential.https://github.com.helper", "!gh auth git-credential")]);
 
+    var childEnvironment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["GIT_SSH_COMMAND"] = "untrusted-ssh-command",
+        ["GIT_SSH"] = "untrusted-ssh",
+        ["GIT_SSH_VARIANT"] = "untrusted-variant",
+        ["GIT_EXEC_PATH"] = "untrusted-exec-path",
+        ["GIT_EXTERNAL_DIFF"] = "untrusted-diff",
+        ["GIT_DIR"] = "untrusted-repository",
+        ["GIT_CONFIG_COUNT"] = "1",
+        ["GIT_CONFIG_KEY_0"] = "core.fsmonitor",
+        ["GIT_CONFIG_VALUE_0"] = "untrusted-monitor",
+        ["GIT_INDEX_FILE"] = "untrusted-index",
+        ["SSH_ASKPASS"] = "untrusted-askpass",
+        ["SSH_ASKPASS_REQUIRE"] = "force"
+    };
+    GitHubWorkflowPublisher.ConfigureIsolatedGitEnvironment(childEnvironment, isolatedConfig);
+    foreach (var key in new[] { "GIT_SSH_COMMAND", "GIT_SSH", "GIT_SSH_VARIANT", "GIT_EXEC_PATH", "GIT_EXTERNAL_DIFF", "GIT_DIR", "GIT_INDEX_FILE", "SSH_ASKPASS", "SSH_ASKPASS_REQUIRE" })
+        Assert.False(childEnvironment.ContainsKey(key), $"isolated Git child retained {key}");
+    Assert.Equal(isolatedConfig.Entries.Count.ToString(System.Globalization.CultureInfo.InvariantCulture), childEnvironment["GIT_CONFIG_COUNT"]);
+    Assert.Equal(isolatedConfig.Entries[0].Key, childEnvironment["GIT_CONFIG_KEY_0"]);
+    Assert.Equal(isolatedConfig.Entries[0].Value, childEnvironment["GIT_CONFIG_VALUE_0"]);
+
+    // The publisher's fixed helper is trusted as an in-memory command-scope overlay; no config file is consulted.
     Assert.False(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
+    var inheritedGitEnvironment = Environment.GetEnvironmentVariables().Keys.Cast<string>()
+        .Where(key => key.StartsWith("GIT_", StringComparison.OrdinalIgnoreCase) ||
+                      key.Equals("SSH_ASKPASS", StringComparison.OrdinalIgnoreCase) ||
+                      key.Equals("SSH_ASKPASS_REQUIRE", StringComparison.OrdinalIgnoreCase))
+        .ToDictionary(key => key, Environment.GetEnvironmentVariable, StringComparer.OrdinalIgnoreCase);
+    var sshScript = Path.Combine(temp.Path, OperatingSystem.IsWindows() ? "ssh-sentinel.cmd" : "ssh-sentinel");
+    var sshMarker = Path.Combine(temp.Path, "ssh-command-ran.txt");
+    File.WriteAllText(sshScript, OperatingSystem.IsWindows()
+        ? $"@echo off{Environment.NewLine}echo invoked>\"{sshMarker}\"{Environment.NewLine}exit /b 0{Environment.NewLine}"
+        : $"#!/bin/sh{Environment.NewLine}printf invoked > '{sshMarker}'{Environment.NewLine}exit 0{Environment.NewLine}");
+    if (!OperatingSystem.IsWindows())
+        File.SetUnixFileMode(sshScript, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+    try
+    {
+        foreach (var key in inheritedGitEnvironment.Keys) Environment.SetEnvironmentVariable(key, null);
+        Environment.SetEnvironmentVariable("GIT_CONFIG_COUNT", "1");
+        Environment.SetEnvironmentVariable("GIT_CONFIG_KEY_0", "core.fsmonitor");
+        Environment.SetEnvironmentVariable("GIT_CONFIG_VALUE_0", "!inherited-config-secret");
+        Assert.False(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None),
+            "inherited GIT_CONFIG_* values must not enter the isolated Git child");
+
+        Environment.SetEnvironmentVariable("GIT_CONFIG_COUNT", null);
+        Environment.SetEnvironmentVariable("GIT_CONFIG_KEY_0", null);
+        Environment.SetEnvironmentVariable("GIT_CONFIG_VALUE_0", null);
+        Environment.SetEnvironmentVariable("GIT_SSH_COMMAND", sshScript);
+        try
+        {
+            GitHubWorkflowPublisher.Run("git", repository, ["ls-remote", "ssh://127.0.0.1/Ateliers-Dev/test.git"],
+                gitConfigOverlay: isolatedConfig);
+        }
+        catch (InvalidOperationException) { }
+        Assert.False(File.Exists(sshMarker), "inherited GIT_SSH_COMMAND was executed by Git");
+
+        Environment.SetEnvironmentVariable("GIT_SSH_COMMAND", null);
+        Environment.SetEnvironmentVariable("GIT_SSH", sshScript);
+        try
+        {
+            GitHubWorkflowPublisher.Run("git", repository, ["ls-remote", "ssh://127.0.0.1/Ateliers-Dev/test.git"],
+                gitConfigOverlay: isolatedConfig);
+        }
+        catch (InvalidOperationException) { }
+        Assert.False(File.Exists(sshMarker), "inherited GIT_SSH was executed by Git");
+    }
+    finally
+    {
+        foreach (var key in Environment.GetEnvironmentVariables().Keys.Cast<string>()
+                     .Where(key => key.StartsWith("GIT_", StringComparison.OrdinalIgnoreCase) ||
+                                   key.Equals("SSH_ASKPASS", StringComparison.OrdinalIgnoreCase) ||
+                                   key.Equals("SSH_ASKPASS_REQUIRE", StringComparison.OrdinalIgnoreCase)).ToArray())
+            Environment.SetEnvironmentVariable(key, null);
+        foreach (var (key, value) in inheritedGitEnvironment) Environment.SetEnvironmentVariable(key, value);
+    }
+    var alteredOverlay = new GitHubWorkflowPublisher.GitConfigOverlay(
+        [new("credential.https://github.com.helper", "!unexpected-helper")]);
+    var alteredEntries = GitHubWorkflowPublisher.GetUnsafeEffectiveGitConfig(repository, Path.GetFullPath(
+        RunGitFixture(repository, "rev-parse", "--git-path", "config").Trim(), repository), alteredOverlay, CancellationToken.None);
+    Assert.True(alteredEntries.Any(entry => entry.Key == "credential.https://github.com.helper" && entry.Source == "isolated-command"));
+
+    RunGitFixture(repository, "config", "--local", "credential.https://github.com.helper", "!untrusted-helper-secret");
+    var localConfigPath = Path.GetFullPath(RunGitFixture(repository, "rev-parse", "--git-path", "config").Trim(), repository);
+    var unsafeHelpers = GitHubWorkflowPublisher.GetUnsafeEffectiveGitConfig(repository, localConfigPath, isolatedConfig, CancellationToken.None);
+    Assert.True(unsafeHelpers.Any(entry => entry.Key == "credential.<redacted>.helper" && entry.Source == "repository-local"),
+        string.Join(",", unsafeHelpers.Select(entry => $"{entry.Key}:{entry.Source}")));
+    Assert.False(string.Join(" ", unsafeHelpers.Select(entry => entry.Key + entry.Source)).Contains("untrusted-helper-secret", StringComparison.Ordinal));
+    RunGitFixture(repository, "config", "--local", "--unset-all", "credential.https://github.com.helper");
+
     RunGitFixture(repository, "config", "--local", "filter.lfs.clean", "git-lfs clean -- %f");
     Assert.True(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
     RunGitFixture(repository, "config", "--local", "--unset-all", "filter.lfs.clean");
     Assert.False(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
 
-    RunGitFixture(repository, "config", "--local", "credential.https://github.com.helper", "!untrusted-helper");
-    Assert.True(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
-    RunGitFixture(repository, "config", "--local", "--unset-all", "credential.https://github.com.helper");
-    Assert.False(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
-
     RunGitFixture(repository, "config", "--local", "core.fsmonitor", "untrusted-monitor");
     Assert.True(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
     RunGitFixture(repository, "config", "--local", "--unset-all", "core.fsmonitor");
+    RunGitFixture(repository, "config", "--local", "core.hooksPath", "C:/private/untrusted-hooks");
+    var unsafeHooks = GitHubWorkflowPublisher.GetUnsafeEffectiveGitConfig(repository, localConfigPath, isolatedConfig, CancellationToken.None);
+    Assert.True(unsafeHooks.Any(entry => entry.Key == "core.hooksPath" && entry.Source == "repository-local"));
+    Assert.False(string.Join(" ", unsafeHooks.Select(entry => entry.Key + entry.Source)).Contains("C:/private/untrusted-hooks", StringComparison.Ordinal));
+    RunGitFixture(repository, "config", "--local", "--unset-all", "core.hooksPath");
+    RunGitFixture(repository, "config", "--local", "include.path", "C:/private/untrusted-config");
+    var unsafeIncludes = GitHubWorkflowPublisher.GetUnsafeEffectiveGitConfig(repository, localConfigPath, isolatedConfig, CancellationToken.None);
+    Assert.True(unsafeIncludes.Any(entry => entry.Key == "include.<redacted>" && entry.Source == "repository-local"));
+    Assert.False(string.Join(" ", unsafeIncludes.Select(entry => entry.Key + entry.Source)).Contains("C:/private/untrusted-config", StringComparison.Ordinal));
+    RunGitFixture(repository, "config", "--local", "--unset-all", "include.path");
+    var includeIfPath = Path.Combine(temp.Path, "conditional-config");
+    File.WriteAllText(includeIfPath, "[credential \"https://github.com\"]\n    helper = !conditional-helper-secret\n");
+    RunGitFixture(repository, "config", "--local", "--add", $"includeIf.gitdir:{repository.Replace('\\', '/')}/.git.path", includeIfPath);
+    var unsafeConditionalIncludes = GitHubWorkflowPublisher.GetUnsafeEffectiveGitConfig(repository, localConfigPath, isolatedConfig, CancellationToken.None);
+    Assert.True(unsafeConditionalIncludes.Any(entry => entry.Key == "include.<redacted>" && entry.Source == "repository-local"),
+        string.Join(",", unsafeConditionalIncludes.Select(entry => $"{entry.Key}:{entry.Source}")));
+    Assert.False(string.Join(" ", unsafeConditionalIncludes.Select(entry => entry.Key + entry.Source)).Contains(includeIfPath, StringComparison.OrdinalIgnoreCase));
+    RunGitFixture(repository, "config", "--local", "--unset-all", $"includeIf.gitdir:{repository.Replace('\\', '/')}/.git.path");
     RunGitFixture(repository, "config", "--local", "extensions.worktreeConfig", "true");
     Assert.True(GitHubWorkflowPublisher.HasUnsafeEffectiveGitConfig(repository, isolatedConfig, CancellationToken.None));
+    RunGitFixture(repository, "config", "--local", "--unset-all", "extensions.worktreeConfig");
+    RunGitFixture(repository, "config", "--local", "extensions.worktreeConfig", "true");
+    RunGitFixture(repository, "config", "--worktree", "credential.https://github.com.helper", "!worktree-helper-secret");
+    var unsafeWorktreeHelper = GitHubWorkflowPublisher.GetUnsafeEffectiveGitConfig(repository, localConfigPath, isolatedConfig, CancellationToken.None);
+    Assert.True(unsafeWorktreeHelper.Any(entry => entry.Key == "credential.<redacted>.helper" && entry.Source == "repository-worktree"));
+    Assert.False(string.Join(" ", unsafeWorktreeHelper.Select(entry => entry.Key + entry.Source)).Contains("worktree-helper-secret", StringComparison.Ordinal));
+    RunGitFixture(repository, "config", "--worktree", "--unset-all", "credential.https://github.com.helper");
 
     File.WriteAllText(Path.Combine(repository, ".gitattributes"), "*.dat filter=lfs\n");
     Assert.True(GitHubWorkflowPublisher.HasActiveGitFilterPaths(repository, ["sample.dat"], isolatedConfig, CancellationToken.None));
@@ -2822,5 +2932,4 @@ sealed class FailingEventWriter(string failureEventType, bool failReadyTransitio
 sealed class DiagnosticTestFailure(string details) : Exception(details)
 {
 }
-
 

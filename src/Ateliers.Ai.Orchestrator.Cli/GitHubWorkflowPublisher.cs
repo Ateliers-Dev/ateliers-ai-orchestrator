@@ -11,9 +11,8 @@ namespace Ateliers.Ai.Orchestrator.Cli;
 public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
 {
     private readonly string _safeHooksPath = CreateSafeHooksPath();
-    private string? _isolatedGitConfigPath;
-    private string? _isolatedGitConfigSha256;
-    private string? _isolatedGitConfigDirectory;
+    private GitConfigOverlay? _gitConfigOverlay;
+    private string? _gitTemporaryDirectory;
     private CancellationToken _activeStopToken;
     private static readonly Regex SecretPath = new(
         @"(^|/)(\.env($|\.)|\.ssh/|id_rsa($|\.)|id_ed25519($|\.)|secrets?([._-]|$)|credentials?([._-]|$)|.*\.(pem|p12|pfx|key)$)",
@@ -30,20 +29,23 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         var stage = "git-isolation";
         try
         {
-            _isolatedGitConfigPath = CreateIsolatedGitConfig(contract.WorkingDirectory, stopToken);
-            _isolatedGitConfigSha256 = HashFile(_isolatedGitConfigPath);
+            _gitConfigOverlay = CreateGitConfigOverlay(contract.WorkingDirectory, stopToken);
             stage = "repository-root";
             var root = Git(contract.WorkingDirectory, "rev-parse", "--show-toplevel").Output.Trim();
             if (!Path.GetFullPath(root).Equals(Path.GetFullPath(contract.WorkingDirectory), PathComparison))
                 throw new InvalidOperationException("workingDirectory はGitリポジトリのルートを指定してください。");
+            var configPath = Path.GetFullPath(Git(root, "rev-parse", "--git-path", "config").Output.Trim(), root);
             stage = "local-git-config-safety";
-            if (HasUnsafeEffectiveGitConfig(root, _isolatedGitConfigPath!, stopToken))
-                throw new WorkflowPreflightException(stage, "unsafe-local-config-key-present");
+            var unsafeConfig = GetUnsafeEffectiveGitConfig(root, configPath, _gitConfigOverlay, stopToken);
+            if (unsafeConfig.Count > 0)
+            {
+                var diagnostic = string.Join(",", unsafeConfig.Select(item => $"key={item.Key};source={item.Source}"));
+                throw new WorkflowPreflightException(stage, $"unsafe-local-config-key-present;{diagnostic}");
+            }
             stage = "git-filter-policy";
             var trackedPaths = Git(root, "ls-files", "-z").Output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
-            if (HasActiveGitFilterPaths(root, trackedPaths, _isolatedGitConfigPath!, stopToken))
+            if (HasActiveGitFilterPaths(root, trackedPaths, _gitConfigOverlay, stopToken))
                 throw new WorkflowPreflightException(stage, "filter-attributed-paths-unsupported-under-isolation");
-            var configPath = Path.GetFullPath(Git(root, "rev-parse", "--git-path", "config").Output.Trim(), root);
             stage = "clean-checkout";
             if (!string.IsNullOrWhiteSpace(Git(root, "status", "--porcelain=v1", "--untracked-files=all").Output))
                 throw new InvalidOperationException("開始時点で作業ツリーに変更があります。cleanな専用checkoutを用意してください。");
@@ -117,7 +119,7 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         var paths = snapshot.Entries.Select(entry => ValidateSnapshotPath(root, entry.Path)).ToArray();
         if (paths.Distinct(StringComparer.Ordinal).Count() != paths.Length)
             throw new InvalidOperationException("Implementer workspace snapshotに重複パスがあります。");
-        if (HasActiveGitFilterPaths(root, snapshot.Entries.Select(entry => entry.Path).ToArray(), _isolatedGitConfigPath!, stopToken))
+        if (HasActiveGitFilterPaths(root, snapshot.Entries.Select(entry => entry.Path).ToArray(), _gitConfigOverlay!, stopToken))
             throw new WorkflowPreflightException("git-filter-policy", "filter-attributed-snapshot-path");
         var currentPaths = CaptureChangedPaths(root, snapshot.BaseSha);
         if (!currentPaths.Order(StringComparer.Ordinal).SequenceEqual(snapshot.Entries.Select(entry => entry.Path).Order(StringComparer.Ordinal), StringComparer.Ordinal))
@@ -129,7 +131,7 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
             throw new InvalidOperationException($"秘密情報を含む可能性があるファイルの変更を検出しました: {Path.GetFileName(forbidden)}");
 
         stopToken.ThrowIfCancellationRequested();
-        var snapshotIndex = Path.Combine(_isolatedGitConfigDirectory!, $"index-{Guid.NewGuid():N}");
+        var snapshotIndex = Path.Combine(_gitTemporaryDirectory!, $"index-{Guid.NewGuid():N}");
         Git(root, ["read-tree", snapshot.BaseSha], stopToken, indexFile: snapshotIndex);
         foreach (var entry in snapshot.Entries)
         {
@@ -552,21 +554,95 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
 
     private static StringComparison PathComparison => OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
-    internal static bool HasUnsafeEffectiveGitConfig(string workingDirectory, string isolatedGitConfigPath, CancellationToken stopToken)
+    internal static bool HasUnsafeEffectiveGitConfig(string workingDirectory, GitConfigOverlay gitConfigOverlay, CancellationToken stopToken)
     {
-        var unsafeConfig = Run("git", workingDirectory, ["config", "--name-only", "--get-regexp",
-                "^(include|filter\\.|credential\\.helper$|credential\\..*\\.helper$|core\\.(sshCommand|fsmonitor)$|extensions\\.worktreeconfig$|url\\..*\\.(insteadOf|pushInsteadOf)$)"],
-            allowExitCodeOne: true, isolatedGitConfigPath: isolatedGitConfigPath, stopToken: stopToken);
-        return !string.IsNullOrWhiteSpace(unsafeConfig.Output);
+        var localConfig = Run("git", workingDirectory, ["rev-parse", "--git-path", "config"],
+            gitConfigOverlay: gitConfigOverlay, stopToken: stopToken);
+        var localConfigPath = Path.GetFullPath(localConfig.Output.Trim(), workingDirectory);
+        return GetUnsafeEffectiveGitConfig(workingDirectory, localConfigPath, gitConfigOverlay, stopToken).Count > 0;
     }
 
+    internal static IReadOnlyList<UnsafeGitConfigEntry> GetUnsafeEffectiveGitConfig(string workingDirectory,
+        string localConfigPath, GitConfigOverlay gitConfigOverlay, CancellationToken stopToken)
+    {
+        const string unsafeKeyPattern = "^(include|filter\\.|credential\\.helper$|credential\\..*\\.helper$|core\\.(sshCommand|fsmonitor|hookspath)$|extensions\\.worktreeconfig$|url\\..*\\.(insteadOf|pushInsteadOf)$)";
+        var result = Run("git", workingDirectory, ["config", "--null", "--show-origin", "--show-scope", "--name-only", "--get-regexp", unsafeKeyPattern],
+            allowExitCodeOne: true, gitConfigOverlay: gitConfigOverlay, stopToken: stopToken);
+        var fields = result.Output.Split('\0');
+        if (fields.Length > 0 && fields[^1].Length == 0) fields = fields[..^1];
+        if (fields.Length % 3 != 0)
+            throw new InvalidOperationException("Git config safety query returned an invalid record.");
+
+        var trustedHelperEntries = 0;
+        var unsafeEntries = new List<UnsafeGitConfigEntry>();
+        for (var index = 0; index < fields.Length; index += 3)
+        {
+            var scope = fields[index];
+            var origin = fields[index + 1];
+            var key = fields[index + 2];
+            if (key.Equals("credential.https://github.com.helper", StringComparison.OrdinalIgnoreCase) &&
+                scope.Equals("command", StringComparison.OrdinalIgnoreCase) && origin.Equals("command line:", StringComparison.Ordinal) &&
+                HasTrustedHelperOverlay(gitConfigOverlay))
+            {
+                trustedHelperEntries++;
+                continue;
+            }
+
+            unsafeEntries.Add(new UnsafeGitConfigEntry(SafeConfigKey(key), SafeConfigSource(scope, origin, localConfigPath, workingDirectory)));
+        }
+        if (trustedHelperEntries != 2)
+            unsafeEntries.Add(new UnsafeGitConfigEntry("credential.https://github.com.helper", "isolated-command"));
+        return unsafeEntries;
+    }
+
+    private static string SafeConfigKey(string key)
+    {
+        if (key.Equals("credential.helper", StringComparison.OrdinalIgnoreCase)) return key;
+        if (key.StartsWith("credential.", StringComparison.OrdinalIgnoreCase) && key.EndsWith(".helper", StringComparison.OrdinalIgnoreCase))
+            return "credential.<redacted>.helper";
+        if (key.StartsWith("filter.", StringComparison.OrdinalIgnoreCase)) return "filter.<redacted>";
+        if (key.StartsWith("include", StringComparison.OrdinalIgnoreCase)) return "include.<redacted>";
+        if (key.StartsWith("url.", StringComparison.OrdinalIgnoreCase)) return "url.<redacted>.rewrite";
+        if (key.Equals("core.hookspath", StringComparison.OrdinalIgnoreCase)) return "core.hooksPath";
+        return key;
+    }
+
+    private static string SafeConfigSource(string scope, string origin, string localConfigPath, string workingDirectory)
+    {
+        if (origin.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                if (Path.GetFullPath(origin[5..], workingDirectory).Equals(Path.GetFullPath(localConfigPath), PathComparison))
+                    return "repository-local";
+            }
+            catch (Exception exception) when (exception is ArgumentException or IOException or NotSupportedException) { }
+        }
+        if (scope.Equals("local", StringComparison.OrdinalIgnoreCase)) return "included-local";
+        if (scope.Equals("worktree", StringComparison.OrdinalIgnoreCase)) return "repository-worktree";
+        if (scope.Equals("command", StringComparison.OrdinalIgnoreCase)) return "command-line";
+        if (scope.Equals("system", StringComparison.OrdinalIgnoreCase) || scope.Equals("global", StringComparison.OrdinalIgnoreCase))
+            return $"inherited-{scope.ToLowerInvariant()}";
+        return "other-config";
+    }
+
+    internal sealed record UnsafeGitConfigEntry(string Key, string Source);
+
+    internal sealed record GitConfigEntry(string Key, string Value);
+    internal sealed record GitConfigOverlay(IReadOnlyList<GitConfigEntry> Entries);
+
+    private static bool HasTrustedHelperOverlay(GitConfigOverlay overlay) => overlay.Entries
+        .Where(entry => entry.Key.Equals("credential.https://github.com.helper", StringComparison.OrdinalIgnoreCase))
+        .Select(entry => entry.Value)
+        .SequenceEqual(new[] { "", "!gh auth git-credential" }, StringComparer.Ordinal);
+
     internal static bool HasActiveGitFilterPaths(string workingDirectory, IReadOnlyList<string> paths,
-        string isolatedGitConfigPath, CancellationToken stopToken)
+        GitConfigOverlay gitConfigOverlay, CancellationToken stopToken)
     {
         if (paths.Count == 0) return false;
         var pathInput = Encoding.UTF8.GetBytes(string.Join('\0', paths) + '\0');
         var attributes = Run("git", workingDirectory, ["check-attr", "-z", "--stdin", "filter"],
-            isolatedGitConfigPath: isolatedGitConfigPath, stopToken: stopToken, standardInput: pathInput).Output;
+            gitConfigOverlay: gitConfigOverlay, stopToken: stopToken, standardInput: pathInput).Output;
         var fields = attributes.Split('\0');
         for (var index = 0; index + 2 < fields.Length; index += 3)
             // Git reports both '-filter' and a literal 'filter=unset' as "unset". Treat it as active to fail closed.
@@ -765,7 +841,7 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         EnsureSafeGitExecutionContext();
         return Run("git", cwd,
             ["-c", $"core.hooksPath={_safeHooksPath}", "-c", "commit.gpgsign=false", .. args],
-            isolatedGitConfigPath: _isolatedGitConfigPath, stopToken: stopToken, standardInput: standardInput,
+            gitConfigOverlay: _gitConfigOverlay, stopToken: stopToken, standardInput: standardInput,
             isolatedGitIndexPath: indexFile);
     }
     private ProcessResult Gh(string cwd, params string[] args) => Run("gh", cwd, args, stopToken: _activeStopToken);
@@ -781,33 +857,34 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         return path;
     }
 
-    private string CreateIsolatedGitConfig(string cwd, CancellationToken stopToken)
+    private GitConfigOverlay CreateGitConfigOverlay(string cwd, CancellationToken stopToken)
     {
-        _isolatedGitConfigDirectory = Path.Combine(Path.GetTempPath(), $"ateliers-orchestrator-gitconfig-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_isolatedGitConfigDirectory);
-        RestrictUnixPermissions(_isolatedGitConfigDirectory, directory: true);
-        var configPath = Path.Combine(_isolatedGitConfigDirectory, "config");
-        File.WriteAllText(configPath, string.Empty, new UTF8Encoding(false));
-        RestrictUnixPermissions(configPath, directory: false);
-        // Do not copy user credential-helper commands. GitHub CLI is already authenticated and provides its own helper.
-        Run("git", cwd, ["config", "--file", configPath, "--add", "credential.https://github.com.helper", string.Empty], stopToken: stopToken);
-        Run("git", cwd, ["config", "--file", configPath, "--add", "credential.https://github.com.helper", "!gh auth git-credential"], stopToken: stopToken);
+        _gitTemporaryDirectory = Path.Combine(Path.GetTempPath(), $"ateliers-orchestrator-git-temp-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_gitTemporaryDirectory);
+        RestrictUnixPermissions(_gitTemporaryDirectory, directory: true);
+        // Keep security-sensitive config in memory and pass it through the child environment.
+        // No mutable file remains between validation and Git reading the credential helper.
+        var entries = new List<GitConfigEntry>
+        {
+            new("credential.https://github.com.helper", string.Empty),
+            new("credential.https://github.com.helper", "!gh auth git-credential")
+        };
         foreach (var key in new[] { "user.name", "user.email" })
         {
-            var identity = Run("git", cwd, ["config", "--global", "--get", key], allowExitCodeOne: true, stopToken: stopToken);
+            var identity = Run("git", cwd, ["config", "--global", "--get", key], allowExitCodeOne: true,
+                isolateGitConfig: true, stopToken: stopToken);
             if (identity.ExitCode == 0 && !string.IsNullOrWhiteSpace(identity.Output))
-                Run("git", cwd, ["config", "--file", configPath, "--add", key, identity.Output.TrimEnd('\r', '\n')], stopToken: stopToken);
+                entries.Add(new GitConfigEntry(key, identity.Output.TrimEnd('\r', '\n')));
         }
-        return configPath;
+        return new GitConfigOverlay(entries);
     }
 
     public void Dispose()
     {
-        TryDeleteDirectory(_isolatedGitConfigDirectory);
+        TryDeleteDirectory(_gitTemporaryDirectory);
         TryDeleteDirectory(_safeHooksPath);
-        _isolatedGitConfigPath = null;
-        _isolatedGitConfigSha256 = null;
-        _isolatedGitConfigDirectory = null;
+        _gitConfigOverlay = null;
+        _gitTemporaryDirectory = null;
     }
 
     private static void TryDeleteDirectory(string? directory)
@@ -828,9 +905,7 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
 
     private void EnsureSafeGitExecutionContext()
     {
-        if (_isolatedGitConfigPath is null || _isolatedGitConfigSha256 is null ||
-            !File.Exists(_isolatedGitConfigPath) ||
-            !HashFile(_isolatedGitConfigPath).Equals(_isolatedGitConfigSha256, StringComparison.Ordinal) ||
+        if (_gitConfigOverlay is null || !HasTrustedHelperOverlay(_gitConfigOverlay) ||
             !Directory.Exists(_safeHooksPath) || Directory.EnumerateFileSystemEntries(_safeHooksPath).Any())
             throw new InvalidOperationException("隔離したGit設定またはhook無効化領域が変更されています。公開処理を停止しました。");
     }
@@ -842,25 +917,43 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
             throw new InvalidOperationException("Implementer実行後にローカルGit設定が変更されました。安全のため公開処理を停止しました。");
     }
 
-    private static ProcessResult Run(string executable, string cwd, IReadOnlyList<string> args,
-        bool allowExitCodeOne = false, string? isolatedGitConfigPath = null,
+    internal static void ConfigureIsolatedGitEnvironment(IDictionary<string, string?> environment, GitConfigOverlay? gitConfigOverlay)
+    {
+        // Git accepts environment overrides for SSH commands, repository selection, diff tools, and other
+        // execution controls. Start from a clean Git environment, then add only publisher-owned values.
+        ClearGitExecutionEnvironment(environment);
+        environment["GIT_CONFIG_NOSYSTEM"] = "1";
+        if (gitConfigOverlay is not null)
+        {
+            environment["GIT_CONFIG_GLOBAL"] = OperatingSystem.IsWindows() ? "NUL" : "/dev/null";
+            environment["GIT_CONFIG_COUNT"] = gitConfigOverlay.Entries.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            for (var index = 0; index < gitConfigOverlay.Entries.Count; index++)
+            {
+                environment[$"GIT_CONFIG_KEY_{index}"] = gitConfigOverlay.Entries[index].Key;
+                environment[$"GIT_CONFIG_VALUE_{index}"] = gitConfigOverlay.Entries[index].Value;
+            }
+        }
+        environment["GIT_TERMINAL_PROMPT"] = "0";
+    }
+
+    private static void ClearGitExecutionEnvironment(IDictionary<string, string?> environment)
+    {
+        foreach (var variable in environment.Keys.Where(key => key.StartsWith("GIT_", StringComparison.OrdinalIgnoreCase)).ToArray())
+            environment.Remove(variable);
+        environment.Remove("SSH_ASKPASS");
+        environment.Remove("SSH_ASKPASS_REQUIRE");
+    }
+
+    internal static ProcessResult Run(string executable, string cwd, IReadOnlyList<string> args,
+        bool allowExitCodeOne = false, GitConfigOverlay? gitConfigOverlay = null, bool isolateGitConfig = false,
         CancellationToken stopToken = default, byte[]? standardInput = null, string? isolatedGitIndexPath = null)
     {
         var info = new ProcessStartInfo(executable) { WorkingDirectory = cwd, UseShellExecute = false,
             RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = standardInput is not null, CreateNoWindow = true };
-        if (isolatedGitConfigPath is not null)
-        {
-            info.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
-            info.Environment["GIT_CONFIG_GLOBAL"] = isolatedGitConfigPath;
-            foreach (var variable in info.Environment.Keys.Where(key => key.StartsWith("GIT_CONFIG_KEY_", StringComparison.OrdinalIgnoreCase) ||
-                         key.StartsWith("GIT_CONFIG_VALUE_", StringComparison.OrdinalIgnoreCase)).ToArray())
-                info.Environment.Remove(variable);
-            info.Environment.Remove("GIT_CONFIG_COUNT");
-            info.Environment.Remove("GIT_CONFIG_PARAMETERS");
-            info.Environment.Remove("GIT_CONFIG_SYSTEM");
-            info.Environment.Remove("GIT_INDEX_FILE");
-            info.Environment["GIT_TERMINAL_PROMPT"] = "0";
-        }
+        if (isolateGitConfig || gitConfigOverlay is not null)
+            ConfigureIsolatedGitEnvironment(info.Environment, gitConfigOverlay);
+        else
+            ClearGitExecutionEnvironment(info.Environment);
         if (isolatedGitIndexPath is not null) info.Environment["GIT_INDEX_FILE"] = isolatedGitIndexPath;
         foreach (var arg in args) info.ArgumentList.Add(arg);
         stopToken.ThrowIfCancellationRequested();
@@ -902,5 +995,5 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         return new ProcessResult(stdout.Result, stderr.Result, process.ExitCode);
     }
 
-    private sealed record ProcessResult(string Output, string Error, int ExitCode);
+    internal sealed record ProcessResult(string Output, string Error, int ExitCode);
 }
