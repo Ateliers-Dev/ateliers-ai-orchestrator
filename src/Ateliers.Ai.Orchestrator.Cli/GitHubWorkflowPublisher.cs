@@ -10,6 +10,7 @@ namespace Ateliers.Ai.Orchestrator.Cli;
 /// <summary>Git CLIとGitHub CLIを使って、専用ブランチへのpushとPR提出を行います。</summary>
 public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
 {
+    private static readonly AsyncLocal<PublicationDiagnosticContext?> CurrentDiagnostic = new();
     private readonly string _safeHooksPath = CreateSafeHooksPath();
     private GitConfigOverlay? _gitConfigOverlay;
     private string? _gitTemporaryDirectory;
@@ -23,7 +24,11 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
 
     /// <inheritdoc />
     public WorkflowPublicationSession Start(TaskContract contract, string runId, CancellationToken stopToken)
+        => ExecuteWithDiagnostics("start.preflight", () => StartCore(contract, runId, stopToken));
+
+    private WorkflowPublicationSession StartCore(TaskContract contract, string runId, CancellationToken stopToken)
     {
+        SetStage("start.git-isolation");
         _activeStopToken = stopToken;
         stopToken.ThrowIfCancellationRequested();
         var stage = "git-isolation";
@@ -96,15 +101,21 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
                 System.ComponentModel.Win32Exception => "process-start-failed",
                 _ => "io-failed"
             };
-            throw new WorkflowPreflightException(stage, reason);
+            throw new WorkflowPreflightException(stage, reason, exception.GetType().Name);
         }
     }
 
     /// <inheritdoc />
     public WorkflowPublicationSnapshot PushChanges(WorkflowPublicationSession session, int attempt, string runDirectory,
         string implementerSnapshotReference, string implementerSnapshotSha256, CancellationToken stopToken)
+        => ExecuteWithDiagnostics("push.snapshot-validation", () => PushChangesCore(session, attempt, runDirectory,
+            implementerSnapshotReference, implementerSnapshotSha256, stopToken));
+
+    private WorkflowPublicationSnapshot PushChangesCore(WorkflowPublicationSession session, int attempt, string runDirectory,
+        string implementerSnapshotReference, string implementerSnapshotSha256, CancellationToken stopToken)
     {
         var root = session.WorkingDirectory;
+        SetStage("push.snapshot-validation");
         stopToken.ThrowIfCancellationRequested();
         EnsureTrustedGitConfig(session);
         var snapshotPath = ResolveRunArtifact(runDirectory, implementerSnapshotReference);
@@ -124,12 +135,14 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         var currentPaths = CaptureChangedPaths(root, snapshot.BaseSha);
         if (!currentPaths.Order(StringComparer.Ordinal).SequenceEqual(snapshot.Entries.Select(entry => entry.Path).Order(StringComparer.Ordinal), StringComparer.Ordinal))
             throw new InvalidOperationException("Implementer終了後にworkspaceの変更パスが変化しました。固定snapshotと一致しません。");
+        SetStage("push.workspace-verification");
         foreach (var entry in snapshot.Entries)
             VerifyWorkspaceSnapshotEntry(root, entry);
         var forbidden = snapshot.Entries.Select(entry => entry.Path).FirstOrDefault(path => SecretPath.IsMatch(path.Replace('\\', '/')));
         if (forbidden is not null)
             throw new InvalidOperationException($"秘密情報を含む可能性があるファイルの変更を検出しました: {Path.GetFileName(forbidden)}");
 
+        SetStage("push.snapshot-index-build");
         stopToken.ThrowIfCancellationRequested();
         var snapshotIndex = Path.Combine(_gitTemporaryDirectory!, $"index-{Guid.NewGuid():N}");
         Git(root, ["read-tree", snapshot.BaseSha], stopToken, indexFile: snapshotIndex);
@@ -156,11 +169,13 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         forbidden = stagedPaths.FirstOrDefault(path => SecretPath.IsMatch(path.Replace('\\', '/')));
         if (forbidden is not null)
             throw new InvalidOperationException($"秘密情報を含む可能性があるファイルをstageしました: {Path.GetFileName(forbidden)}");
+        SetStage("push.secret-scan-and-whitespace-check");
         var stagedDiff = Git(root, ["diff", "--cached", "--binary", "--no-ext-diff", snapshot.BaseSha, "--"],
             stopToken, indexFile: snapshotIndex).Output;
         if (SecretContent.IsMatch(stagedDiff))
             throw new InvalidOperationException("差分に既知形式の秘密情報らしい値を検出しました。内容を確認し、秘密情報を除去してください。");
         Git(root, ["diff", "--cached", "--check", snapshot.BaseSha, "--"], stopToken, indexFile: snapshotIndex);
+        SetStage("push.commit-and-local-verification");
         var expectedTree = Git(root, ["write-tree"], stopToken, indexFile: snapshotIndex).Output.Trim();
         stopToken.ThrowIfCancellationRequested();
         var commitSha = Git(root, ["commit-tree", expectedTree, "-p", snapshot.BaseSha, "-m", $"{session.Branch} の成果物 {attempt}"], stopToken).Output.Trim();
@@ -171,6 +186,7 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         Git(root, ["read-tree", commitSha], stopToken);
         if (!string.IsNullOrWhiteSpace(Git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all").Output))
             throw new InvalidOperationException("snapshot commit後にworking treeが変化しました。リモートへpushしません。");
+        SetStage("push.remote-publication");
         try
         {
             Git(root, ["push", "--no-verify", "--porcelain", "origin", $"HEAD:refs/heads/{session.Branch}"], stopToken);
@@ -180,6 +196,7 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
             RecordInterruptedPush(session, commitSha, runDirectory);
             throw;
         }
+        SetStage("push.remote-verification");
         var remoteLine = Git(root, ["ls-remote", "origin", $"refs/heads/{session.Branch}"], CancellationToken.None).Output.Trim();
         var remoteSha = remoteLine.Split('\t')[0];
         if (!remoteSha.Equals(commitSha, StringComparison.OrdinalIgnoreCase))
@@ -188,6 +205,7 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         // Once the remote ref has been verified, finish recording the exact pushed diff even if
         // the caller requested cancellation meanwhile. The workflow checks the token immediately
         // after this method and fails before Reviewer/PR; this command is only local evidence work.
+        SetStage("push.diff-evidence");
         var diff = Git(root, ["diff", "--binary", "--no-ext-diff", session.BaseSha, commitSha], CancellationToken.None).Output;
         if (string.IsNullOrWhiteSpace(diff))
             throw new InvalidOperationException("pushしたコミットからレビュー対象の差分を取得できません。");
@@ -201,7 +219,13 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
     /// <inheritdoc />
     public WorkflowPullRequest CreatePullRequest(WorkflowPublicationSession session, WorkflowPublicationSnapshot snapshot,
         TaskContract contract, string runDirectory, CancellationToken stopToken)
+        => ExecuteWithDiagnostics("pull_request.reviewed-head-validation", () => CreatePullRequestCore(session, snapshot,
+            contract, runDirectory, stopToken));
+
+    private WorkflowPullRequest CreatePullRequestCore(WorkflowPublicationSession session, WorkflowPublicationSnapshot snapshot,
+        TaskContract contract, string runDirectory, CancellationToken stopToken)
     {
+        SetStage("pull_request.reviewed-head-validation");
         _activeStopToken = stopToken;
         var root = session.WorkingDirectory;
         EnsureTrustedGitConfig(session);
@@ -211,9 +235,11 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
             !remoteLine.Split('\t')[0].Equals(snapshot.CommitSha, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("PR作成前にローカルまたはリモートheadがレビュー済みSHAから変化しました。");
 
+        SetStage("pull_request.base-verification");
         var baseNow = Git(root, "ls-remote", "origin", $"refs/heads/{session.BaseBranch}").Output.Trim().Split('\t')[0];
         if (!baseNow.Equals(session.BaseSha, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("実行中にbaseブランチが進みました。最新のbaseから再実行して差分を再レビューしてください。");
+        SetStage("pull_request.duplicate-check");
         var existing = Gh(root, "pr", "list", "--repo", session.Repository, "--head", session.Branch,
             "--base", session.BaseBranch, "--json", "number", "--template", "{{len .}}").Output.Trim();
         if (existing != "0")
@@ -228,6 +254,7 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         var verifiedEvidencePath = Path.Combine(runDirectory, "github-pull-request.json");
         if (File.Exists(verifiedEvidencePath))
             throw new InvalidOperationException("検証済みPR証跡ファイルが既にあります。実行記録を上書きしません。");
+        SetStage("pull_request.create");
         WritePendingPullRequestEvidence(pendingEvidencePath, session, snapshot, "create-request-started", null);
         string create;
         try
@@ -247,6 +274,7 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
             throw new InvalidOperationException("GitHub CLIのPR作成結果からGitHub PR URLを確認できません。");
 
         WritePendingPullRequestEvidence(pendingEvidencePath, session, snapshot, "create-returned", create);
+        SetStage("pull_request.response-verification");
         string[] details;
         try
         {
@@ -268,6 +296,7 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
             details[3] != session.Branch || details[4] != session.BaseBranch)
             throw new InvalidOperationException("作成したPRのURL・head/base SHAまたはブランチを照合できませんでした。");
 
+        SetStage("pull_request.evidence-persistence");
         var evidence = new
         {
             evidenceKind = "github-pull-request-created",
@@ -290,7 +319,13 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
     /// <inheritdoc />
     public WorkflowReviewComment PostReviewResultComment(WorkflowPublicationSession session, WorkflowPublicationSnapshot snapshot,
         WorkflowPullRequest pullRequest, WorkflowReviewResult reviewResult, string runDirectory, CancellationToken stopToken)
+        => ExecuteWithDiagnostics("review_comment.target-verification", () => PostReviewResultCommentCore(session,
+            snapshot, pullRequest, reviewResult, runDirectory, stopToken));
+
+    private WorkflowReviewComment PostReviewResultCommentCore(WorkflowPublicationSession session, WorkflowPublicationSnapshot snapshot,
+        WorkflowPullRequest pullRequest, WorkflowReviewResult reviewResult, string runDirectory, CancellationToken stopToken)
     {
+        SetStage("review_comment.target-verification");
         _activeStopToken = stopToken;
         EnsureTrustedGitConfig(session);
         if (!Regex.IsMatch(reviewResult.RunId, "^[A-Za-z0-9._-]{1,128}$", RegexOptions.CultureInvariant) ||
@@ -312,6 +347,7 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
             "{{.headRefOid}}\t{{.baseRefOid}}\t{{.headRefName}}\t{{.baseRefName}}\t{{.state}}").Output.Trim().Split('\t');
         EnsurePullRequestTargetsReview(prDetails, session, snapshot, pullRequest);
 
+        SetStage("review_comment.content-validation");
         var marker = $"<!-- ateliers-review-result run={reviewResult.RunId} head={snapshot.CommitSha} base={session.BaseSha} diff={snapshot.DiffSha256} -->";
         var body = FormatReviewComment(reviewResult, marker);
         if (SecretContent.IsMatch(body))
@@ -322,6 +358,7 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
             throw new InvalidOperationException("レビュー結果コメント証跡が既にあります。上書きせず停止しました。");
         WriteReviewCommentPending(pendingPath, session, pullRequest, reviewResult, snapshot, "post-request-started");
 
+        SetStage("review_comment.github-write-and-verification");
         try
         {
             var existing = FetchReviewComments(session.WorkingDirectory, session.Repository, prNumber);
@@ -848,6 +885,73 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
     private ProcessResult Gh(string cwd, byte[] standardInput, params string[] args) =>
         Run("gh", cwd, args, stopToken: _activeStopToken, standardInput: standardInput);
     private static ProcessResult Gh(string cwd, string[] args, CancellationToken stopToken) => Run("gh", cwd, args, stopToken: stopToken);
+
+    private static T ExecuteWithDiagnostics<T>(string initialStage, Func<T> action)
+    {
+        var previous = CurrentDiagnostic.Value;
+        var context = new PublicationDiagnosticContext(initialStage);
+        CurrentDiagnostic.Value = context;
+        try
+        {
+            return action();
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (WorkflowPreflightException exception)
+        {
+            throw new WorkflowPublicationFailureException(new WorkflowPublicationDiagnostic(
+                exception.Stage, MapPreflightReason(exception.Reason), exception.ExceptionType));
+        }
+        catch (WorkflowPublicationFailureException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (IsExpectedPublicationFailure(exception))
+        {
+            throw new WorkflowPublicationFailureException(new WorkflowPublicationDiagnostic(
+                context.Stage, GetReasonCode(exception), exception.GetType().Name));
+        }
+        finally
+        {
+            CurrentDiagnostic.Value = previous;
+        }
+    }
+
+    private static bool IsExpectedPublicationFailure(Exception exception) => exception is IOException or
+        UnauthorizedAccessException or System.Security.SecurityException or InvalidOperationException or System.ComponentModel.Win32Exception or
+        System.Text.Json.JsonException or KeyNotFoundException or FormatException or ArgumentException or NotSupportedException;
+
+    private static string GetReasonCode(Exception exception) => exception switch
+    {
+        UnauthorizedAccessException or System.Security.SecurityException => "access-denied",
+        IOException => "filesystem-error",
+        System.ComponentModel.Win32Exception => "process-start-failed",
+        System.Text.Json.JsonException or KeyNotFoundException or FormatException => "evidence-format-invalid",
+        ArgumentException or NotSupportedException => "invalid-input",
+        InvalidOperationException => "operation-rejected",
+        _ => "unexpected-error"
+    };
+
+    private static string MapPreflightReason(string reason) => reason switch
+    {
+        "access-denied" => "access-denied",
+        "process-start-failed" => "process-start-failed",
+        "io-failed" => "filesystem-error",
+        "invalid-path-or-argument" => "invalid-input",
+        _ => "operation-rejected"
+    };
+
+    private static void SetStage(string stage)
+    {
+        if (CurrentDiagnostic.Value is { } context) context.Stage = stage;
+    }
+
+    private sealed class PublicationDiagnosticContext(string stage)
+    {
+        public string Stage { get; set; } = stage;
+    }
 
     private static string CreateSafeHooksPath()
     {

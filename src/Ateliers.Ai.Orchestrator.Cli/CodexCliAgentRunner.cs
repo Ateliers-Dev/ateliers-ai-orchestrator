@@ -76,7 +76,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
             AddPowerShellShimCommand(start, options.ExecutablePath, codexArguments);
         else
             foreach (var argument in codexArguments) start.ArgumentList.Add(argument);
-        PrepareEnvironment(start, profileRoot);
+        PrepareEnvironment(start, profileRoot, runDirectory, request.Contract.WorkingDirectory, role, request.Attempt);
         var redactOutput = CreateProxyOutputRedactor(start.Environment);
         if (role == "implementer")
         {
@@ -360,9 +360,16 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
         return $"ROLE=IMPLEMENTER\nあなたはImplementerです。契約に記された作業領域と許可操作の範囲内でのみ作業し、外部書込・削除・マージを行わず、変更後の unified diff とテスト結果を最終応答に含めてください。{ScopeBoundaryInstruction}\n\n契約:\n{contract}{revision}";
     }
 
-    private void PrepareEnvironment(ProcessStartInfo start, string profileRoot)
+    private void PrepareEnvironment(ProcessStartInfo start, string profileRoot, string runDirectory,
+        string workingDirectory, string role, int attempt)
     {
         profileRoot = Path.GetFullPath(profileRoot);
+        var runtimeRoot = Path.GetFullPath(Path.Combine(runDirectory, "runtime", $"{role}-{attempt}"));
+        var checkoutRoot = Path.TrimEndingDirectorySeparator(ResolvePathForContainment(workingDirectory));
+        if (!IsOutsideDirectory(checkoutRoot, ResolvePathForContainment(runtimeRoot)) ||
+            !IsOutsideDirectory(checkoutRoot, ResolvePathForContainment(profileRoot)))
+            throw new InvalidOperationException("Codex子プロセスの実行環境はcheckout外へ配置する必要があります。");
+
         var inherited = start.Environment.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
         start.Environment.Clear();
         var allowed = new[] { "PATH", "SystemDrive", "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "PROCESSOR_ARCHITECTURE",
@@ -371,8 +378,47 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
             "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy" };
         foreach (var name in allowed)
             if (inherited.TryGetValue(name, out var value) && value is not null) start.Environment[name] = value;
+        var userProfile = Path.Combine(runtimeRoot, "user-profile");
+        var appData = Path.Combine(userProfile, "AppData", "Roaming");
+        var localAppData = Path.Combine(userProfile, "AppData", "Local");
+        var temp = Path.Combine(runtimeRoot, "tmp");
+        var dotnetHome = Path.Combine(runtimeRoot, "dotnet-home");
+        foreach (var path in new[] { userProfile, appData, localAppData, temp, dotnetHome }) Directory.CreateDirectory(path);
+        start.Environment["HOME"] = userProfile;
+        start.Environment["USERPROFILE"] = userProfile;
+        start.Environment["APPDATA"] = appData;
+        start.Environment["LOCALAPPDATA"] = localAppData;
+        start.Environment["TEMP"] = temp;
+        start.Environment["TMP"] = temp;
+        start.Environment["TMPDIR"] = temp;
+        start.Environment["DOTNET_CLI_HOME"] = dotnetHome;
         Directory.CreateDirectory(profileRoot);
         start.Environment["CODEX_HOME"] = profileRoot;
+    }
+
+    private static bool IsOutsideDirectory(string directory, string candidate)
+    {
+        var relativePath = Path.GetRelativePath(directory, candidate);
+        return Path.IsPathRooted(relativePath) || relativePath == ".." ||
+            relativePath.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+    }
+
+    private static string ResolvePathForContainment(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var root = Path.GetPathRoot(fullPath) ?? throw new InvalidOperationException("実行環境のパスを解決できません。");
+        var current = root;
+        foreach (var segment in fullPath[root.Length..].Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, segment);
+            if (!Directory.Exists(current)) continue;
+            var directory = new DirectoryInfo(current);
+            if ((directory.Attributes & FileAttributes.ReparsePoint) == 0) continue;
+            current = directory.ResolveLinkTarget(returnFinalTarget: true)?.FullName
+                ?? throw new InvalidOperationException("実行環境のリンク先を解決できません。");
+        }
+        return Path.GetFullPath(current);
     }
 
     private static IReadOnlyList<string> CollectArtifactReferences(string artifactDirectory, string runDirectory)
