@@ -617,7 +617,7 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
     internal static IReadOnlyList<UnsafeGitConfigEntry> GetUnsafeEffectiveGitConfig(string workingDirectory,
         string localConfigPath, GitConfigOverlay gitConfigOverlay, CancellationToken stopToken)
     {
-        const string unsafeKeyPattern = "^(include|filter\\.|credential\\.helper$|credential\\..*\\.helper$|core\\.(sshCommand|fsmonitor|hookspath)$|extensions\\.worktreeconfig$|url\\..*\\.(insteadOf|pushInsteadOf)$)";
+        const string unsafeKeyPattern = "^(include|filter\\.|credential\\.helper$|credential\\..*\\.helper$|core\\.(sshcommand|fsmonitor|hookspath)$|extensions\\.worktreeconfig$|url\\..*\\.(insteadof|pushinsteadof)$)";
         var result = Run("git", workingDirectory, ["config", "--null", "--show-origin", "--show-scope", "--name-only", "--get-regexp", unsafeKeyPattern],
             allowExitCodeOne: true, gitConfigOverlay: gitConfigOverlay, stopToken: stopToken);
         var fields = result.Output.Split('\0');

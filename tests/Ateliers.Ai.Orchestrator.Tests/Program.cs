@@ -10,15 +10,23 @@ Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false
 if (args.Length >= 1 && args[0] == "--fake-codex-fixture") return RunFakeCodexFixture(args);
 if (args.Length >= 1 && args[0] == "--external-process-fixture") return RunExternalProcessFixture(args);
 if (args.Length >= 1 && args[0] == "--lifecycle-writer-fixture") return RunLifecycleWriterFixture(args);
-if (args.Length > 1 || (args.Length == 1 && args[0] != "--unit"))
+if (args.Length > 1 || (args.Length == 1 && args[0] is not ("--unit" or "--git-integration")))
 {
-    Console.Error.WriteLine("使用方法: Ateliers.Ai.Orchestrator.Tests [--unit]");
+    Console.Error.WriteLine("使用方法: Ateliers.Ai.Orchestrator.Tests [--unit | --git-integration]");
     return 2;
 }
 
 var suite = new TestSuite();
-AddUnitTests(suite);
+if (args.Length == 1 && args[0] == "--git-integration") AddGitIntegrationTests(suite);
+else AddUnitTests(suite);
 return suite.Run().ExitCode;
+
+static void AddGitIntegrationTests(TestSuite suite)
+{
+    // These tests use real, isolated Git repositories and linked worktrees. They do not call GitHub or a real Codex CLI.
+    suite.Add("linked worktreeのconfig・clean/dirty判定を実Gitで確認する", PublisherChecksRealLinkedWorktreeConfigAndCleanliness);
+    suite.Add("linked worktree内の子プロセス生成差分をsnapshotへ固定する", CodexChildChangesAreSnapshottedFromLinkedWorktree);
+}
 
 static void AddUnitTests(TestSuite suite)
 {
@@ -330,6 +338,79 @@ static void PublisherClassifiesDirtyCheckout()
     Assert.Equal(true, exception.Diagnostic.StandardOutputPresent);
     Assert.True(exception.Diagnostic.StandardOutputLength > 0);
     Assert.False(exception.ToString().Contains("private-dirty-marker", StringComparison.Ordinal));
+}
+
+static void PublisherChecksRealLinkedWorktreeConfigAndCleanliness()
+{
+    using var fixture = new GitWorktreeFixture();
+    RunGitFixture(fixture.Worktree, "config", "--worktree", "core.sshCommand", "fixture-private-ssh-command");
+    var overlay = new GitHubWorkflowPublisher.GitConfigOverlay(
+        [new("credential.https://github.com.helper", string.Empty),
+         new("credential.https://github.com.helper", "!gh auth git-credential")]);
+    var configPath = Path.GetFullPath(RunGitFixture(fixture.Worktree, "rev-parse", "--git-path", "config").Trim(), fixture.Worktree);
+    var unsafeConfig = GitHubWorkflowPublisher.GetUnsafeEffectiveGitConfig(fixture.Worktree, configPath, overlay, CancellationToken.None);
+    Assert.True(unsafeConfig.Any(entry => entry.Key.Equals("core.sshCommand", StringComparison.OrdinalIgnoreCase) &&
+        entry.Source == "repository-worktree"),
+        $"linked worktree固有のSSH設定が安全性検査の対象になりませんでした: {string.Join(',', unsafeConfig.Select(entry => $"{entry.Key}/{entry.Source}"))}");
+    using (var publisher = new GitHubWorkflowPublisher())
+    {
+        var exception = Assert.Throws<WorkflowPublicationFailureException>(() =>
+            publisher.Start(SampleContract() with { WorkingDirectory = fixture.Worktree }, "worktree-config", CancellationToken.None));
+        Assert.Equal("local-git-config-safety", exception.Diagnostic.Stage);
+        Assert.False(exception.ToString().Contains("fixture-private-ssh-command", StringComparison.Ordinal),
+            "worktree configの値が診断へ出力されました。");
+    }
+    RunGitFixture(fixture.Worktree, "config", "--worktree", "--unset-all", "core.sshCommand");
+    unsafeConfig = GitHubWorkflowPublisher.GetUnsafeEffectiveGitConfig(fixture.Worktree, configPath, overlay, CancellationToken.None);
+    Assert.True(unsafeConfig.Any(entry => entry.Key.Equals("extensions.worktreeConfig", StringComparison.OrdinalIgnoreCase)),
+        "linked worktreeを有効にするextensions.worktreeConfigが安全性検査の対象になりませんでした。");
+    using (var publisher = new GitHubWorkflowPublisher())
+    {
+        var exception = Assert.Throws<WorkflowPublicationFailureException>(() =>
+            publisher.Start(SampleContract() with { WorkingDirectory = fixture.Worktree }, "worktree-extension", CancellationToken.None));
+        Assert.Equal("local-git-config-safety", exception.Diagnostic.Stage,
+            "linked worktreeを有効にするextensions.worktreeConfigが未検出でした。");
+    }
+    Assert.Equal(string.Empty, RunGitFixture(fixture.Worktree, "status", "--porcelain=v1", "--untracked-files=all"),
+        "未変更のlinked worktreeがcleanと判定されませんでした。");
+    File.WriteAllText(Path.Combine(fixture.Worktree, "dirty-marker.txt"), "temporary dirty state");
+    Assert.True(RunGitFixture(fixture.Worktree, "status", "--porcelain=v1", "--untracked-files=all")
+        .Contains("dirty-marker.txt", StringComparison.Ordinal), "生成した未追跡ファイルをGitがdirtyとして認識しませんでした。");
+}
+
+static void CodexChildChangesAreSnapshottedFromLinkedWorktree()
+{
+    using var fixture = new GitWorktreeFixture();
+    var runDirectory = Path.Combine(fixture.Root.Path, "run");
+    var implementerHome = Path.Combine(fixture.Root.Path, "implementer-profile");
+    var reviewerHome = Path.Combine(fixture.Root.Path, "reviewer-profile");
+    Directory.CreateDirectory(runDirectory);
+    Directory.CreateDirectory(implementerHome);
+    Directory.CreateDirectory(reviewerHome);
+    var options = new CodexCliRunnerOptions(Environment.ProcessPath!, implementerHome, reviewerHome,
+        ["--fake-codex-fixture", "environment-artifact"]);
+    var request = new AgentRequest("git-integration", "Implementer", SampleContract() with
+        { WorkingDirectory = fixture.Worktree }, 1, RunDirectory: runDirectory, RemainingTime: TimeSpan.FromSeconds(10));
+    var response = new CodexCliAgentRunner(options).Implement(request);
+    Assert.True(response.Succeeded, response.ExecutionEvidence?.Error ?? "Fake child processが失敗しました。");
+    Assert.True(response.WorkspaceSnapshotReference is not null && response.WorkspaceSnapshotSha256 is not null,
+        "linked worktree内の変更を固定snapshotへ保存しませんでした。");
+
+    var snapshotPath = Path.Combine(runDirectory, response.WorkspaceSnapshotReference!);
+    var snapshotBytes = File.ReadAllBytes(snapshotPath);
+    Assert.Equal(response.WorkspaceSnapshotSha256, Convert.ToHexStringLower(SHA256.HashData(snapshotBytes)));
+    using var snapshot = JsonDocument.Parse(snapshotBytes);
+    Assert.Equal(fixture.BaseSha, snapshot.RootElement.GetProperty("BaseSha").GetString());
+    var entry = snapshot.RootElement.GetProperty("Entries").EnumerateArray().Single();
+    Assert.Equal("example.txt", entry.GetProperty("Path").GetString());
+    Assert.Equal("100644", entry.GetProperty("Mode").GetString());
+    var expectedContent = $"fixture artifact from {implementerHome}\n";
+    var content = Convert.FromBase64String(entry.GetProperty("ContentBase64").GetString()!);
+    Assert.Equal(expectedContent, Encoding.UTF8.GetString(content),
+        "子プロセス環境から生成したファイル内容がsnapshotと一致しません。");
+    Assert.Equal(expectedContent, File.ReadAllText(Path.Combine(fixture.Worktree, "example.txt")));
+    Assert.True(RunGitFixture(fixture.Worktree, "status", "--porcelain=v1", "--untracked-files=all").Contains("example.txt", StringComparison.Ordinal));
+    Assert.True(response.ExecutionEvidence!.ProcessExitObserved == true && response.ExecutionEvidence.StreamsClosed == true);
 }
 
 static void PublisherClassifiesCommandFailuresSafely()
@@ -912,7 +993,13 @@ static int RunFakeCodexFixture(string[] args)
         return 0;
     }
     if (mode == "kill-failure") { Thread.Sleep(500); return 0; }
-    if (prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal)) File.WriteAllText("example.txt", "fixture change\n");
+    if (prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal))
+    {
+        var content = mode == "environment-artifact"
+            ? $"fixture artifact from {Environment.GetEnvironmentVariable("CODEX_HOME")}\n"
+            : "fixture change\n";
+        File.WriteAllText("example.txt", content);
+    }
     if (mode == "executable-mode-change" && prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal) && !OperatingSystem.IsWindows())
         File.SetUnixFileMode("example.txt", UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
     if (mode == "new-executable" && prompt.Contains("ROLE=IMPLEMENTER", StringComparison.Ordinal) && !OperatingSystem.IsWindows())
@@ -2873,6 +2960,102 @@ sealed class TemporaryDirectory : IDisposable
             Directory.Delete(AdditionalPath, recursive: true);
         }
         Directory.Delete(Path, recursive: true);
+    }
+}
+
+/// <summary>一つのテスト専用に初期化した実Git repositoryとlinked worktreeです。</summary>
+sealed class GitWorktreeFixture : IDisposable
+{
+    private readonly TemporaryDirectory root = new();
+    private bool worktreeRegistered;
+    private readonly Dictionary<string, string?> originalGitEnvironment = Environment.GetEnvironmentVariables()
+        .Keys.Cast<string>()
+        .Where(name => name.StartsWith("GIT_", StringComparison.OrdinalIgnoreCase) ||
+            name.Equals("SSH_ASKPASS", StringComparison.OrdinalIgnoreCase) ||
+            name.Equals("SSH_ASKPASS_REQUIRE", StringComparison.OrdinalIgnoreCase))
+        .ToDictionary(name => name, Environment.GetEnvironmentVariable, StringComparer.OrdinalIgnoreCase);
+    public TemporaryDirectory Root => root;
+    public string Repository { get; }
+    public string Worktree { get; }
+    public string BaseSha { get; }
+
+    public GitWorktreeFixture()
+    {
+        Repository = Path.Combine(root.Path, "repository");
+        Worktree = Path.Combine(root.Path, "linked-worktree");
+        root.AdditionalPath = Repository;
+        Directory.CreateDirectory(Repository);
+        try
+        {
+            foreach (var name in Environment.GetEnvironmentVariables().Keys.Cast<string>()
+                .Where(name => name.StartsWith("GIT_", StringComparison.OrdinalIgnoreCase) ||
+                    name.Equals("SSH_ASKPASS", StringComparison.OrdinalIgnoreCase) ||
+                    name.Equals("SSH_ASKPASS_REQUIRE", StringComparison.OrdinalIgnoreCase)).ToArray())
+                Environment.SetEnvironmentVariable(name, null);
+            Environment.SetEnvironmentVariable("GIT_CONFIG_NOSYSTEM", "1");
+            Environment.SetEnvironmentVariable("GIT_CONFIG_GLOBAL", OperatingSystem.IsWindows() ? "NUL" : "/dev/null");
+            Environment.SetEnvironmentVariable("GIT_TERMINAL_PROMPT", "0");
+            RunGit(Repository, "-c", "init.defaultBranch=main", "init", "-q");
+            RunGit(Repository, "config", "extensions.worktreeConfig", "true");
+            File.WriteAllText(Path.Combine(Repository, "example.txt"), "baseline\n");
+            RunGit(Repository, "add", "example.txt");
+            RunGit(Repository, "-c", "user.name=Orchestrator Integration Test", "-c",
+                "user.email=orchestrator-integration@example.invalid", "commit", "-qm", "baseline");
+            BaseSha = RunGit(Repository, "rev-parse", "HEAD").Trim();
+            RunGit(Repository, "worktree", "add", "-q", "-b", "codex/git-integration-fixture", Worktree, BaseSha);
+            worktreeRegistered = true;
+        }
+        catch
+        {
+            root.Dispose();
+            RestoreGitEnvironment();
+            throw;
+        }
+    }
+
+    public void Dispose()
+    {
+        Exception? cleanupFailure = null;
+        if (worktreeRegistered && Directory.Exists(Worktree))
+        {
+            try { RunGit(Repository, "worktree", "remove", "--force", Worktree); }
+            catch (Exception exception) { cleanupFailure = exception; }
+        }
+        try { root.Dispose(); }
+        finally { RestoreGitEnvironment(); }
+        if (cleanupFailure is not null)
+            throw new InvalidOperationException("テスト用linked worktreeの登録解除に失敗しました。root全体は削除しました。", cleanupFailure);
+    }
+
+    private void RestoreGitEnvironment()
+    {
+        foreach (var name in Environment.GetEnvironmentVariables().Keys.Cast<string>()
+            .Where(name => name.StartsWith("GIT_", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("SSH_ASKPASS", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("SSH_ASKPASS_REQUIRE", StringComparison.OrdinalIgnoreCase)).ToArray())
+            Environment.SetEnvironmentVariable(name, null);
+        foreach (var (name, value) in originalGitEnvironment) Environment.SetEnvironmentVariable(name, value);
+    }
+
+    private static string RunGit(string workingDirectory, params string[] arguments)
+    {
+        var start = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        start.Environment["GIT_TERMINAL_PROMPT"] = "0";
+        foreach (var argument in arguments) start.ArgumentList.Add(argument);
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("Git fixture process could not start.");
+        var output = process.StandardOutput.ReadToEnd();
+        var error = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException($"Git fixture failed with exit code {process.ExitCode}: {error}");
+        return output;
     }
 }
 
