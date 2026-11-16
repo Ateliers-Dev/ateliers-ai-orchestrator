@@ -1,0 +1,61 @@
+﻿{
+  "schemaVersion": 1,
+  "taskId": "issue-17-reviewer-stop-reason",
+  "purpose": "Issue #17を修正し、Reviewer停止時に実際の停止原因が実行証跡へ記録されることをテストと独立レビューで確認する",
+  "workingDirectory": "__REPOSITORY_ROOT_IS_SET_BY_SCRIPT__",
+  "scope": {
+    "included": [
+      "src/",
+      "tests/"
+    ],
+    "excluded": [
+      "Issue #17と無関係な機能変更",
+      "本番環境へのデプロイ",
+      "PRの自動マージ"
+    ]
+  },
+  "inputs": [
+    {
+      "description": "Issue #17: Reviewer停止時に停止原因を実行証跡へ記録する",
+      "reference": "https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/17",
+      "revision": "実行時点のIssue本文"
+    }
+  ],
+  "requirements": [
+    "Issue #17の再現条件と期待動作を確認する",
+    "Reviewerがタイムアウトまたは停止要求で終了した場合、空出力より停止原因をExecutionEvidence.Errorへ記録する",
+    "通常完了時に本文と任意成果物の両方が空の場合は、従来どおり空出力エラーを記録する",
+    "対象範囲の自動テストを追加または更新して実行する",
+    "実装者と独立したReviewerが固定差分をレビューする",
+    "変更と検証結果を日本語で報告する"
+  ],
+  "acceptanceCriteria": [
+    "タイムアウトと停止要求の診断がExecutionEvidence.Errorに実際の停止原因を示す",
+    "通常完了時の空出力エラーの既存動作を維持する",
+    "関連する自動テストが成功する",
+    "独立Reviewerの結果が実行証跡に記録される",
+    "PRとReviewer結果コメントが作成され、人間の最終判断待ちで停止する"
+  ],
+  "delegatedOperations": [
+    "Issue #17と関連コード・テストを調査する",
+    "src/ と tests/ の対象ファイルを編集する",
+    "関連する自動テストを追加・更新して実行する",
+    "変更をcommitして専用ブランチをGitHubへpushする",
+    "Pull Requestを作成し、独立Reviewerの結果をPRコメントに記録する"
+  ],
+  "limits": {
+    "maxDurationMinutes": 120,
+    "maxRevisionAttempts": 2,
+    "maxRetries": 2
+  },
+  "stopConditions": [
+    "委譲範囲外の判断が必要になった場合",
+    "Issue #17と無関係な大規模変更が必要になった場合",
+    "作業開始時にcleanな既定ブランチのcheckoutを確認できない場合",
+    "GitHub認証、push、Pull Request作成またはレビューコメント投稿の結果が不確かな場合"
+  ],
+  "reporting": {
+    "pullRequestExpected": true,
+    "finalReportFormat": "markdown"
+  }
+}
