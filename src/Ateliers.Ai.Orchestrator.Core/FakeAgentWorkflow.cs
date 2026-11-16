@@ -231,11 +231,16 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                     catch (Exception exception) when (exception is WorkflowPublicationFailureException or IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
                     {
                         publicationFailureDiagnostic = GetPublicationDiagnostic(exception, "start.preflight");
-                        failure = $"GitHub提出の事前確認に失敗しました。認証・リモート・ブランチ・権限を確認してください。 (stage={publicationFailureDiagnostic.Stage}; reason={publicationFailureDiagnostic.ReasonCode}; exception={publicationFailureDiagnostic.ExceptionType})";
+                        failure = $"GitHub提出の事前確認に失敗しました。原因は未確定です。 ({FormatPublicationDiagnostic(publicationFailureDiagnostic)})";
                         eventWriter.Append("github_publication_failed", "failed", from: run.State, to: run.State,
                             detail: "GitHub提出の事前確認に失敗しました。例外出力は秘密情報保護のため記録していません。", error: failure,
                             stage: publicationFailureDiagnostic.Stage, reasonCode: publicationFailureDiagnostic.ReasonCode,
-                            exceptionType: publicationFailureDiagnostic.ExceptionType);
+                            exceptionType: publicationFailureDiagnostic.ExceptionType,
+                            exitCode: publicationFailureDiagnostic.ExitCode,
+                            standardOutputPresent: publicationFailureDiagnostic.StandardOutputPresent,
+                            standardOutputLength: publicationFailureDiagnostic.StandardOutputLength,
+                            standardErrorPresent: publicationFailureDiagnostic.StandardErrorPresent,
+                            standardErrorLength: publicationFailureDiagnostic.StandardErrorLength);
                         run.Transition(RunState.Failed);
                     }
                 }
@@ -316,11 +321,16 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                     catch (Exception exception) when (exception is WorkflowPublicationFailureException or IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
                     {
                         publicationFailureDiagnostic = GetPublicationDiagnostic(exception, "push.changes");
-                        failure = $"必須GitHub pushまたは差分固定に失敗しました。成功扱いにはしていません。 (stage={publicationFailureDiagnostic.Stage}; reason={publicationFailureDiagnostic.ReasonCode}; exception={publicationFailureDiagnostic.ExceptionType})";
+                        failure = $"必須GitHub pushまたは差分固定に失敗しました。成功扱いにはしていません。原因は未確定です。 ({FormatPublicationDiagnostic(publicationFailureDiagnostic)})";
                         eventWriter.Append("github_publication_failed", "failed", from: run.State, to: run.State,
                             detail: "必須GitHub pushまたは差分固定に失敗しました。例外出力は秘密情報保護のため記録していません。", error: failure,
                             stage: publicationFailureDiagnostic.Stage, reasonCode: publicationFailureDiagnostic.ReasonCode,
-                            exceptionType: publicationFailureDiagnostic.ExceptionType);
+                            exceptionType: publicationFailureDiagnostic.ExceptionType,
+                            exitCode: publicationFailureDiagnostic.ExitCode,
+                            standardOutputPresent: publicationFailureDiagnostic.StandardOutputPresent,
+                            standardOutputLength: publicationFailureDiagnostic.StandardOutputLength,
+                            standardErrorPresent: publicationFailureDiagnostic.StandardErrorPresent,
+                            standardErrorLength: publicationFailureDiagnostic.StandardErrorLength);
                         run.Transition(RunState.Failed);
                         break;
                     }
@@ -507,12 +517,17 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                             {
                                 publicationFailureDiagnostic = GetPublicationDiagnostic(exception,
                                     publishedPullRequest is null ? "pull_request.create_or_verify" : "review_comment.post_or_verify");
-                                failure = $"必須GitHub PR作成または証跡照合に失敗しました。成功扱いにはしていません。 (stage={publicationFailureDiagnostic.Stage}; reason={publicationFailureDiagnostic.ReasonCode}; exception={publicationFailureDiagnostic.ExceptionType})";
+                                failure = $"必須GitHub PR作成または証跡照合に失敗しました。成功扱いにはしていません。原因は未確定です。 ({FormatPublicationDiagnostic(publicationFailureDiagnostic)})";
                                 if (publishedPullRequest is not null)
                                     eventWriter.Append("github_review_result_comment_failed", "failed", from: run.State, to: run.State,
                                         detail: $"PR全体への必須レビュー結果コメントを検証できませんでした。runId={runId}; reviewer={reviewerId}; pr={publishedPullRequest.Url}; expectedHeadSha={publicationSnapshot.CommitSha}; expectedBaseSha={publishedPullRequest.BaseSha}; expectedDiffSha256={publicationSnapshot.DiffSha256}; 結果不明の場合はpending証跡を確認してください。",
                                         error: failure, stage: publicationFailureDiagnostic.Stage, reasonCode: publicationFailureDiagnostic.ReasonCode,
                                         exceptionType: publicationFailureDiagnostic.ExceptionType,
+                                        exitCode: publicationFailureDiagnostic.ExitCode,
+                                        standardOutputPresent: publicationFailureDiagnostic.StandardOutputPresent,
+                                        standardOutputLength: publicationFailureDiagnostic.StandardOutputLength,
+                                        standardErrorPresent: publicationFailureDiagnostic.StandardErrorPresent,
+                                        standardErrorLength: publicationFailureDiagnostic.StandardErrorLength,
                                         outputReference: File.Exists(Path.Combine(runDirectory, "github-review-comment-pending.json"))
                                             ? "github-review-comment-pending.json" : null,
                                         targetCommitSha: publicationSnapshot.CommitSha, diffSha256: publicationSnapshot.DiffSha256,
@@ -521,6 +536,11 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                                     detail: "必須GitHub PR作成または証跡照合に失敗しました。部分証跡があれば確認してください。例外出力は記録していません。",
                                     error: failure, stage: publicationFailureDiagnostic.Stage,
                                     reasonCode: publicationFailureDiagnostic.ReasonCode, exceptionType: publicationFailureDiagnostic.ExceptionType,
+                                    exitCode: publicationFailureDiagnostic.ExitCode,
+                                    standardOutputPresent: publicationFailureDiagnostic.StandardOutputPresent,
+                                    standardOutputLength: publicationFailureDiagnostic.StandardOutputLength,
+                                    standardErrorPresent: publicationFailureDiagnostic.StandardErrorPresent,
+                                    standardErrorLength: publicationFailureDiagnostic.StandardErrorLength,
                                     outputReference: File.Exists(Path.Combine(runDirectory, "github-review-comment-pending.json")) ? "github-review-comment-pending.json" :
                                         File.Exists(Path.Combine(runDirectory, "github-review-comment.json")) ? "github-review-comment.json" :
                                         File.Exists(Path.Combine(runDirectory, "github-pull-request.json")) ? "github-pull-request.json" :
@@ -766,7 +786,13 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
 
     private static string FormatPublicationDiagnostic(WorkflowPublicationDiagnostic? diagnostic) => diagnostic is null
         ? "なし"
-        : $"stage={diagnostic.Stage}; reason={diagnostic.ReasonCode}; exception={diagnostic.ExceptionType}";
+        : $"stage={diagnostic.Stage}; reason={diagnostic.ReasonCode}; exception={diagnostic.ExceptionType}; " +
+          $"cause={(diagnostic.ReasonCode == "dirty-checkout" ? "dirty-checkout" : "未確定")}; " +
+          $"exitCode={diagnostic.ExitCode?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "未取得"}; " +
+          $"stdoutPresent={diagnostic.StandardOutputPresent?.ToString().ToLowerInvariant() ?? "未取得"}; " +
+          $"stdoutLength={diagnostic.StandardOutputLength?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "未取得"}; " +
+          $"stderrPresent={diagnostic.StandardErrorPresent?.ToString().ToLowerInvariant() ?? "未取得"}; " +
+          $"stderrLength={diagnostic.StandardErrorLength?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "未取得"}";
 
     private static string Outcome(AgentResponse response) => response.TimedOut ? "timeout" : response.StopRequested ? "stop_requested" :
         !response.Succeeded ? "failed" : string.IsNullOrWhiteSpace(response.Content) ? "empty" : "completed";

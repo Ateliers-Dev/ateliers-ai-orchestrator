@@ -32,15 +32,18 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         _activeStopToken = stopToken;
         stopToken.ThrowIfCancellationRequested();
         var stage = "git-isolation";
+        SetStage(stage);
         try
         {
             _gitConfigOverlay = CreateGitConfigOverlay(contract.WorkingDirectory, stopToken);
             stage = "repository-root";
+            SetStage(stage);
             var root = Git(contract.WorkingDirectory, "rev-parse", "--show-toplevel").Output.Trim();
             if (!Path.GetFullPath(root).Equals(Path.GetFullPath(contract.WorkingDirectory), PathComparison))
                 throw new InvalidOperationException("workingDirectory はGitリポジトリのルートを指定してください。");
             var configPath = Path.GetFullPath(Git(root, "rev-parse", "--git-path", "config").Output.Trim(), root);
             stage = "local-git-config-safety";
+            SetStage(stage);
             var unsafeConfig = GetUnsafeEffectiveGitConfig(root, configPath, _gitConfigOverlay, stopToken);
             if (unsafeConfig.Count > 0)
             {
@@ -48,17 +51,24 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
                 throw new WorkflowPreflightException(stage, $"unsafe-local-config-key-present;{diagnostic}");
             }
             stage = "git-filter-policy";
+            SetStage(stage);
             var trackedPaths = Git(root, "ls-files", "-z").Output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
             if (HasActiveGitFilterPaths(root, trackedPaths, _gitConfigOverlay, stopToken))
                 throw new WorkflowPreflightException(stage, "filter-attributed-paths-unsupported-under-isolation");
             stage = "clean-checkout";
-            if (!string.IsNullOrWhiteSpace(Git(root, "status", "--porcelain=v1", "--untracked-files=all").Output))
-                throw new InvalidOperationException("開始時点で作業ツリーに変更があります。cleanな専用checkoutを用意してください。");
+            SetStage(stage);
+            var checkoutStatus = Git(root, "status", "--porcelain=v1", "--untracked-files=all");
+            if (!string.IsNullOrWhiteSpace(checkoutStatus.Output))
+                throw new WorkflowPreflightException(stage, "dirty-checkout", exitCode: checkoutStatus.ExitCode,
+                    standardOutputPresent: checkoutStatus.Output.Length > 0, standardOutputLength: checkoutStatus.Output.Length,
+                    standardErrorPresent: checkoutStatus.Error.Length > 0, standardErrorLength: checkoutStatus.Error.Length);
 
             // gh handles API authentication; Git push uses the configured credential helper. Neither output is persisted.
             stage = "github-authentication";
+            SetStage(stage);
             Gh(root, "auth", "status", "--hostname", "github.com");
             stage = "github-repository-identity";
+            SetStage(stage);
             var repo = Gh(root, "repo", "view", "--json", "nameWithOwner,defaultBranchRef",
                 "--template", "{{.nameWithOwner}}\t{{.defaultBranchRef.name}}").Output.Trim().Split('\t');
             if (repo.Length != 2 || string.IsNullOrWhiteSpace(repo[0]) || string.IsNullOrWhiteSpace(repo[1]))
@@ -66,12 +76,14 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
             var repository = repo[0];
             var baseBranch = repo[1];
             stage = "remote-validation";
+            SetStage(stage);
             var remoteUrl = Git(root, "remote", "get-url", "origin").Output.Trim();
             var pushRemoteUrl = Git(root, "remote", "get-url", "--push", "origin").Output.Trim();
             if (!RemoteMatches(remoteUrl, repository) || !RemoteMatches(pushRemoteUrl, repository))
                 throw new InvalidOperationException("originがGitHub CLIで特定したリポジトリと一致しません。");
 
             stage = "default-branch-refresh";
+            SetStage(stage);
             Git(root, "fetch", "--no-tags", "origin", $"+refs/heads/{baseBranch}:refs/remotes/origin/{baseBranch}");
             var baseSha = Git(root, "rev-parse", $"refs/remotes/origin/{baseBranch}").Output.Trim();
             var headSha = Git(root, "rev-parse", "HEAD").Output.Trim();
@@ -81,15 +93,18 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
             var safeTaskId = Regex.Replace(contract.TaskId, "[^A-Za-z0-9._-]", "-");
             var branch = $"codex/{safeTaskId}-{runId[..Math.Min(8, runId.Length)]}";
             stage = "branch-availability";
+            SetStage(stage);
             if (!string.IsNullOrWhiteSpace(Git(root, "ls-remote", "--heads", "origin", $"refs/heads/{branch}").Output))
                 throw new InvalidOperationException("実行用ブランチが既にリモートに存在します。別のrunIdで再実行してください。");
             stage = "branch-creation";
+            SetStage(stage);
             Git(root, "switch", "--create", branch, baseSha);
             return new WorkflowPublicationSession(root, repository, branch, baseBranch, baseSha,
                 configPath, HashFile(configPath), _safeHooksPath);
         }
         catch (OperationCanceledException) { throw; }
         catch (WorkflowPreflightException) { throw; }
+        catch (PublicationCommandException) { throw; }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException or
             InvalidOperationException or ArgumentException or NotSupportedException or System.ComponentModel.Win32Exception)
         {
@@ -902,11 +917,20 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         catch (WorkflowPreflightException exception)
         {
             throw new WorkflowPublicationFailureException(new WorkflowPublicationDiagnostic(
-                exception.Stage, MapPreflightReason(exception.Reason), exception.ExceptionType));
+                exception.Stage, MapPreflightReason(exception.Reason), exception.ExceptionType,
+                exception.ExitCode, exception.StandardOutputPresent, exception.StandardOutputLength,
+                exception.StandardErrorPresent, exception.StandardErrorLength));
         }
         catch (WorkflowPublicationFailureException)
         {
             throw;
+        }
+        catch (PublicationCommandException exception)
+        {
+            throw new WorkflowPublicationFailureException(new WorkflowPublicationDiagnostic(
+                context.Stage, exception.ReasonCode, exception.ExceptionType, exception.ExitCode,
+                exception.StandardOutputPresent, exception.StandardOutputLength,
+                exception.StandardErrorPresent, exception.StandardErrorLength));
         }
         catch (Exception exception) when (IsExpectedPublicationFailure(exception))
         {
@@ -919,7 +943,7 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         }
     }
 
-    private static bool IsExpectedPublicationFailure(Exception exception) => exception is IOException or
+    private static bool IsExpectedPublicationFailure(Exception exception) => exception is PublicationCommandException or IOException or
         UnauthorizedAccessException or System.Security.SecurityException or InvalidOperationException or System.ComponentModel.Win32Exception or
         System.Text.Json.JsonException or KeyNotFoundException or FormatException or ArgumentException or NotSupportedException;
 
@@ -936,6 +960,7 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
 
     private static string MapPreflightReason(string reason) => reason switch
     {
+        "dirty-checkout" => "dirty-checkout",
         "access-denied" => "access-denied",
         "process-start-failed" => "process-start-failed",
         "io-failed" => "filesystem-error",
@@ -951,6 +976,20 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
     private sealed class PublicationDiagnosticContext(string stage)
     {
         public string Stage { get; set; } = stage;
+    }
+
+    internal sealed class PublicationCommandException(string reasonCode, string exceptionType,
+        int? exitCode = null, bool? standardOutputPresent = null, int? standardOutputLength = null,
+        bool? standardErrorPresent = null, int? standardErrorLength = null)
+        : InvalidOperationException("外部公開コマンドに失敗しました。内容は診断へ記録していません。")
+    {
+        public string ReasonCode { get; } = reasonCode;
+        public string ExceptionType { get; } = exceptionType;
+        public int? ExitCode { get; } = exitCode;
+        public bool? StandardOutputPresent { get; } = standardOutputPresent;
+        public int? StandardOutputLength { get; } = standardOutputLength;
+        public bool? StandardErrorPresent { get; } = standardErrorPresent;
+        public int? StandardErrorLength { get; } = standardErrorLength;
     }
 
     private static string CreateSafeHooksPath()
@@ -1062,23 +1101,25 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         foreach (var arg in args) info.ArgumentList.Add(arg);
         stopToken.ThrowIfCancellationRequested();
         using var process = new Process { StartInfo = info };
+        bool started;
         try
         {
-            if (!process.Start()) throw new InvalidOperationException();
+            started = process.Start();
         }
-        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        catch (Exception exception)
         {
-            throw new InvalidOperationException($"必要なコマンド {executable} を起動できません。GitとGitHub CLIの導入・PATHを確認してください。");
+            throw new PublicationCommandException("process-start-failed", exception.GetType().Name);
         }
+        if (!started) throw new PublicationCommandException("process-start-failed", "ProcessStartReturnedFalse");
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
-        if (standardInput is not null)
-        {
-            process.StandardInput.BaseStream.Write(standardInput);
-            process.StandardInput.Close();
-        }
         try
         {
+            if (standardInput is not null)
+            {
+                process.StandardInput.BaseStream.Write(standardInput);
+                process.StandardInput.Close();
+            }
             process.WaitForExitAsync(stopToken).WaitAsync(TimeSpan.FromSeconds(120)).GetAwaiter().GetResult();
         }
         catch (OperationCanceledException)
@@ -1091,11 +1132,24 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         {
             try { process.Kill(entireProcessTree: true); } catch (Exception) { }
             try { process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult(); } catch (Exception) { }
-            throw new InvalidOperationException($"{executable} の処理がタイムアウトしました。認証・ネットワーク・権限を確認してください。");
+            throw new PublicationCommandException("process-execution-failed", "TimeoutException");
         }
-        Task.WaitAll(stdout, stderr);
+        catch (Exception exception)
+        {
+            try { process.Kill(entireProcessTree: true); } catch (Exception) { }
+            throw new PublicationCommandException("process-execution-failed", exception.GetType().Name);
+        }
+        try { Task.WaitAll(stdout, stderr); }
+        catch (Exception exception)
+        {
+            throw new PublicationCommandException("process-execution-failed", exception.GetType().Name);
+        }
         if (process.ExitCode != 0 && !(allowExitCodeOne && process.ExitCode == 1))
-            throw new InvalidOperationException($"{executable} の処理に失敗しました（終了コード {process.ExitCode}）。資格情報やリモート権限を確認してください。出力に秘密情報が含まれる可能性があるため記録していません。");
+            throw new PublicationCommandException(executable.Equals("git", StringComparison.OrdinalIgnoreCase)
+                    ? "git-nonzero-exit" : "command-nonzero-exit",
+                "ProcessExitNonZero", process.ExitCode,
+                stdout.Result.Length > 0, stdout.Result.Length,
+                stderr.Result.Length > 0, stderr.Result.Length);
         return new ProcessResult(stdout.Result, stderr.Result, process.ExitCode);
     }
 
