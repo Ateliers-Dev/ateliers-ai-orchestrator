@@ -92,6 +92,7 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("timeout時にFakeプロセスの子プロセス停止も確認する", CodexTimeoutStopsFakeChildProcess);
     suite.Add("kill失敗を記録しプロセス終了未確認を成功扱いしない", CodexKillFailureIsNotReportedAsSuccess);
     suite.Add("Ctrl+C停止要求とtimeoutを区別しkill・終了・stream結果を記録する", CodexCancellationIsDistinctFromTimeout);
+    suite.Add("Reviewer停止時は空応答より停止理由を実行証跡へ記録する", ReviewerStopReasonTakesPrecedenceOverEmptyOutput);
     suite.Add("Workflow停止要求をCodex RunnerとFake子プロセスへ伝播する", WorkflowCancellationStopsFakeCodexProcess);
     suite.Add("Codex子プロセスへ親のAPI secret環境変数を渡さない", CodexChildEnvironmentFiltersSecrets);
     suite.Add("Codex子プロセスへSystemDriveを渡す", CodexChildInheritsSystemDrive);
@@ -1435,6 +1436,33 @@ static void CodexCancellationIsDistinctFromTimeout()
         Assert.True(response.ExecutionEvidence.KillAttempted);
         Assert.True(response.ExecutionEvidence.ProcessExitObserved == true);
         Assert.True(response.ExecutionEvidence.StreamsClosed == true);
+    }
+}
+
+static void ReviewerStopReasonTakesPrecedenceOverEmptyOutput()
+{
+    static AgentRequest AsReviewer(AgentRequest request)
+    {
+        var artifactPath = Path.Combine(request.RunDirectory!, "fixture-artifact.md");
+        File.WriteAllText(artifactPath, "fixed reviewer input");
+        return request with
+        {
+            Role = "Reviewer",
+            ArtifactReference = "fixture-artifact.md",
+            ArtifactSha256 = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(artifactPath)))
+        };
+    }
+
+    var (timeoutRunner, timeoutRequest, timeoutRoot) = CreateCodexFixture("timeout", TimeSpan.FromMilliseconds(100));
+    using (timeoutRoot)
+    {
+        var response = timeoutRunner.Review(AsReviewer(timeoutRequest));
+        Assert.False(response.Succeeded);
+        Assert.True(response.TimedOut);
+        Assert.True(response.ExecutionEvidence!.KillAttempted);
+        Assert.True(response.ExecutionEvidence.ExitCode is not null and not 0);
+        Assert.True(response.ExecutionEvidence!.Error!.Contains("実行時間上限に到達しました", StringComparison.Ordinal));
+        Assert.False(response.ExecutionEvidence.Error.Contains("本文も任意成果物も返しませんでした", StringComparison.Ordinal));
     }
 }
 
