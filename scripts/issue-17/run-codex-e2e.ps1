@@ -151,8 +151,8 @@ try {
     }
 
     Write-Host ''
-    Write-Host '実Codex E2Eでは、既存checkoutのブランチとファイルを維持し、%TEMP% に一時Gitクローンを作成して実行します。専用ブランチの作成、commit、push、PRとReviewerコメントの作成は一時クローン内で行われます。自動mergeはしません。'
-    Write-Host '実行に失敗した場合は一時クローンを削除せず、調査用に残します。'
+    Write-Host 'one-shot実行は既存checkoutを維持し、%TEMP% の一時GitクローンでCodexとReviewerを実行します。commit、push、PR作成、レビュー結果コメント投稿は行いません。'
+    Write-Host 'CLIはNeedsHumanInputで停止する想定です。実行記録と作業コピーは人間の確認用に保持します。'
     $confirmation = Read-Host '続行するには RUN ISSUE-17 CODEX E2E と入力してください'
     if ($confirmation -cne 'RUN ISSUE-17 CODEX E2E') {
         throw '確認文字列が一致しないため、実Codex E2Eを開始しませんでした。'
@@ -191,9 +191,22 @@ try {
         '--slack-notifications', 'disabled'
     )
 
-    Write-Host 'Codex E2E を開始します。元のcheckout内のブランチは切り替わりません。'
-    Invoke-CheckedNative -FilePath $cliExecutable -Arguments $runArguments -Description 'Issue #17 Codex E2E'
-    $executionSucceeded = $true
+    Write-Host 'Codex one-shot E2E を開始します。元のcheckout内のブランチは切り替わりません。'
+    $runOutput = @(& $cliExecutable @runArguments 2>&1)
+    $runExitCode = $LASTEXITCODE
+    foreach ($line in $runOutput) { Write-Host $line }
+    if ($runExitCode -ne 0) {
+        throw ("Issue #17 Codex one-shot E2E が失敗しました (exit code {0})。" -f $runExitCode)
+    }
+    $stateLine = @($runOutput | ForEach-Object { $_.ToString() } | Where-Object { $_ -like '状態:*' } | Select-Object -Last 1)
+    if ($stateLine.Count -eq 0) {
+        throw 'CLI出力から実行状態を確認できません。未完了として一時クローンを保持します。'
+    }
+    $runState = ($stateLine[0] -replace '^状態:\s*', '').Trim()
+    if ($runState -ne 'NeedsHumanInput') {
+        throw ("想定外のone-shot終端状態です: {0}。未完了として一時クローンを保持します。" -f $runState)
+    }
+    throw 'CLIはNeedsHumanInputで停止しました。ワークフローは人間確認待ちのため未完了です。一時クローンと実行記録を確認してください。'
 }
 catch {
     [Console]::Error.WriteLine(("Issue #17 検証を停止しました: {0}" -f $_.Exception.Message))
@@ -207,15 +220,5 @@ finally {
     if (Test-Path -LiteralPath $tempContractDirectory) {
         Remove-Item -LiteralPath $tempContractDirectory -Recurse -Force -ErrorAction SilentlyContinue
     }
-    if ($executionSucceeded -and $null -ne $executionRoot -and (Test-Path -LiteralPath $executionRoot)) {
-        $tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
-        $executionPath = [System.IO.Path]::GetFullPath($executionRoot)
-        $tempPrefix = $tempRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
-        if (-not $executionPath.StartsWith($tempPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-            [Console]::Error.WriteLine(("安全確認のため一時クローンを削除しませんでした: {0}" -f $executionPath))
-        }
-        else {
-            Remove-Item -LiteralPath $executionPath -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    }
+
 }
