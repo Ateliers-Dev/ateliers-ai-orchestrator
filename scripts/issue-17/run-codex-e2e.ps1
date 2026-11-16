@@ -59,7 +59,6 @@ $cliExecutable = Join-Path $repositoryRoot 'src\Ateliers.Ai.Orchestrator.Cli\bin
 $tempContractDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ('ateliers-issue-17-contract-' + [Guid]::NewGuid().ToString('N'))
 $tempContractPath = Join-Path $tempContractDirectory 'task-contract.json'
 $executionRoot = $null
-$executionSucceeded = $false
 
 Push-Location $repositoryRoot
 try {
