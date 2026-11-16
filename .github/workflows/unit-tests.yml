@@ -64,5 +64,8 @@ jobs:
           Write-Output "Unexpected Windows unit-test result (exit=$testExitCode); expected exactly the two Unix-mode skips and no failures."
           exit 1
 
+      - name: Run local real-Git integration tests
+        run: dotnet run --project tests/Ateliers.Ai.Orchestrator.Tests/Ateliers.Ai.Orchestrator.Tests.csproj --configuration Release --no-build --no-restore -- --git-integration
+
       - name: Run Slack unit tests
         run: dotnet test tests/Ateliers.Slack.UnitTests/Ateliers.Slack.UnitTests.csproj --configuration Release --no-build --no-restore
