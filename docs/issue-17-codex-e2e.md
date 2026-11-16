@@ -41,7 +41,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '<repo-root>\scripts\iss
 
 CLIのone-shot経路では `NeedsHumanInput` が未完了状態です。スクリプトはCLIの終了コードだけで成功と判断せず、出力された終端状態を確認します。`NeedsHumanInput` または状態を確認できない場合は非0終了し、一時クローンと実行記録を保持してパスを表示します。自動削除はしません。実行証跡を確認し、必要な人間判断を終えた後に一時クローンを手動で削除してください。
 
-実行記録とライフサイクルJSONLは `%TEMP%\AteliersAiOrchestrator\issue-17\` 以下へ保存します。実行ログや応答にはタスク内容や診断情報が含まれ得るため、アクセスと保持期間を管理してください。Slack通知は無効にします。
+実行記録とライフサイクルJSONLは `%TEMP%\AteliersAiOrchestrator\issue-17\` 以下へ保存します。実行ログや応答にはタスク内容や診断情報が含まれ得るため、アクセスと保持期間を管理してください。
+
+Slack通知は `-SlackNotifications auto|disabled|test` で選択できます。既定値は `disabled` です。`auto` は通常のSlack設定を使い、通常チャンネルへ通知する可能性があります。`test` はテストチャンネルを使います。通知を確認する場合は実行時に明示してください。準備だけの通常実行はCLIの `run` を呼び出さないため、通知を送りません。
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '<repo-root>\scripts\issue-17\run-codex-e2e.ps1' -RunCodex -SlackNotifications test
+```
 
 ## 失敗時
 
