@@ -132,10 +132,23 @@ try {
     $repositoryIdentity = Get-CheckedNativeOutput -FilePath $ghCommand.Source -Arguments @(
         'repo', 'view', '--json', 'nameWithOwner', '--template', '{{.nameWithOwner}}'
     ) -Description 'GitHubリポジトリの確認'
-    if ([string]::IsNullOrWhiteSpace($repositoryIdentity)) {
-        throw 'GitHubリポジトリを特定できません。'
+    $defaultBranch = Get-CheckedNativeOutput -FilePath $ghCommand.Source -Arguments @(
+        'repo', 'view', '--json', 'defaultBranchRef', '--template', '{{.defaultBranchRef.name}}'
+    ) -Description 'GitHub既定ブランチの確認'
+    if ([string]::IsNullOrWhiteSpace($repositoryIdentity) -or [string]::IsNullOrWhiteSpace($defaultBranch)) {
+        throw 'GitHubリポジトリまたは既定ブランチを特定できません。'
     }
     $githubUrl = 'https://github.com/' + $repositoryIdentity + '.git'
+    $branchApiPath = 'repos/{0}/branches/{1}' -f $repositoryIdentity, [System.Uri]::EscapeDataString($defaultBranch)
+    $remoteHead = Get-CheckedNativeOutput -FilePath $ghCommand.Source -Arguments @(
+        'api', $branchApiPath, '--jq', '.commit.sha'
+    ) -Description 'GitHub既定ブランチのSHA確認'
+    $localHead = Get-CheckedNativeOutput -FilePath $gitCommand.Source -Arguments @(
+        '-C', $repositoryRoot, 'rev-parse', 'HEAD'
+    ) -Description 'ローカルHEADの確認'
+    if (-not $localHead.Equals($remoteHead, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Releaseビルド元がGitHub既定ブランチの最新SHAと一致しません。最新の既定ブランチに更新してから再実行してください。'
+    }
 
     Write-Host ''
     Write-Host '実Codex E2Eでは、既存checkoutのブランチとファイルを維持し、%TEMP% に一時Gitクローンを作成して実行します。専用ブランチの作成、commit、push、PRとReviewerコメントの作成は一時クローン内で行われます。自動mergeはしません。'
