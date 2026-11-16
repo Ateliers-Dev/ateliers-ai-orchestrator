@@ -1,7 +1,9 @@
 ﻿[CmdletBinding()]
 param(
     [switch]$RunCodex,
-    [string]$CodexExecutable
+    [string]$CodexExecutable,
+    [ValidateSet('auto', 'disabled', 'test')]
+    [string]$SlackNotifications = 'disabled'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -187,7 +189,7 @@ try {
         '--codex-exe', $CodexExecutable,
         '--runs', $runRoot,
         '--lifecycle-log', $lifecycleLog,
-        '--slack-notifications', 'disabled'
+        '--slack-notifications', $SlackNotifications.ToLowerInvariant()
     )
 
     Write-Host 'Codex one-shot E2E を開始します。元のcheckout内のブランチは切り替わりません。'
