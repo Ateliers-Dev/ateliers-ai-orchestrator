@@ -44,6 +44,14 @@ public sealed record RunEvent
     public string? ReasonCode { get; init; }
     /// <summary>失敗した例外の型名です。</summary>
     public string? ExceptionType { get; init; }
+    /// <summary>外部コマンドが終了した場合の終了コードです。</summary>
+    public int? ExitCode { get; init; }
+    /// <summary>標準出力本文を含めず、有無と長さだけを記録します。</summary>
+    public bool? StandardOutputPresent { get; init; }
+    public int? StandardOutputLength { get; init; }
+    /// <summary>標準エラー本文を含めず、有無と長さだけを記録します。</summary>
+    public bool? StandardErrorPresent { get; init; }
+    public int? StandardErrorLength { get; init; }
     /// <summary>この実行では取得できていない情報です。</summary>
     public IReadOnlyList<string> UnknownInformation { get; init; } = [];
 }
@@ -73,7 +81,9 @@ public interface IRunEventWriter
         long? elapsedMilliseconds = null, IReadOnlyList<string>? unknownInformation = null,
         IReadOnlyList<string>? artifactReferences = null,
         string role = "Orchestrator", string? stage = null, string? reasonCode = null,
-        string? exceptionType = null);
+        string? exceptionType = null, int? exitCode = null,
+        bool? standardOutputPresent = null, int? standardOutputLength = null,
+        bool? standardErrorPresent = null, int? standardErrorLength = null);
 }
 
 /// <summary>新規JSONLイベント記録を作成し、順序付きイベントをディスクへ追記します。</summary>
@@ -135,7 +145,12 @@ public sealed class JsonlRunEventStore : IRunEventWriter, IDisposable
         string role = "Orchestrator",
         string? stage = null,
         string? reasonCode = null,
-        string? exceptionType = null)
+        string? exceptionType = null,
+        int? exitCode = null,
+        bool? standardOutputPresent = null,
+        int? standardOutputLength = null,
+        bool? standardErrorPresent = null,
+        int? standardErrorLength = null)
     {
         var nextSequence = sequence + 1;
         var item = new RunEvent
@@ -158,6 +173,11 @@ public sealed class JsonlRunEventStore : IRunEventWriter, IDisposable
             Stage = stage,
             ReasonCode = reasonCode,
             ExceptionType = exceptionType,
+            ExitCode = exitCode,
+            StandardOutputPresent = standardOutputPresent,
+            StandardOutputLength = standardOutputLength,
+            StandardErrorPresent = standardErrorPresent,
+            StandardErrorLength = standardErrorLength,
             UnknownInformation = unknownInformation ?? [],
             ArtifactReferences = artifactReferences ?? []
         };

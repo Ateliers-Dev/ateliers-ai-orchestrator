@@ -32,6 +32,9 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("トップレベルと各コマンドのhelpは成功出力し入力エラーは標準エラーへ分離する", CliHelpAndInputErrorsAreSeparated);
     suite.Add("PublisherはGit設定・SSH実行環境を隔離しローカルfilter等を拒否する", PublisherIsolatesInheritedGitConfigAndRejectsLocalFilters);
     suite.Add("Publisher失敗は固定段階・理由コード・例外型だけを返す", PublisherFailureDiagnosticIsStructuredAndSanitized);
+    suite.Add("Publisherはdirty checkoutをGitプロセス失敗と区別する", PublisherClassifiesDirtyCheckout);
+    suite.Add("PublisherはGit非ゼロ・外部コマンド出力統計・起動失敗を安全に区別する", PublisherClassifiesCommandFailuresSafely);
+    suite.Add("公開診断の終了コードと出力統計をJSONLへ安全に保存する", PublicationProcessMetadataIsPersistedWithoutOutput);
     suite.Add("PublisherはPR証跡の保存確認後にpendingだけを削除する", PublisherPersistsVerifiedPrEvidenceBeforeRemovingPending);
     suite.Add("PRレビューコメントは判定・指摘項目を記録し同一Run/SHAの再投稿を防ぐ", ReviewCommentIsStructuredAndIdempotent);
     suite.Add("JSONLイベントに連番とUTC時刻を記録する", EventLogIsSequencedAndUtc);
@@ -299,13 +302,101 @@ static void PublisherFailureDiagnosticIsStructuredAndSanitized()
         var exception = Assert.Throws<WorkflowPublicationFailureException>(() =>
             publisher.Start(SampleContract() with { WorkingDirectory = root }, "publisher-diagnostics", CancellationToken.None));
         Assert.Equal("repository-root", exception.Diagnostic.Stage);
-        Assert.Equal("operation-rejected", exception.Diagnostic.ReasonCode);
-        Assert.Equal("InvalidOperationException", exception.Diagnostic.ExceptionType);
+        Assert.Equal("git-nonzero-exit", exception.Diagnostic.ReasonCode);
+        Assert.Equal("ProcessExitNonZero", exception.Diagnostic.ExceptionType);
+        Assert.True(exception.Diagnostic.ExitCode != 0);
+        Assert.Equal(false, exception.Diagnostic.StandardOutputPresent);
+        Assert.True(exception.Diagnostic.StandardErrorLength > 0);
         Assert.True(exception.InnerException is null, "元例外の文言が公開診断例外へ保持されています。");
         Assert.False(exception.Message.Contains("command output", StringComparison.OrdinalIgnoreCase));
         Assert.False(exception.ToString().Contains("exit code", StringComparison.OrdinalIgnoreCase));
     }
     finally { Directory.Delete(root, true); }
+}
+
+static void PublisherClassifiesDirtyCheckout()
+{
+    using var temp = new TemporaryDirectory();
+    var repository = Path.Combine(temp.Path, "dirty-repository");
+    Directory.CreateDirectory(repository);
+    RunGitFixture(repository, "init", "-q");
+    File.WriteAllText(Path.Combine(repository, "private-dirty-marker.txt"), "dirty");
+    using var publisher = new GitHubWorkflowPublisher();
+    var exception = Assert.Throws<WorkflowPublicationFailureException>(() =>
+        publisher.Start(SampleContract() with { WorkingDirectory = repository }, "dirty-checkout", CancellationToken.None));
+    Assert.Equal("clean-checkout", exception.Diagnostic.Stage);
+    Assert.Equal("dirty-checkout", exception.Diagnostic.ReasonCode);
+    Assert.Equal(0, exception.Diagnostic.ExitCode);
+    Assert.Equal(true, exception.Diagnostic.StandardOutputPresent);
+    Assert.True(exception.Diagnostic.StandardOutputLength > 0);
+    Assert.False(exception.ToString().Contains("private-dirty-marker", StringComparison.Ordinal));
+}
+
+static void PublisherClassifiesCommandFailuresSafely()
+{
+    using var temp = new TemporaryDirectory();
+    var repository = Path.Combine(temp.Path, "repo");
+    Directory.CreateDirectory(repository);
+    RunGitFixture(repository, "init", "-q");
+    var gitFailure = Assert.Throws<GitHubWorkflowPublisher.PublicationCommandException>(() =>
+        GitHubWorkflowPublisher.Run("git", repository, ["diagnostic-secret-invalid-command"]));
+    Assert.Equal("git-nonzero-exit", gitFailure.ReasonCode);
+    Assert.Equal(1, gitFailure.ExitCode);
+    Assert.Equal(false, gitFailure.StandardOutputPresent);
+    Assert.Equal(0, gitFailure.StandardOutputLength);
+    Assert.Equal(true, gitFailure.StandardErrorPresent);
+    Assert.True(gitFailure.StandardErrorLength > 0);
+    Assert.False(gitFailure.ToString().Contains("diagnostic-secret", StringComparison.Ordinal));
+    Assert.False(gitFailure.ToString().Contains("git: 'diagnostic-secret-invalid-command'", StringComparison.Ordinal));
+
+    var shell = OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/sh";
+    var shellArgs = OperatingSystem.IsWindows()
+        ? new[] { "/d", "/c", "echo stdout-secret&echo stderr-secret 1>&2&exit /b 23" }
+        : new[] { "-c", "printf stdout-secret; printf stderr-secret >&2; exit 23" };
+    var otherFailure = Assert.Throws<GitHubWorkflowPublisher.PublicationCommandException>(() =>
+        GitHubWorkflowPublisher.Run(shell, repository, shellArgs));
+    Assert.Equal("command-nonzero-exit", otherFailure.ReasonCode);
+    Assert.Equal(23, otherFailure.ExitCode);
+    Assert.Equal(true, otherFailure.StandardOutputPresent);
+    Assert.True(otherFailure.StandardOutputLength >= "stdout-secret".Length);
+    Assert.Equal(true, otherFailure.StandardErrorPresent);
+    Assert.True(otherFailure.StandardErrorLength >= "stderr-secret".Length);
+    Assert.False(otherFailure.ToString().Contains("stdout-secret", StringComparison.Ordinal));
+    Assert.False(otherFailure.ToString().Contains("stderr-secret", StringComparison.Ordinal));
+
+    var missingExecutable = "missing-publisher-command-" + Guid.NewGuid().ToString("N");
+    var startFailure = Assert.Throws<GitHubWorkflowPublisher.PublicationCommandException>(() =>
+        GitHubWorkflowPublisher.Run(missingExecutable, repository, []));
+    Assert.Equal("process-start-failed", startFailure.ReasonCode);
+    Assert.Equal(null, startFailure.ExitCode);
+    Assert.Equal(null, startFailure.StandardOutputPresent);
+    Assert.Equal(null, startFailure.StandardErrorLength);
+    Assert.False(startFailure.ToString().Contains(missingExecutable, StringComparison.Ordinal));
+}
+
+static void PublicationProcessMetadataIsPersistedWithoutOutput()
+{
+    using var temp = new TemporaryDirectory();
+    var path = Path.Combine(temp.Path, "events.jsonl");
+    using (var store = JsonlRunEventStore.CreateNew(path, "diagnostic-test"))
+    {
+        store.Append("github_publication_failed", "failed", stage: "clean-checkout",
+            reasonCode: "git-nonzero-exit", exceptionType: "ProcessExitNonZero", exitCode: 23,
+            standardOutputPresent: false, standardOutputLength: 0,
+            standardErrorPresent: true, standardErrorLength: 19);
+    }
+    var json = File.ReadAllText(path);
+    using var document = JsonDocument.Parse(json);
+    var item = document.RootElement;
+    Assert.Equal("clean-checkout", item.GetProperty("stage").GetString());
+    Assert.Equal("git-nonzero-exit", item.GetProperty("reasonCode").GetString());
+    Assert.Equal(23, item.GetProperty("exitCode").GetInt32());
+    Assert.Equal(false, item.GetProperty("standardOutputPresent").GetBoolean());
+    Assert.Equal(0, item.GetProperty("standardOutputLength").GetInt32());
+    Assert.Equal(true, item.GetProperty("standardErrorPresent").GetBoolean());
+    Assert.Equal(19, item.GetProperty("standardErrorLength").GetInt32());
+    Assert.False(json.Contains("stdout-secret", StringComparison.Ordinal));
+    Assert.False(json.Contains("stderr-secret", StringComparison.Ordinal));
 }
 
 static void PublisherPersistsVerifiedPrEvidenceBeforeRemovingPending()
@@ -2987,7 +3078,9 @@ sealed class FailingEventWriter(string failureEventType, bool failReadyTransitio
         long? elapsedMilliseconds = null, IReadOnlyList<string>? unknownInformation = null,
         IReadOnlyList<string>? artifactReferences = null,
         string role = "Orchestrator", string? stage = null, string? reasonCode = null,
-        string? exceptionType = null)
+        string? exceptionType = null, int? exitCode = null,
+        bool? standardOutputPresent = null, int? standardOutputLength = null,
+        bool? standardErrorPresent = null, int? standardErrorLength = null)
     {
         if (to == RunState.ReadyForHumanReview) ReadyTransitions++;
         if (eventType == failureEventType || (failReadyTransition && to == RunState.ReadyForHumanReview))
@@ -2995,7 +3088,8 @@ sealed class FailingEventWriter(string failureEventType, bool failReadyTransitio
         if (innerWriter is not null)
             return innerWriter.Append(eventType, result, from, to, detail, error, inputReference, outputReference,
                 targetCommitSha, diffSha256, elapsedMilliseconds, unknownInformation, artifactReferences, role,
-                stage, reasonCode, exceptionType);
+                stage, reasonCode, exceptionType, exitCode, standardOutputPresent, standardOutputLength,
+                standardErrorPresent, standardErrorLength);
         return new RunEvent
         {
             RunId = "test",
