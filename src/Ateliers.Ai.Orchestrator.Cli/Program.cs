@@ -1,38 +1,525 @@
-YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éí÷ÍûN‹Z–‹­¦ëeŠw¬ÕÕÍ¥¹œMåÍÑ•´¹Q•áĞì4)ÕÍ¥¹œMåÍÑ•´¹¥…¹½ÍÑ¥Ìì4)ÕÍ¥¹œMåÍÑ•´¹Q•áĞ¹)Í½¸ì4)ÕÍ¥¹œMåÍÑ•´¹Q•áĞ¹)Í½¸¹M•É¥…±¥é…Ñ¥½¸ì4)ÕÍ¥¹œÑ•±¥•ÉÌ¹¤¹=É¡•ÍÑÉ…Ñ½È¹½É”ì4)ÕÍ¥¹œÑ•±¥•ÉÌ¹¤¹=É¡•ÍÑÉ…Ñ½È¹±¤ì4)ÕÍ¥¹œÑ•±¥•ÉÌ¹M±…¬ì4(4)¥˜€¡…ÉÌ¹1•¹Ñ €øô€È€˜˜…ÉÍlÁt€ôô€‰ÉÕ¸ˆ€˜˜…ÉÍlÅt€ôô€ˆ´µÍÑ‘¥¸µ©Í½¸ˆ¤4)ì4(€€€½¹Í½±”¹%¹ÁÕÑ¹½‘¥¹œ€ô¹•ÜUQá¹½‘¥¹œ¡•¹½‘•ÉM¡½Õ±‘µ¥ÑUQá%‘•¹Ñ¥™¥•Èè™…±Í”°Ñ¡É½İ=¹%¹Ù…±¥‘	åÑ•ÌèÑÉÕ”¤ì4(€€€½¹Í½±”¹=ÕÑÁÕÑ¹½‘¥¹œ€ô¹•ÜUQá¹½‘¥¹œ¡•¹½‘•ÉM¡½Õ±‘µ¥ÑUQá%‘•¹Ñ¥™¥•Èè™…±Í”¤ì4)ô4)•±Í”¥˜€¡…ÉÌ¹1•¹Ñ €ôô€Ä€˜˜…ÉÍlÁt¥Ì€ˆ´µ…Á…‰¥±¥Ñ¥•Ìˆ½È€ˆ´µ½¹ÑÉ…ĞµÍ¡•µ„ˆ½È€ˆ´µ½É¡•ÍÑÉ…Ñ¥½¸µÕ¥‘”ˆ¤4)ì4(€€€½¹Í½±”¹=ÕÑÁÕÑ¹½‘¥¹œ€ô¹•ÜUQá¹½‘¥¹œ¡•¹½‘•ÉM¡½Õ±‘µ¥ÑUQá%‘•¹Ñ¥™¥•Èè™…±Í”¤ì4)ô4(4)É•ÑÕÉ¸…İ…¥Ğ=É¡•ÍÑÉ…Ñ½É±¤¹IÕ¹Íå¹Œ¡…ÉÌ¤ì4(4(¼¼¼€ñÍÕµµ…Éäû
-ÿ
-ç
-¿––GÒ»š’s¢¢ó£–º¢†3šê[–
-g¢¢c¦2Ë
-Kš&Ç
-Ï{Ï'§
-“Ï–—–>Ÿgğ½ÍÕµµ…Éäø4)¥¹Ñ•É¹…°ÍÑ…Ñ¥Œ±…ÍÌ=É¡•ÍÑÉ…Ñ½É±¤4)ì4(€€€€¼¼¼€ñÍÕµµ…Éäû–òWšVÃ
-K¢šzC_¢ššÆW
-3}1'šN7’ös
-K–º¢†3_ûgğ½ÍÕµµ…Éäø4(€€€€¼¼¼€ñÁ…É…´¹…µ”ô‰…ÉÌˆû
-Ï{Ï'–B7£w»–òWšVÃŸgğ½Á…É…´ø4(€€€€¼¼¼€ñÉ•ÑÕÉ¹Ìûš"C–*šf¼Ã–—–*o’â7–
-g¼Ë–º¢†3¢¢c¦2Ë»–’ÇšV_¼ÏŸgğ½É•ÑÕÉ¹Ìø4(€€€ÁÕ‰±¥ŒÍÑ…Ñ¥Œ…Íå¹ŒQ…Í¬ñ¥¹ĞøIÕ¹Íå¹Œ¡ÍÑÉ¥¹mt…ÉÌ¤4(€€€ì4(€€€€€€€Ù…ÈÍÑÉÕÑÕÉ•‘IÕ¸€ô…ÉÌ¹1•¹Ñ €øô€È€˜˜…ÉÍlÁt€ôô€‰ÉÕ¸ˆ€˜˜…ÉÍlÅt€ôô€ˆ´µÍÑ‘¥¸µ©Í½¸ˆì4(€€€€€€€¥˜€¡…ÉÌ¹1•¹Ñ €ôô€Ä€˜˜€¡…ÉÍlÁt¥Ì€ˆ´µÙ•ÉÍ¥½¸ˆ½È€‰Ù•ÉÍ¥½¸ˆ¤¤4(€€€€€€€ì4(€€€€€€€€€€€½¹Í½±”¹]É¥Ñ•1¥¹”¡•ÑY•ÉÍ¥½¸ ¤¤ì4(€€€€€€€€€€€É•ÑÕÉ¸€Àì4(€€€€€€€ô4(4(€€€€€€€¥˜€¡…ÉÌ¹1•¹Ñ €ôô€Ä€˜˜…ÉÍlÁt€ôô€ˆ´µ…Á…‰¥±¥Ñ¥•Ìˆ¤4(€€€€€€€ì4(€€€€€€€€€€€½¹Í½±”¹]É¥Ñ•1¥¹”¡)Í½¹M•É¥…±¥é•È¹M•É¥…±¥é”¡¹•Üì±¥Y•ÉÍ¥½¸€ô•ÑY•ÉÍ¥½¸ ¤°ÁÉ½Ñ½½±Y•ÉÍ¥½¸€ô€Ä°½µµ…¹‘Ì€ô¹•ÜìÉÕ¹MÑ‘¥¹)Í½¸€ôÑÉÕ”°½¹ÑÉ…ÑM¡•µ„€ôÑÉÕ”°½É¡•ÍÑÉ…Ñ¥½¹Õ¥‘”€ôÑÉÕ”ôô¤¤ì4(€€€€€€€€€€€É•ÑÕÉ¸€Àì4(€€€€€€€ô4(4(€€€€€€€¥˜€¡…ÉÌ¹1•¹Ñ €ôô€Ä€˜˜…ÉÍlÁt€ôô€ˆ´µ½¹ÑÉ…ĞµÍ¡•µ„ˆ¤4(€€€€€€€ì4(€€€€€€€€€€€½¹Í½±”¹]É¥Ñ•1¥¹”¡Q…Í­½¹ÑÉ…ÑM¡•µ„¹•Ñ)Í½¸ ¤¤ì4(€€€€€€€€€€€É•ÑÕÉ¸€Àì4(€€€€€€€ô4(4(€€€€€€€¥˜€¡…ÉÌ¹1•¹Ñ €ôô€Ä€˜˜…ÉÍlÁt€ôô€ˆ´µ½É¡•ÍÑÉ…Ñ¥½¸µÕ¥‘”ˆ¤4(€€€€€€€ì4(€€€€€€€€€€€½¹Í½±”¹]É¥Ñ”¡=É¡•ÍÑÉ…Ñ¥½¹Õ¥‘”¹•ÑQ•áĞ ¤¤ì4(€€€€€€€€€€€É•ÑÕÉ¸€Àì4(€€€€€€€ô4(4(€€€€€€€¥˜€¡…ÉÌ¹1•¹Ñ €ôô€Àñğ…ÉÍlÁt¥Ì€ˆ´µ¡•±Àˆ½È€ˆµ ˆ¤4(€€€€€€€ì4(€€€€€€€€€€€AÉ¥¹ÑUÍ…”¡½¹Í½±”¹=ÕĞ¤ì4(€€€€€€€€€€€É•ÑÕÉ¸€Àì4(€€€€€€€ô4(4(€€€€€€€¥˜€¡…ÉÍlÁt¥Ì€‰Ù…±¥‘…Ñ”ˆ½È€‰ÍÑ…ÉĞˆ½È€‰ÉÕ¸ˆ½È€‰Ù•É¥™äµÍ±…¬ˆ€˜˜…ÉÌ¹M­¥À Ä¤¹¹ä¡…ÉÕµ•¹Ğ€ôø…ÉÕµ•¹Ğ¥Ì€ˆ´µ¡•±Àˆ½È€ˆµ ˆ¤¤4(€€€€€€€ì4(€€€€€€€€€€€AÉ¥¹ÑUÍ…”¡½¹Í½±”¹=ÕĞ°…ÉÍlÁt¤ì4(€€€€€€€€€€€É•ÑÕÉ¸€Àì4(€€€€€€€ô4(4(€€€€€€€¥˜€¡…ÉÌ¹1•¹Ñ €ğ€Èñğ…ÉÍlÁt¥Ì¹½Ğ€ ‰Ù…±¥‘…Ñ”ˆ½È€‰ÍÑ…ÉĞˆ½È€‰ÉÕ¸ˆ½È€‰Ù•É¥™äµÍ±…¬ˆ¤ñğ4(€€€€€€€€€€€€¡…ÉÍlÁt€ôô€‰Ù…±¥‘…Ñ”ˆ€˜˜…ÉÌ¹1•¹Ñ €„ô€È¤ñğ4(€€€€€€€€€€€€¡…ÉÍlÁt€ôô€‰Ù•É¥™äµÍ±…¬ˆ€˜˜…ÉÌ¹1•¹Ñ €„ô€Ì¤ñğ4(€€€€€€€€€€€€¡…ÉÍlÁt€ôô€‰ÍÑ…ÉĞˆ€˜˜…ÉÌ¹1•¹Ñ ¥Ì¹½Ğ€ È½È€Ğ¤¤ñğ4(€€€€€€€€€€€€¡…ÉÍlÁt€ôô€‰ÉÕ¸ˆ€˜˜€¡…ÉÌ¹1•¹Ñ €ğ€Èñğ…ÉÌ¹1•¹Ñ €”€È€„ô€À¤¤¤4(€€€€€€€ì4(€€€€€€€€€€€½¹Í½±”¹ÉÉ½È¹]É¥Ñ•1¥¹” ‹
-Ï{Ï'û¿–òWšVÃ3’â7¢ÚÏ_›
-//’â7š¶Ÿgˆ¤ì4(€€€€€€€€€€€¥˜€¡ÍÑÉÕÑÕÉ•‘IÕ¸¤]É¥Ñ•MÑÉÕÑÕÉ•‘ÉÉ½È ‰¥¹Ù…±¥‘}…ÉÕµ•¹ÑÌˆ°€‹
-Ï{Ï'–òWšVÃ3’â7š¶Ÿgˆ°€È¤ì4(€€€€€€€€€€€•±Í”AÉ¥¹ÑUÍ…”¡½¹Í½±”¹ÉÉ½È¤ì4(€€€€€€€€€€€É•ÑÕÉ¸€Èì4(€€€€€€€ô4(4(€€€€€€€¥˜€¡…ÉÍlÁt€ôô€‰Ù•É¥™äµÍ±…¬ˆ¤4(€€€€€€€ì4(€€€€€€€€€€€¥˜€ …QÉåI•Í½±Ù•Õ±±A…Ñ ¡…ÉÍlÅt°€‰M±…¯¢¢·–ºhˆ°½ÕĞÙ…ÈÍ±…­½¹™¥ÕÉ…Ñ¥½¹A…Ñ °½ÕĞÙ…ÈÍ±…­A…Ñ¡ÉÉ½È¤ñğ4(€€€€€€€€€€€€€€€€…QÉåI•Í½±Ù•Õ±±A…Ñ ¡…ÉÍlÉt°€‰M±…¬Í•É•ÑÌˆ°½ÕĞÙ…ÈÍ±…­M•É•ÑÍA…Ñ °½ÕĞÍ±…­A…Ñ¡ÉÉ½È¤¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€½¹Í½±”¹ÉÉ½È¹]É¥Ñ•1¥¹”¡Í±…­A…Ñ¡ÉÉ½È¤ì4(€€€€€€€€€€€€€€€É•ÑÕÉ¸€Èì4(€€€€€€€€€€€ô4(4(€€€€€€€€€€€ÕÍ¥¹œÙ…È‘¥ÍÁ…Ñ¡•È€ôM±…­1¥™•å±•9½Ñ¥™¥…Ñ¥½¹¥ÍÁ…Ñ¡•È¹QÉåÉ•…Ñ”¡Í±…­½¹™¥ÕÉ…Ñ¥½¹A…Ñ °Í±…­M•É•ÑÍA…Ñ °½ÕĞÙ…Èİ…É¹¥¹œ¤ì4(€€€€€€€€€€€¥˜€¡‘¥ÍÁ…Ñ¡•È¥Ì¹Õ±°¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€½¹Í½±”¹ÉÉ½È¹]É¥Ñ•1¥¹”¡İ…É¹¥¹œ€üü€‰M±…¯¢¢·–ºk
-K–"§R£Ÿ7ûo
-Oˆ¤ì4(€€€€€€€€€€€€€€€É•ÑÕÉ¸€Ìì4(€€€€€€€€€€€ô4(€€€€€€€€€€€¥˜€ ……İ…¥Ğ‘¥ÍÁ…Ñ¡•È¹Y•É¥™å	½Ñ%‘•¹Ñ¥Ñ¥•ÍÍå¹Œ ¤¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€½¹Í½±”¹ÉÉ½È¹]É¥Ñ•1¥¹” ‰M±…¯¢ª7¢¢ó
-KŸ–B#Ÿ7ûo
-O		½Ğ%’â7’â¢Óû½A'
-£§óŸg¦k~—¿¦’ş‡_›ûo
-Oˆ¤ì4(€€€€€€€€€€€€€€€É•ÑÕÉ¸€Ìì4(€€€€€€€€€€€ô4(€€€€€€€€€€€½¹Í½±”¹]É¥Ñ•1¥¹” ‰M±…¯»šr³V©	½Ó¢ª7¢¢ó£¢¢·–ºi	½Ğ%
-KŸ–B#_û_¦k~—¿¦’ş‡_›ûo
-Oˆ¤ì4(€€€€€€€€€€€É•ÑÕÉ¸€Àì4(€€€€€€€ô4(4(€€€€€€€½¹ÑÉ…ÑI•…‘I•ÍÕ±ĞÉ•…ì4(€€€€€€€¥˜€¡ÍÑÉÕÑÕÉ•‘IÕ¸¤4(€€€€€€€ì4(€€€€€€€€€€€É•…€ôQ…Í­½¹ÑÉ…ÑI•…‘•È¹I•…‘)Í½¸¡…İ…¥Ğ½¹Í½±”¹%¸¹I•…‘Q½¹‘Íå¹Œ ¤¤ì4(€€€€€€€ô4(€€€€€€€•±Í”¥˜€ …QÉåI•Í½±Ù•Õ±±A…Ñ ¡…ÉÍlÅt°€‹––GÒW
-‡
-“¬ˆ°½ÕĞÙ…È½¹ÑÉ…ÑA…Ñ °½ÕĞÙ…ÈÁ…Ñ¡ÉÉ½È¤¤4(€€€€€€€ì4(€€€€€€€€€€€½¹Í½±”¹ÉÉ½È¹]É¥Ñ•1¥¹”¡Á…Ñ¡ÉÉ½È¤ì4(€€€€€€€€€€€AÉ¥¹ÑUÍ…”¡½¹Í½±”¹ÉÉ½È¤ì4(€€€€€€€€€€€É•ÑÕÉ¸€Èì4(€€€€€€€ô4(€€€€€€€•±Í”É•…€ôQ…Í­½¹ÑÉ…ÑI•…‘•È¹I•…¡½¹ÑÉ…ÑA…Ñ ¤ì4(€€€€€€€¥˜€ …É•…¹%ÍY…±¥¤4(€€€€€€€ì4(€€€€€€€€€€€™½É•… €¡Ù…È•ÉÉ½È¥¸É•…¹ÉÉ½ÉÌ¤½¹Í½±”¹ÉÉ½È¹]É¥Ñ•1¥¹” ‹––GÒ
-£§ğèí•ÉÉ½Éôˆ¤ì4(€€€€€€€€€€€¥˜€¡ÍÑÉÕÑÕÉ•‘IÕ¸¤]É¥Ñ•MÑÉÕÑÕÉ•‘ÉÉ½È ‰¥¹Ù…±¥‘}½¹ÑÉ…Ğˆ°€‹––GÒ)M=;3’â7š¶Ÿgˆ°€È°É•…¹ÉÉ½ÉÌ¤ì4(€€€€€€€€€€€É•ÑÕÉ¸€Èì4(€€€€€€€ô4(4(€€€€€€€Ù…È½¹ÑÉ…Ğ€ôÉ•…¹½¹ÑÉ…Ğ„ì4(€€€€€€€Ù…È½¹ÑÉ…Ñ!…Í €ôÉ•…¹½¹Ñ•¹ÑM¡„ÈÔØ„ì4(4(€€€€€€€¥˜€¡…ÉÍlÁt€ôô€‰Ù…±¥‘…Ñ”ˆ¤4(€€€€€€€ì4(€€€€€€€€€€€½¹Í½±”¹]É¥Ñ•1¥¹” ‹––GÒ¿šr'–*çŸdèÑ…Í­%õí½¹ÑÉ…Ğ¹Q…Í­%‘ôÍ¡•µ…Y•ÉÍ¥½¸õí½¹ÑÉ…Ğ¹M¡•µ…Y•ÉÍ¥½¹ôÍ¡„ÈÔØõí½¹ÑÉ…Ñ!…Í¡ôˆ¤ì4(€€€€€€€€€€€É•ÑÕÉ¸€Àì4(€€€€€€€ô4(4(€€€€€€€¥˜€¡…ÉÍlÁt€ôô€‰ÉÕ¸ˆ¤4(€€€€€€€ì4(€€€€€€€€€€€¥˜€ …QÉåA…ÉÍ•IÕ¹=ÁÑ¥½¹Ì¡…ÉÌ°ÍÑÉÕÑÕÉ•‘IÕ¸°½¹ÑÉ…Ğ¹]½É­¥¹¥É•Ñ½Éä°½ÕĞÙ…ÈÍ•¹…É¥¼°½ÕĞÙ…ÈÉÕ¹I½½Ğ°½ÕĞÙ…È±¥™•å±•1½A…Ñ °½ÕĞÙ…È•Ù¥‘•¹•A…Ñ °½ÕĞÙ…È…•¹Ñ-¥¹°4(€€€€€€€€€€€€€€€½ÕĞÙ…È½‘•á=ÁÑ¥½¹Ì°½ÕĞÙ…È¹½Ñ¥™¥…Ñ¥½¹Í¥Í…‰±•°½ÕĞÙ…ÈÕÍ•M±…­Q•ÍÑ¡…¹¹•°°½ÕĞÙ…ÈÍ±…­½¹™¥ÕÉ…Ñ¥½¹A…Ñ °4(€€€€€€€€€€€€€€€½ÕĞÙ…ÈÍ±…­M•É•ÑÍA…Ñ °½ÕĞÙ…È½ÁÑ¥½¹ÉÉ½È¤¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€½¹Í½±”¹ÉÉ½È¹]É¥Ñ•1¥¹”¡½ÁÑ¥½¹ÉÉ½È¤ì4(€€€€€€€€€€€€€€€¥˜€¡ÍÑÉÕÑÕÉ•‘IÕ¸¤]É¥Ñ•MÑÉÕÑÕÉ•‘ÉÉ½È ‰¥¹Ù…±¥‘}…ÉÕµ•¹ÑÌˆ°½ÁÑ¥½¹ÉÉ½È°€È¤ì4(€€€€€€€€€€€€€€€•±Í”AÉ¥¹ÑUÍ…”¡½¹Í½±”¹ÉÉ½È°€‰ÉÕ¸ˆ¤ì4(€€€€€€€€€€€€€€€É•ÑÕÉ¸€Èì4(€€€€€€€€€€€ô4(4(€€€€€€€€€€€¥˜€ …QÉåI•…‘I•Ù¥•İÙ¥‘•¹”¡•Ù¥‘•¹•A…Ñ °½ÕĞÙ…È•Ù¥‘•¹”°½ÕĞÙ…È•Ù¥‘•¹•ÉÉ½È¤¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€½¹Í½±”¹ÉÉ½È¹]É¥Ñ•1¥¹”¡•Ù¥‘•¹•ÉÉ½È¤ì4(€€€€€€€€€€€€€€€¥˜€¡ÍÑÉÕÑÕÉ•‘IÕ¸¤]É¥Ñ•MÑÉÕÑÕÉ•‘ÉÉ½È ‰¥¹Ù…±¥‘}É•Ù¥•İ}•Ù¥‘•¹”ˆ°•Ù¥‘•¹•ÉÉ½È°€È¤ì4(€€€€€€€€€€€€€€€•±Í”AÉ¥¹ÑUÍ…”¡½¹Í½±”¹ÉÉ½È°€‰ÉÕ¸ˆ¤ì4(€€€€€€€€€€€€€€€É•ÑÕÉ¸€Èì4(€€€€€€€€€€€ô4(4(€€€€€€€€€€€ÕÍ¥¹œÙ…ÈÍÑ½ÁM½ÕÉ”€ô¹•Ü…¹•±±…Ñ¥½¹Q½­•¹M½ÕÉ” ¤ì4(€€€€€€€€€€€½¹Í½±•…¹•±Ù•¹Ñ!…¹‘±•Èü…¹•±!…¹‘±•È€ô¹Õ±°ì4(€€€€€€€€€€€¥˜€¡…•¹Ñ-¥¹€ôô€‰½‘•àˆ¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€…¹•±!…¹‘±•È€ô€¡|°•Ù•¹ÑÉÌ¤€ôøì•Ù•¹ÑÉÌ¹…¹•°€ôÑÉÕ”ìÍÑ½ÁM½ÕÉ”¹…¹•° ¤ìôì4(€€€€€€€€€€€€€€€½¹Í½±”¹…¹•±-•åAÉ•ÍÌ€¬ô…¹•±!…¹‘±•Èì4(€€€€€€€€€€€€€€€½‘•á=ÁÑ¥½¹Ì€ô½‘•á=ÁÑ¥½¹Ì„İ¥Ñ ì…¹•±±…Ñ¥½¹Q½­•¸€ôÍÑ½ÁM½ÕÉ”¹Q½­•¸ôì4(€€€€€€€€€€€ô4(4(€€€€€€€€€€€Ù…È™…­•IÕ¹%€ôÕ¥¹9•İÕ¥ ¤¹Q½MÑÉ¥¹œ ‰8ˆ¤ì4(€€€€€€€€€€€Ù…È™…­•IÕ¹¥É•Ñ½Éä€ôA…Ñ ¹½µ‰¥¹”¡ÉÕ¹I½½Ğ°™…­•IÕ¹%¤ì4(€€€€€€€€€€€ÑÉä4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€¥É•Ñ½Éä¹É•…Ñ•¥É•Ñ½Éä¡™…­•IÕ¹¥É•Ñ½Éä¤ì4(€€€€€€€€€€€€€€€ÕÍ¥¹œÙ…È•Ù•¹ÑMÑ½É”€ô)Í½¹±IÕ¹Ù•¹ÑMÑ½É”¹É•…Ñ•9•Ü¡A…Ñ ¹½µ‰¥¹”¡™…­•IÕ¹¥É•Ñ½Éä°€‰•Ù•¹ÑÌ¹©Í½¹°ˆ¤°™…­•IÕ¹%¤ì4(€€€€€€€€€€€€€€€ÕÍ¥¹œÙ…È±¥™•å±•]É¥Ñ•È€ôÍ±…­½¹™¥ÕÉ…Ñ¥½¹A…Ñ ¥Ì¹Õ±°4(€€€€€€€€€€€€€€€€€€€€ü¹•Ü1¥™•å±•9½Ñ¥™¥…Ñ¥½¹Ù•¹Ñ]É¥Ñ•È¡±¥™•å±•1½A…Ñ °¹½Ñ¥™¥…Ñ¥½¹Í¥Í…‰±•°ÕÍ•M±…­Q•ÍÑ¡…¹¹•°¤4(€€€€€€€€€€€€€€€€€€€€è¹•Ü1¥™•å±•9½Ñ¥™¥…Ñ¥½¹Ù•¹Ñ]É¥Ñ•È¡±¥™•å±•1½A…Ñ °¹½Ñ¥™¥…Ñ¥½¹Í¥Í…‰±•°Í±…­½¹™¥ÕÉ…Ñ¥½¹A…Ñ °Í±…­M•É•ÑÍA…Ñ „¤ì4(€€€€€€€€€€€€€€€%•¹ÑIÕ¹¹•ÈÉÕ¹¹•È€ô…•¹Ñ-¥¹€ôô€‰½‘•àˆ€ü¹•Ü½‘•á±¥•¹ÑIÕ¹¹•È¡½‘•á=ÁÑ¥½¹Ì„¤€è¹•Ü…­••¹ÑIÕ¹¹•È¡Í•¹…É¥¼¤ì4(€€€€€€€€€€€€€€€ÕÍ¥¹œÙ…ÈÁÕ‰±¥Í¡•È€ô…•¹Ñ-¥¹€ôô€‰½‘•àˆ€˜˜½¹ÑÉ…Ğ¹I•Á½ÉÑ¥¹œ¹AÕ±±I•ÅÕ•ÍÑáÁ•Ñ•4(€€€€€€€€€€€€€€€€€€€€ü¹•Ü¥Ñ!Õ‰]½É­™±½İAÕ‰±¥Í¡•È ¤€è¹Õ±°ì4(€€€€€€€€€€€€€€€Ù…ÈÉ•ÍÕ±Ğ€ô¹•Ü…­••¹Ñ]½É­™±½Ü ¤¹IÕ¸¡½¹ÑÉ…Ğ°½¹ÑÉ…Ñ!…Í °™…­•IÕ¹%°™…­•IÕ¹¥É•Ñ½Éä°4(€€€€€€€€€€€€€€€€€€€ÉÕ¹¹•È°•Ù•¹ÑMÑ½É”°•Ù¥‘•¹”°ÍÑ½ÁQ½­•¸èÍÑ½ÁM½ÕÉ”¹Q½­•¸°4(€€€€€€€€€€€€€€€€€€€½‘•á=¹•M¡½Ğè…•¹Ñ-¥¹€ôô€‰½‘•àˆ°±¥™•å±•Ù•¹ÑÌè±¥™•å±•]É¥Ñ•È°ÁÕ‰±¥Í¡•ÈèÁÕ‰±¥Í¡•È¤ì4(€€€€€€€€€€€€€€€…İ…¥Ğ±¥™•å±•]É¥Ñ•È¹±ÕÍ¡M±…­9½Ñ¥™¥…Ñ¥½¹ÍÍå¹Œ¡ÍÑ½ÁM½ÕÉ”¹Q½­•¸¤ì4(€€€€€€€€€€€€€€€¥˜€¡±¥™•å±•]É¥Ñ•È¹…¥±•‘]É¥Ñ•Ì€ø€À¤4(€€€€€€€€€€€€€€€€€€€½¹Í½±”¹ÉÉ½È¹]É¥Ñ•1¥¹” ‹¢¶›–F(èƒ§
-“W
-×
-“
-¿­)M=93ã»šnã7¢úóÿ­í±¥™•å±•]É¥Ñ•È¹…¥±•‘]É¥Ñ•Í÷’îÛ–’ÇšV__û_–º¢†3ÖCšzs¿ÚgÚk_›ûgˆ¤ì4(€€€€€€€€€€€€€€€¥˜€¡±¥™•å±•]É¥Ñ•È¹…¥±•‘M±…­M•¹‘Ì€ø€À¤4(€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€ÑÉäì½¹Í½±”¹ÉÉ½È¹]É¥Ñ•1¥¹” ‹¢¶›–F(èM±…¯¦k~—­í±¥™•å±•]É¥Ñ•È¹…¥±•‘M±…­M•¹‘Í÷’îÛ–’ÇšV__û_–º¢†3ÖCšzs¿ÚgÚk_›ûgˆ¤ìô4(€€€€€€€€€€€€€€€€€€€…Ñ €¡á•ÁÑ¥½¸¤ìô4(€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€€€€¥˜€ …ÍÑÉÕÑÕÉ•‘IÕ¸€˜˜±¥™•å±•]É¥Ñ•È¹M•¹ÑM±…­M•¹‘Ì€ø€À¤4(€€€€€€€€€€€€€€€€€€€½¹Í½±”¹]É¥Ñ•1¥¹” ‰M±…¯¦k~—¦’ş‡š"C–*|èí±¥™•å±•]É¥Ñ•È¹M•¹ÑM±…­M•¹‘Í÷’îØˆ¤ì4(€€€€€€€€€€€€€€€¥˜€ …É•ÍÕ±Ğ¹A•ÉÍ¥ÍÑ•¹•MÕ••‘•¤4(€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€½¹Í½±”¹ÉÉ½È¹]É¥Ñ•1¥¹” ‹–º¢†3¿’êë¦ZO–"“šZ·–ú‡Ÿ–sš¶‹_û_3š"Cšzs&§û¿–º¢†3¢¢c¦2Ë»’şw–¶c¯–’ÇšV__û_|èí™…­•IÕ¹¥É•Ñ½Éåôˆ¤ì4(€€€€€€€€€€€€€€€€€€€¥˜€¡É•ÍÕ±Ğ¹•Ñ…¥°¥Ì¹½Ğ¹Õ±°¤½¹Í½±”¹ÉÉ½È¹]É¥Ñ•1¥¹”¡É•ÍÕ±Ğ¹•Ñ…¥°¤ì4(€€€€€€€€€€€€€€€€€€€¥˜€¡ÍÑÉÕÑÕÉ•‘IÕ¸¤]É¥Ñ•MÑÉÕÑÕÉ•‘I•ÍÕ±Ğ¡™…±Í”°€Ì°™…­•IÕ¹%°É•ÍÕ±Ğ¹MÑ…Ñ”¹Q½MÑÉ¥¹œ ¤°™…­•IÕ¹¥É•Ñ½Éä°4(€€€€€€€€€€€€€€€€€€€€€€€€‰Á•ÉÍ¥ÍÑ•¹•}™…¥±•ˆ°€‹–º¢†3¢¢c¦2Ëû¿š"Cšzs&§»’şw–¶c¯–’ÇšV__û_ˆ¤ì4(€€€€€€€€€€€€€€€€€€€É•ÑÕÉ¸€Ìì4(€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€€€€Ù…È•á¥Ñ½‘”€ôÉ•ÍÕ±Ğ¹MÑ…Ñ”€ôôIÕ¹MÑ…Ñ”¹…¥±•€ü€Ì€è€Àì4(€€€€€€€€€€€€€€€¥˜€¡ÍÑÉÕÑÕÉ•‘IÕ¸¤4(€€€€€€€€€€€€€€€€€€€]É¥Ñ•MÑÉÕÑÕÉ•‘I•ÍÕ±Ğ¡•á¥Ñ½‘”€ôô€À°•á¥Ñ½‘”°™…­•IÕ¹%°É•ÍÕ±Ğ¹MÑ…Ñ”¹Q½MÑÉ¥¹œ ¤°™…­•IÕ¹¥É•Ñ½Éä°4(€€€€€€€€€€€€€€€€€€€€€€€•á¥Ñ½‘”€ôô€À€ü¹Õ±°€è€‰İ½É­™±½İ}™…¥±•ˆ°•á¥Ñ½‘”€ôô€À€ü¹Õ±°€è€‹
-«ó
-Ç
-ç#³ó
-ßŸÏ3–’ÇšV__û_ˆ¤ì4(€€€€€€€€€€€€€€€•±Í”4(€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€½¹Í½±”¹]É¥Ñ•1¥¹” ‰ì¡…•¹Ñ-¥¹€ôô€‰½‘•àˆ€ü€‰½‘•à1'–º¢†0ˆ€è€‰…­—–º¢†0ˆ¥÷
-K¢¢c¦2Ë_û_|èí™…­•IÕ¹%‘ôˆ¤ì4(€€€€€€€€€€€€€€€€€€€½¹Í½±”¹]É¥Ñ•1¥¹” ‹*Ûš,èíÉ•ÍÕ±Ğ¹MÑ…Ñ•ôˆ¤ì4(€€€€€€€€€€€€€€€€€€€½¹Í½±”¹]É¥Ñ•1¥¹” ‹¢¢c¦2Ë– èí™…­•IÕ¹¥É•Ñ½Éåôˆ¤ì4(€€€€€€€€ƒo7îÚ$z{-®éÜj×V7F÷'’Â"æFVÆ–W'2Ö÷&6†W7G&F÷""Â''Vç2"’“°Ğ¢Æ–fV7–6ÆTÆöuF‚ÒF‚ävWDgVÆÅF‚…F‚ä6öÖ&–æR‡'Vä&6TF—&V7F÷'’Â"æFVÆ–W'2Ö÷&6†W7G&F÷""Â&Æ–fV7–6ÆRæ§6öæÂ"’“°Ğ¢Wf–FVæ6UF‚ÒçVÆÃ°Ğ¢vVçD¶–æBÒ&f¶R#°Ğ¢6öFW„÷F–öç2ÒçVÆÃ°Ğ¢æ÷F–f–6F–öç4F—6&ÆVBÒfÇ6S°Ğ¢W6U6Æ6µFW7D6†ææVÂÒfÇ6S°Ğ¢6Æ6´6öæf–wW&F–öåF‚ÒçVÆÃ°Ğ¢6Æ6µ6V7&WG5F‚ÒçVÆÃ°Ğ¢W'&÷"Ò7G&–æräV×G“°Ğ¢f"6VVâÒæWr†6…6WCÇ7G&–æsâ…7G&–æt6ö×&W"ä÷&F–æÂ“°Ğ¢7G&–æsòW†V7WF&ÆRÒçVÆÂÂ–×ÆVÖVçFW$†öÖRÒçVÆÂÂ&Wf–WvW$†öÖRÒçVÆÃ°Ğ¢f÷"‡f"–æFW‚Ò#²–æFW‚Â&w2äÆVæwFƒ²–æFW‚³Ò"Ğ¢°Ğ¢–b†–æFW‚²ãÒ&w2äÆVæwF‚ÇÂ6VVâäFB†&w5¶–æFW…Ò’Ğ¢°Ğ¢W'&÷"Ò''Vâ8î8*®89~8+~8:~8;>8ş˜xŞŠH~8~8®8NYŞX˜Ş8X
-N8î{XN8~hÈ~Zé®8~8n8ş88^8N8"#°Ğ¢&WGW&âfÇ6S°Ğ¢ĞĞ Ğ¢7v—F6‚†&w5¶–æFW…ÒĞ¢°Ğ¢66R"Ò×66Væ&–ò# Ğ¢–b‚VçVÒåG'•'6R†&w5¶–æFW‚²ÒÂ–væ÷&T66S¢G'VRÂ÷WB66Væ&–ò’ÇÂVçVÒä—4FVf–æVB‡66Væ&–ò’Ğ¢°Ğ¢W'&÷"ÒB.iÊ®Zûî[ùÎ8äf¶^8+~88®8:®8*®8~8“¢¶&w5¶–æFW‚²×Ò#°Ğ¢&WGW&âfÇ6S°Ğ¢ĞĞ¢'&V³°Ğ¢66R"ÒÖvVçB# Ğ¢–b†&w5¶–æFW‚²Ò—2æ÷B‚&f¶R"÷"&6öFW‚"’Ğ¢°Ğ¢W'&÷"Ò"ÒÖvVçB8òf¶R8î8ş8ò6öFW‚8~88"#°Ğ¢&WGW&âfÇ6S°Ğ¢ĞĞ¢vVçD¶–æBÒ&w5¶–æFW‚²Ó°Ğ¢'&V³°Ğ¢66R"ÒÖ6öFW‚ÖW†R# Ğ¢–b‚G'•&W6öÇfTgVÆÅF‚†&w5¶–æFW‚²ÒÂ"ÒÖ6öFW‚ÖW†R"Â÷WBW†V7WF&ÆRÂ÷WBW'&÷"’’&WGW&âfÇ6S°Ğ¢'&V³°Ğ¢66R"ÒÖ–×ÆVÖVçFW"Ö6öFW‚Ö†öÖR# Ğ¢–b‚G'•&W6öÇfTgVÆÅF‚†&w5¶–æFW‚²ÒÂ"ÒÖ–×ÆVÖVçFW"Ö6öFW‚Ö†öÖR"Â÷WB–×ÆVÖVçFW$†öÖRÂ÷WBW'&÷"’’&WGW&âfÇ6S°Ğ¢'&V³°Ğ¢66R"Ò×&Wf–WvW"Ö6öFW‚Ö†öÖR# Ğ¢–b‚G'•&W6öÇfTgVÆÅF‚†&w5¶–æFW‚²ÒÂ"Ò×&Wf–WvW"Ö6öFW‚Ö†öÖR"Â÷WB&Wf–WvW$†öÖRÂ÷WBW'&÷"’’&WGW&âfÇ6S°Ğ¢'&V³°Ğ¢66R"Ò×'Vç2# Ğ¢–b‚G'•&W6öÇfTgVÆÅF‚†&w5¶–æFW‚²ÒÂ"Ò×'Vç2"Â÷WBf"'VåF‚Â÷WBW'&÷"’’&WGW&âfÇ6S°Ğ¢'Vç4F—&V7F÷'’Ò'VåFƒ°Ğ¢'&V³°Ğ¢66R"ÒÖÆ–fV7–6ÆRÖÆör# Ğ¢–b‚G'•&W6öÇfTgVÆÅF‚†&w5¶–æFW‚²ÒÂ"ÒÖÆ–fV7–6ÆRÖÆör"Â÷WBÆ–fV7–6ÆTÆöuF‚Â÷WBW'&÷"’’&WGW&âfÇ6S°Ğ¢'&V³°Ğ¢66R"Ò×&Wf–WrÖWf–FVæ6R# Ğ¢–b‚G'•&W6öÇfTgVÆÅF‚†&w5¶–æFW‚²ÒÂ"Ò×&Wf–WrÖWf–FVæ6R"Â÷WBf"&Wf–WuF‚Â÷WBW'&÷"’’&WGW&âfÇ6S°Ğ¢Wf–FVæ6UF‚Ò&Wf–WuFƒ°Ğ¢'&V³°Ğ¢66R"Ò×6Æ6²Öæ÷F–f–6F–öç2# Ğ¢–b†&w5¶–æFW‚²Ò—2æ÷B‚&WFò"÷"&F—6&ÆVB"÷"'FW7B"’Ğ¢°Ğ¢W'&÷"Ò"Ò×6Æ6²Öæ÷F–f–6F–öç28òWFş8F—6&ÆVN8FW7B8î8N8®8(Î8¾8).hÈ~Zé®8~8n8ş88^8N8"#°Ğ¢&WGW&âfÇ6S°Ğ¢ĞĞ¢æ÷F–f–6F–öç4F—6&ÆVBÒ&w5¶–æFW‚²ÒÓÒ&F—6&ÆVB#°Ğ¢W6U6Æ6µFW7D6†ææVÂÒ&w5¶–æFW‚²ÒÓÒ'FW7B#°Ğ¢'&V³°Ğ¢66R"Ò×6Æ6²Ö6öæf–r# Ğ¢–b‚G'•&W6öÇfTgVÆÅF‚†&w5¶–æFW‚²ÒÂ"Ò×6Æ6²Ö6öæf–r"Â÷WBf"6öæf–wW&F–öåF‚Â÷WBW'&÷"’’&WGW&âfÇ6S°Ğ¢6Æ6´6öæf–wW&F–öåF‚Ò6öæf–wW&F–öåFƒ°Ğ¢'&V³°Ğ¢66R"Ò×6Æ6²×6V7&WG2# Ğ¢–b‚G'•&W6öÇfTgVÆÅF‚†&w5¶–æFW‚²ÒÂ"Ò×6Æ6²×6V7&WG2"Â÷WBf"6V7&WG5F‚Â÷WBW'&÷"’’&WGW&âfÇ6S°Ğ¢6Æ6µ6V7&WG5F‚Ò6V7&WG5Fƒ°Ğ¢'&V³°Ğ¢FVfVÇC Ğ¢W'&÷"ÒB.iÊ®Zûî[ùÎ8ç'Vî8*®89~8+~8:~8;>8~8“¢¶&w5¶–æFW…×Ò#°Ğ¢&WGW&âfÇ6S°Ğ¢ĞĞ¢ĞĞ¢–b‚‡6Æ6´6öæf–wW&F–öåF‚—2çVÆÂ’Ò‡6Æ6µ6V7&WG5F‚—2çVÆÂ’Ğ¢°Ğ¢W'&÷"Ò"Ò×6Æ6²Ö6öæf–r8‚Ò×6Æ6²×6V7&WG28şKŠikhÈ~Zé®8~8n8ş88^8N8"#°Ğ¢&WGW&âfÇ6S°Ğ¢ĞĞ¢–b‚‡6Æ6´6öæf–wW&F–öåF‚—2æ÷BçVÆÂÇÂ6Æ6µ6V7&WG5F‚—2æ÷BçVÆÂ’bb†æ÷F–f–6F–öç4F—6&ÆVBÇÂW6U6Æ6µFW7D6†ææVÂ’Ğ¢°Ğ¢W'&÷"Ò%6Æ6¾ŠŠŞZé®898+8).hÈ~Zé®88(¾ZNY86Æ6²Öæ÷F–f–6F–öç28òWFò8¾8~8n8ş88^8N8"#°Ğ¢&WGW&âfÇ6S°Ğ¢ĞĞ¢–b†vVçD¶–æBÓÒ&6öFW‚"Ğ¢°Ğ¢–b‡6VVâä6öçF–ç2‚"Ò×66Væ&–ò"’’²W'&÷"Ò"Ò×66Væ&–ò8òÒÖvVçBf¶R8{XN8şY8(ş8¾8n8ş88^8N8"#²&WGW&âfÇ6S²ĞĞ¢–b†W†V7WF&ÆR—2çVÆÂĞ¢²W'&÷"Ò$6öFWZéşŠÎ8¾8òÒÖ6öFW‚ÖW†R8Î[ø^Šh8~88"#²&WGW&âfÇ6S²ĞĞ¢G'Ğ¢°Ğ¢6öFW„÷F–öç2ÒæWr6öFW„6Æ•'VææW$÷F–öç2†W†V7WF&ÆRÀĞ¢6öFW„6Æ•'VææW$÷F–öç2å&W6öÇfT6öFW„†öÖR†–×ÆVÖVçFW$†öÖR’ÀĞ¢6öFW„6Æ•'VææW$÷F–öç2å&W6öÇfT6öFW„†öÖR‡&Wf–WvW$†öÖR’’åfÆ–FFR‚“°Ğ¢ĞĞ¢6F6‚„&wVÖVçDW†6WF–öâW†6WF–öâ’²W'&÷"ÒW†6WF–öâäÖW76vS²&WGW&âfÇ6S²ĞĞ¢ĞĞ¢&WGW&âG'VS°Ğ¢ĞĞ Ğ¢òòòÇ7VÖÖ'“îZIn˜:Š‹Î‹z89^8*8*N8:¾8).ZéşŠÎ™h¾Zx¾X˜Ş8¾ŠªŞ8ş‹ëÎ8ş8XZ^X©¾KˆŞX)8).ZY®8~8î88#Â÷7VÖÖ'“àĞ¢òòòÇ&ÒæÖSÒ&Wf–FVæ6UF‚#îŠ‹Î‹z¥4ôî8î{[nZûî898+8~88.iÊ®hÈ~Zé®8®8(–çVÆÎ8~88#Â÷&ÓàĞ¢òòòÇ&ÒæÖSÒ&Wf–FVæ6R#îŠªŞ8ş‹ëÎ8)>8Š‹Î‹z8~88#Â÷&ÓàĞ¢òòòÇ&ÒæÖSÒ&W'&÷"#îŠªŞ8ş‹ëÎ8ş8(D¥4ôî[Ú.[Èş8¾YXşšÎ8Î8.8(¾ZNY8îŠªÎiˆî8~88#Â÷&ÓàĞ¢òòòÇ&WGW&ç3îŠ‹Î‹z8ÎiÊ®hÈ~Zé®88î8ş8şjÚ>[‹8¾ŠªŞ8ş‹ëÎ8(8şZNY8÷G'V^8~88#Â÷&WGW&ç3àĞ¢&—fFR7FF–2&ööÂG'•&VE&Wf–WtWf–FVæ6R‡7G&–æsòWf–FVæ6UF‚Â÷WB‡VÖå&Wf–WtWf–FVæ6SòWf–FVæ6RÂ÷WB7G&–ærW'&÷"Ğ¢°Ğ¢Wf–FVæ6RÒçVÆÃ°Ğ¢W'&÷"Ò7G&–æräV×G“°Ğ¢–b†Wf–FVæ6UF‚—2çVÆÂ’&WGW&âG'VS°Ğ Ğ¢G'Ğ¢°Ğ¢Wf–FVæ6RÒ§6öå6W&–Æ—¦W"äFW6W&–Æ—¦SÄ‡VÖå&Wf–WtWf–FVæ6Sâ„f–ÆRå&VDÆÄ'—FW2†Wf–FVæ6UF‚’ÂæWr§6öå6W&–Æ—¦W$÷F–öç0Ğ¢°Ğ¢&÷W'G”æÖ–æuöÆ–7’Ò§6öäæÖ–æuöÆ–7’ä6ÖVÄ66RÀĞ¢&÷W'G”æÖT66T–ç6Vç6—F—fRÒfÇ6RÀĞ¢VæÖVDÖVÖ&W$†æFÆ–ærÒ§6öåVæÖVDÖVÖ&W$†æFÆ–æräF—6ÆÆ÷pĞ¢Ò“°Ğ¢–b†Wf–FVæ6R—2æ÷BçVÆÂ’&WGW&âG'VS°Ğ¢W'&÷"Ò.K«®™i>z+®Š¨ŞŠ‹Î‹z¥4ôî8Îz›®8~88"#°Ğ¢&WGW&âfÇ6S°Ğ¢ĞĞ¢6F6‚„W†6WF–öâW†6WF–öâ’v†Vâ†W†6WF–öâ—2”ôW†6WF–öâ÷"VæWF†÷&—¦VD66W74W†6WF–öâ÷"§6öäW†6WF–öâ÷"&wVÖVçDW†6WF–öâ÷"æ÷E7W÷'FVDW†6WF–öâ÷"7—7FVÒå6V7W&—G’å6V7W&—G”W†6WF–öâĞ¢°Ğ¢W'&÷"ÒW†6WF–öâ—2§6öäW†6WF–öàĞ¢òB.K«®™i>z+®Š¨ŞŠ‹Î‹z¥4ôî8ÎKˆŞjÚ>8~8“¢¶W†6WF–öâäÖW76vWÒ Ğ¢¢B.K«®™i>z+®Š¨ŞŠ‹Î‹z89^8*8*N8:¾8).ŠªŞ8şXùn8(Î8î8¾8)3¢¶W†6WF–öâäÖW76vWÒ#°Ğ¢&WGW&âfÇ6S°Ğ¢ĞĞ¢ĞĞ Ğ¢òòòÇ7VÖÖ'“î[ø^š898+X
-N8).jIÎŠ‹Î8~8n{[nZûî898+8ZHhù¾8~8î88#Â÷7VÖÖ'“àĞ¢òòòÇ&ÒæÖSÒ'fÇVR#îXZ^X©¾8^8(Î8ş898+8~88#Â÷&ÓàĞ¢òòòÇ&ÒæÖSÒ&÷F–öäæÖR#î8*8:8;ÎŠzK®8¾KÛş8n[É^i[YŞ8~88#Â÷&ÓàĞ¢òòòÇ&ÒæÖSÒ&gVÆÅF‚#îZHhù¾[èÎ8î{[nZûî898+8~88#Â÷&ÓàĞ¢òòòÇ&ÒæÖSÒ&W'&÷"#îz›®8î8ş8şKˆŞjÚ>8®898+8îZNY8îŠªÎiˆî8~88#Â÷&ÓàĞ¢òòòÇ&WGW&ç3î898+8).KÛşyJ8~8Ş8(¾ZNY8÷G'V^8~88#Â÷&WGW&ç3àĞ¢&—fFR7FF–2&ööÂG'•&W6öÇfTgVÆÅF‚‡7G&–ærfÇVRÂ7G&–ær÷F–öäæÖRÂ÷WB7G&–ærgVÆÅF‚Â÷WB7G&–ærW'&÷"Ğ¢°Ğ¢gVÆÅF‚Ò7G&–æräV×G“°Ğ¢W'&÷"Ò7G&–æräV×G“°Ğ¢–b‡7G&–ærä—4çVÆÄ÷%v†—FU76R‡fÇVR’Ğ¢°Ğ¢W'&÷"ÒB'¶÷F–öäæÖWÒ8¾z›®8î898+8şhÈ~Zé®8~8Ş8î8¾8)>8"#°Ğ¢&WGW&âfÇ6S°Ğ¢ĞĞ Ğ¢G'Ğ¢°Ğ¢gVÆÅF‚ÒF‚ävWDgVÆÅF‚‡fÇVR“°Ğ¢&WGW&âG'VS°Ğ¢ĞĞ¢6F6‚„W†6WF–öâW†6WF–öâ’v†Vâ†W†6WF–öâ—2&wVÖVçDW†6WF–öâ÷"æ÷E7W÷'FVDW†6WF–öâ÷"F…FöôÆöætW†6WF–öâĞ¢°Ğ¢W'&÷"ÒB'¶÷F–öäæÖWÒ8î898+8ÎKˆŞjÚ>8~8“¢¶W†6WF–öâäÖW76vWÒ#°Ğ¢&WGW&âfÇ6S°Ğ¢ĞĞ¢ĞĞ Ğ¢òòòÇ7VÖÖ'“îXŠyJ8~8Ş8(¾8+>89î8;>88[Ú.[Èş8).hÈ~Zé®8^8(Î8şX{®X©¾XX8ŠzK®8~8î88#Â÷7VÖÖ'“àĞ¢&—fFR7FF–2fö–B&–çEW6vR…FW‡Ew&—FW"w&—FW"Â7G&–æsò6öÖÖæBÒçVÆÂĞ¢°Ğ¢w&—FW"åw&—FTÆ–æR†6öÖÖæB7v—F6€Ğ¢°Ğ¢'fÆ–FFR"Óâ.KÛşyJikk9S¢FVÆ–W'2Ö÷&6†W7G&F÷"fÆ–FFRÆ6öçG&7Bæ§6öãâ"ÀĞ¢'fW&–g’×6Æ6²"Óâ.KÛşyJikk9S¢FVÆ–W'2Ö÷&6†W7G&F÷"fW&–g’×6Æ6²Ç6Æ6²æ§6öãâÇ6Æ6²ç6V7&WG2æ§6öãâ"ÀĞ¢'7F'B"Óâ.KÛşyJikk9S¢FVÆ–W'2Ö÷&6†W7G&F÷"7F'BÆ6öçG&7Bæ§6öãâ²Ò×'Vç2Î88~8*>8:Î8*ş888:£åÒ"ÀĞ¢''Vâ"Óâ.KÛşyJikk9S¢FVÆ–W'2Ö÷&6†W7G&F÷"'VâÆ6öçG&7Bæ§6öãâ²ÒÖvVçBf¶WÆ6öFW…Ò²Ò×66Væ&–òÄf¶U66Væ&–óåÒ²ÒÖ6öFW‚ÖW†RÎ{[nZûî898+“åÒ²ÒÖ–×ÆVÖVçFW"Ö6öFW‚Ö†öÖRÎ{[nZûî898+“åÒ²Ò×&Wf–WvW"Ö6öFW‚Ö†öÖRÎ{[nZûî898+“åÒ²Ò×'Vç2Î88~8*>8:Î8*ş888:£åÒ²ÒÖÆ–fV7–6ÆRÖÆörÄ¥4ôäÃåÒ²Ò×&Wf–WrÖWf–FVæ6RÎŠ‹Î‹zæ§6öãåÒ²Ò×6Æ6²Öæ÷F–f–6F–öç2WF÷ÆF—6&ÆVGÇFW7EÒ²Ò×6Æ6²Ö6öæf–rÄ¥4ôãåÒ²Ò×6Æ6²×6V7&WG2Ä¥4ôãåÒ"ÀĞ¢òÓâ.KÛşyJikk9S¢ Ğ¢Ò“°Ğ¢–b†6öÖÖæB—2æ÷BçVÆÂ’&WGW&ã°Ğ¢w&—FW"åw&—FTÆ–æR‚"FVÆ–W'2ä’ä÷&6†W7G&F÷"ä6Æ’Ò×fW'6–öâ"“°Ğ¢w&—FW"åw&—FTÆ–æR‚"FVÆ–W'2ä’ä÷&6†W7G&F÷"ä6Æ’ÒÖ6&–Æ—F–W2"“°Ğ¢w&—FW"åw&—FTÆ–æR‚"FVÆ–W'2ä’ä÷&6†W7G&F÷"ä6Æ’ÒÖ6öçG&7B×66†VÖ"“°Ğ¢w&—FW"åw&—FTÆ–æR‚"FVÆ–W'2ä’ä÷&6†W7G&F÷"ä6Æ’ÒÖ÷&6†W7G&F–öâÖwV–FR"“°Ğ¢w&—FW"åw&—FTÆ–æR‚"FVÆ–W'2Ö÷&6†W7G&F÷"fÆ–FFRÆ6öçG&7Bæ§6öãâ"“°Ğ¢w&—FW"åw&—FTÆ–æR‚"FVÆ–W'2Ö÷&6†W7G&F÷"fW&–g’×6Æ6²Ç6Æ6²æ§6öãâÇ6Æ6²ç6V7&WG2æ§6öãâ"“°Ğ¢w&—FW"åw&—FTÆ–æR‚"FVÆ–W'2Ö÷&6†W7G&F÷"7F'BÆ6öçG&7Bæ§6öãâ²Ò×'Vç2Î88~8*>8:Î8*ş888:£åÒ"“°Ğ¢w&—FW"åw&—FTÆ–æR‚"FVÆ–W'2Ö÷&6†W7G&F÷"'VâÆ6öçG&7Bæ§6öãâ²ÒÖvVçBf¶WÆ6öFW…Ò²Ò×66Væ&–òÄf¶U66Væ&–óåÒ²ÒÖ6öFW‚ÖW†RÎ{[nZûî898+“åÒ²ÒÖ–×ÆVÖVçFW"Ö6öFW‚Ö†öÖRÎ{[nZûî898+“åÒ²Ò×&Wf–WvW"Ö6öFW‚Ö†öÖRÎ{[nZûî898+“åÒ²Ò×'Vç2Î88~8*>8:Î8*ş888:£åÒ²ÒÖÆ–fV7–6ÆRÖÆörÄ¥4ôäÃåÒ²Ò×&Wf–WrÖWf–FVæ6RÎŠ‹Î‹zæ§6öãåÒ²Ò×6Æ6²Öæ÷F–f–6F–öç2WF÷ÆF—6&ÆVGÇFW7EÒ²Ò×6Æ6²Ö6öæf–rÄ¥4ôãåÒ²Ò×6Æ6²×6V7&WG2Ä¥4ôãåÒ"“°Ğ¢ĞĞ§ĞĞ Ğ
+using System.Text;
+using System.Diagnostics;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Ateliers.Ai.Orchestrator.Core;
+using Ateliers.Ai.Orchestrator.Cli;
+using Ateliers.Slack;
+
+if (args.Length >= 2 && args[0] == "run" && args[1] == "--stdin-json")
+{
+    Console.InputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+    Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+}
+else if (args.Length == 1 && args[0] is "--capabilities" or "--contract-schema" or "--orchestration-guide")
+{
+    Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+}
+
+return await OrchestratorCli.RunAsync(args);
+
+/// <summary>ã‚¿ã‚¹ã‚¯å¥‘ç´„ã®æ¤œè¨¼ã¨å®Ÿè¡Œæº–å‚™è¨˜éŒ²ã‚’æ‰±ã†ã‚³ãƒãƒ³ãƒ‰ãƒ©ã‚¤ãƒ³å…¥å£ã§ã™ã€‚</summary>
+internal static class OrchestratorCli
+{
+    /// <summary>å¼•æ•°ã‚’è§£æã—ã€è¦æ±‚ã•ã‚ŒãŸCLIæ“ä½œã‚’å®Ÿè¡Œã—ã¾ã™ã€‚</summary>
+    /// <param name="args">ã‚³ãƒãƒ³ãƒ‰åã¨ãã®å¼•æ•°ã§ã™ã€‚</param>
+    /// <returns>æˆåŠŸæ™‚ã¯0ã€å…¥åŠ›ä¸å‚™ã¯2ã€å®Ÿè¡Œè¨˜éŒ²ã®å¤±æ•—ã¯3ã§ã™ã€‚</returns>
+    public static async Task<int> RunAsync(string[] args)
+    {
+        var structuredRun = args.Length >= 2 && args[0] == "run" && args[1] == "--stdin-json";
+        if (args.Length == 1 && (args[0] is "--version" or "version"))
+        {
+            Console.WriteLine(GetVersion());
+            return 0;
+        }
+
+        if (args.Length == 1 && args[0] == "--capabilities")
+        {
+            Console.WriteLine(JsonSerializer.Serialize(new { cliVersion = GetVersion(), protocolVersion = 1, commands = new { runStdinJson = true, contractSchema = true, orchestrationGuide = true } }));
+            return 0;
+        }
+
+        if (args.Length == 1 && args[0] == "--contract-schema")
+        {
+            Console.WriteLine(TaskContractSchema.GetJson());
+            return 0;
+        }
+
+        if (args.Length == 1 && args[0] == "--orchestration-guide")
+        {
+            Console.Write(OrchestrationGuide.GetText());
+            return 0;
+        }
+
+        if (args.Length == 0 || args[0] is "--help" or "-h")
+        {
+            PrintUsage(Console.Out);
+            return 0;
+        }
+
+        if (args[0] is "validate" or "start" or "run" or "verify-slack" && args.Skip(1).Any(argument => argument is "--help" or "-h"))
+        {
+            PrintUsage(Console.Out, args[0]);
+            return 0;
+        }
+
+        if (args.Length < 2 || args[0] is not ("validate" or "start" or "run" or "verify-slack") ||
+            (args[0] == "validate" && args.Length != 2) ||
+            (args[0] == "verify-slack" && args.Length != 3) ||
+            (args[0] == "start" && args.Length is not (2 or 4)) ||
+            (args[0] == "run" && (args.Length < 2 || args.Length % 2 != 0)))
+        {
+            Console.Error.WriteLine("ã‚³ãƒãƒ³ãƒ‰ã¾ãŸã¯å¼•æ•°ãŒä¸è¶³ã—ã¦ã„ã‚‹ã‹ã€ä¸æ­£ã§ã™ã€‚");
+            if (structuredRun) WriteStructuredError("invalid_arguments", "ã‚³ãƒãƒ³ãƒ‰å¼•æ•°ãŒä¸æ­£ã§ã™ã€‚", 2);
+            else PrintUsage(Console.Error);
+            return 2;
+        }
+
+        if (args[0] == "verify-slack")
+        {
+            if (!TryResolveFullPath(args[1], "Slackè¨­å®š", out var slackConfigurationPath, out var slackPathError) ||
+                !TryResolveFullPath(args[2], "Slack secrets", out var slackSecretsPath, out slackPathError))
+            {
+                Console.Error.WriteLine(slackPathError);
+                return 2;
+            }
+
+            using var dispatcher = SlackLifecycleNotificationDispatcher.TryCreate(slackConfigurationPath, slackSecretsPath, out var warning);
+            if (dispatcher is null)
+            {
+                Console.Error.WriteLine(warning ?? "Slackè¨­å®šã‚’åˆ©ç”¨ã§ãã¾ã›ã‚“ã€‚");
+                return 3;
+            }
+            if (!await dispatcher.VerifyBotIdentitiesAsync())
+            {
+                Console.Error.WriteLine("Slackèªè¨¼ã‚’ç…§åˆã§ãã¾ã›ã‚“ã€‚Bot IDä¸ä¸€è‡´ã¾ãŸã¯APIã‚¨ãƒ©ãƒ¼ã§ã™ã€‚é€šçŸ¥ã¯é€ä¿¡ã—ã¦ã„ã¾ã›ã‚“ã€‚");
+                return 3;
+            }
+            Console.WriteLine("Slackã®æœ¬ç•ªBotèªè¨¼ã¨è¨­å®šBot IDã‚’ç…§åˆã—ã¾ã—ãŸã€‚é€šçŸ¥ã¯é€ä¿¡ã—ã¦ã„ã¾ã›ã‚“ã€‚");
+            return 0;
+        }
+
+        ContractReadResult read;
+        if (structuredRun)
+        {
+            read = TaskContractReader.ReadJson(await Console.In.ReadToEndAsync());
+        }
+        else if (!TryResolveFullPath(args[1], "å¥‘ç´„ãƒ•ã‚¡ã‚¤ãƒ«", out var contractPath, out var pathError))
+        {
+            Console.Error.WriteLine(pathError);
+            PrintUsage(Console.Error);
+            return 2;
+        }
+        else read = TaskContractReader.Read(contractPath);
+        if (!read.IsValid)
+        {
+            foreach (var error in read.Errors) Console.Error.WriteLine($"å¥‘ç´„ã‚¨ãƒ©ãƒ¼: {error}");
+            if (structuredRun) WriteStructuredError("invalid_contract", "å¥‘ç´„JSONãŒä¸æ­£ã§ã™ã€‚", 2, read.Errors);
+            return 2;
+        }
+
+        var contract = read.Contract!;
+        var contractHash = read.ContentSha256!;
+
+        if (args[0] == "validate")
+        {
+            Console.WriteLine($"å¥‘ç´„ã¯æœ‰åŠ¹ã§ã™: taskId={contract.TaskId} schemaVersion={contract.SchemaVersion} sha256={contractHash}");
+            return 0;
+        }
+
+        if (args[0] == "run")
+        {
+            if (!TryParseRunOptions(args, structuredRun, contract.WorkingDirectory, out var scenario, out var runRoot, out var lifecycleLogPath, out var evidencePath, out var agentKind,
+                out var codexOptions, out var notificationsDisabled, out var useSlackTestChannel, out var slackConfigurationPath,
+                out var slackSecretsPath, out var optionError))
+            {
+                Console.Error.WriteLine(optionError);
+                if (structuredRun) WriteStructuredError("invalid_arguments", optionError, 2);
+                else PrintUsage(Console.Error, "run");
+                return 2;
+            }
+
+            if (!TryReadReviewEvidence(evidencePath, out var evidence, out var evidenceError))
+            {
+                Console.Error.WriteLine(evidenceError);
+                if (structuredRun) WriteStructuredError("invalid_review_evidence", evidenceError, 2);
+                else PrintUsage(Console.Error, "run");
+                return 2;
+            }
+
+            using var stopSource = new CancellationTokenSource();
+            ConsoleCancelEventHandler? cancelHandler = null;
+            if (agentKind == "codex")
+            {
+                cancelHandler = (_, eventArgs) => { eventArgs.Cancel = true; stopSource.Cancel(); };
+                Console.CancelKeyPress += cancelHandler;
+                codexOptions = codexOptions! with { CancellationToken = stopSource.Token };
+            }
+
+            var fakeRunId = Guid.NewGuid().ToString("N");
+            var fakeRunDirectory = Path.Combine(runRoot, fakeRunId);
+            try
+            {
+                Directory.CreateDirectory(fakeRunDirectory);
+                using var eventStore = JsonlRunEventStore.CreateNew(Path.Combine(fakeRunDirectory, "events.jsonl"), fakeRunId);
+                using var lifecycleWriter = slackConfigurationPath is null
+                    ? new LifecycleNotificationEventWriter(lifecycleLogPath, notificationsDisabled, useSlackTestChannel)
+                    : new LifecycleNotificationEventWriter(lifecycleLogPath, notificationsDisabled, slackConfigurationPath, slackSecretsPath!);
+                IAgentRunner runner = agentKind == "codex" ? new CodexCliAgentRunner(codexOptions!) : new FakeAgentRunner(scenario);
+                using var publisher = agentKind == "codex" && contract.Reporting.PullRequestExpected
+                    ? new GitHubWorkflowPublisher() : null;
+                var result = new FakeAgentWorkflow().Run(contract, contractHash, fakeRunId, fakeRunDirectory,
+                    runner, eventStore, evidence, stopToken: stopSource.Token,
+                    codexOneShot: agentKind == "codex", lifecycleEvents: lifecycleWriter, publisher: publisher);
+                await lifecycleWriter.FlushSlackNotificationsAsync(stopSource.Token);
+                if (lifecycleWriter.FailedWrites > 0)
+                    Console.Error.WriteLine($"è­¦å‘Š: ãƒ©ã‚¤ãƒ•ã‚µã‚¤ã‚¯ãƒ«JSONLã¸ã®æ›¸ãè¾¼ã¿ã«{lifecycleWriter.FailedWrites}ä»¶å¤±æ•—ã—ã¾ã—ãŸã€‚å®Ÿè¡Œçµæœã¯ç¶™ç¶šã—ã¦ã„ã¾ã™ã€‚");
+                if (lifecycleWriter.FailedSlackSends > 0)
+                {
+                    try { Console.Error.WriteLine($"è­¦å‘Š: Slacké€šçŸ¥ã«{lifecycleWriter.FailedSlackSends}ä»¶å¤±æ•—ã—ã¾ã—ãŸã€‚å®Ÿè¡Œçµæœã¯ç¶™ç¶šã—ã¦ã„ã¾ã™ã€‚"); }
+                    catch (Exception) { }
+                }
+                if (!structuredRun && lifecycleWriter.SentSlackSends > 0)
+                    Console.WriteLine($"Slacké€šçŸ¥é€ä¿¡æˆåŠŸ: {lifecycleWriter.SentSlackSends}ä»¶");
+                if (!result.PersistenceSucceeded)
+                {
+                    Console.Error.WriteLine($"å®Ÿè¡Œã¯äººé–“åˆ¤æ–­å¾…ã¡ã§åœæ­¢ã—ã¾ã—ãŸãŒã€æˆæœç‰©ã¾ãŸã¯å®Ÿè¡Œè¨˜éŒ²ã®ä¿å­˜ã«å¤±æ•—ã—ã¾ã—ãŸ: {fakeRunDirectory}");
+                    if (result.Detail is not null) Console.Error.WriteLine(result.Detail);
+                    if (structuredRun) WriteStructuredResult(false, 3, fakeRunId, result.State.ToString(), fakeRunDirectory,
+                        "persistence_failed", "å®Ÿè¡Œè¨˜éŒ²ã¾ãŸã¯æˆæœç‰©ã®ä¿å­˜ã«å¤±æ•—ã—ã¾ã—ãŸã€‚");
+                    return 3;
+                }
+                var exitCode = result.State == RunState.Failed ? 3 : 0;
+                if (structuredRun)
+                    WriteStructuredResult(exitCode == 0, exitCode, fakeRunId, result.State.ToString(), fakeRunDirectory,
+                        exitCode == 0 ? null : "workflow_failed", exitCode == 0 ? null : "ã‚ªãƒ¼ã‚±ã‚¹ãƒˆãƒ¬ãƒ¼ã‚·ãƒ§ãƒ³ãŒå¤±æ•—ã—ã¾ã—ãŸã€‚");
+                else
+                {
+                    Console.WriteLine($"{(agentKind == "codex" ? "Codex CLIå®Ÿè¡Œ" : "Fakeå®Ÿè¡Œ")}ã‚’è¨˜éŒ²ã—ã¾ã—ãŸ: {fakeRunId}");
+                    Console.WriteLine($"çŠ¶æ…‹: {result.State}");
+                    Console.WriteLine($"è¨˜éŒ²å…ˆ: {fakeRunDirectory}");
+                }
+                return exitCode;
+            }
+            catch (IOException exception)
+            {
+                Console.Error.WriteLine($"Fakeå®Ÿè¡Œã®æˆæœç‰©ã¾ãŸã¯è¨˜éŒ²ã‚’æ›¸ãè¾¼ã‚ã¾ã›ã‚“ã§ã—ãŸ: {exception.Message}");
+                Console.Error.WriteLine($"è¨˜éŒ²å…ˆ: {fakeRunDirectory}ï¼ˆéƒ¨åˆ†çš„ãªè¨˜éŒ²ãŒæ®‹ã£ã¦ã„ã‚‹å ´åˆã¯å†…å®¹ã‚’ç¢ºèªã—ã¦ãã ã•ã„ï¼‰");
+                if (structuredRun) WriteStructuredResult(false, 3, fakeRunId, null, fakeRunDirectory, "persistence_failed", "å®Ÿè¡Œè¨˜éŒ²ã‚’æ›¸ãè¾¼ã‚ã¾ã›ã‚“ã§ã—ãŸã€‚");
+                return 3;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine($"Fakeå®Ÿè¡Œã®ä¿å­˜å…ˆã¸ã®æ›¸ãè¾¼ã¿æ¨©é™ãŒã‚ã‚Šã¾ã›ã‚“: {fakeRunDirectory}");
+                if (structuredRun) WriteStructuredResult(false, 3, fakeRunId, null, fakeRunDirectory, "persistence_failed", "å®Ÿè¡Œè¨˜éŒ²å…ˆã¸ã®æ›¸ãè¾¼ã¿æ¨©é™ãŒã‚ã‚Šã¾ã›ã‚“ã€‚");
+                return 3;
+            }
+            catch (JsonException exception)
+            {
+                Console.Error.WriteLine($"Fakeå®Ÿè¡Œè¨˜éŒ²ã‚’JSONã¸å¤‰æ›ã§ãã¾ã›ã‚“ã§ã—ãŸ: {exception.Message}");
+                if (structuredRun) WriteStructuredResult(false, 3, fakeRunId, null, fakeRunDirectory, "persistence_failed", "å®Ÿè¡Œè¨˜éŒ²ã‚’JSONã¸å¤‰æ›ã§ãã¾ã›ã‚“ã§ã—ãŸã€‚");
+                return 3;
+            }
+            finally
+            {
+                if (cancelHandler is not null) Console.CancelKeyPress -= cancelHandler;
+            }
+        }
+
+        string runsDirectory;
+        if (!TryGetRunsDirectory(args, out runsDirectory, out var runsPathError))
+        {
+            Console.Error.WriteLine(runsPathError);
+            PrintUsage(Console.Error, "start");
+            return 2;
+        }
+
+        var runId = Guid.NewGuid().ToString("N");
+        var runDirectory = Path.Combine(runsDirectory, runId);
+        var elapsed = Stopwatch.StartNew();
+        try
+        {
+            Directory.CreateDirectory(runDirectory);
+            using var eventStore = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), runId);
+            eventStore.Append("run_prepared", "accepted", to: RunState.Prepared,
+                detail: "å¥‘ç´„ã‚’æ¤œè¨¼ã—ã€å®Ÿè¡Œè¨˜éŒ²ã‚’åˆæœŸåŒ–ã—ã¾ã—ãŸã€‚Agentå®Ÿè¡Œã¯ã“ã®Issueã®ç¯„å›²å¤–ã§ã™ã€‚",
+                inputReference: $"sha256:{contractHash}",
+                unknownInformation: ["Agentå®Ÿè¡Œãƒ»ãƒ¢ãƒ‡ãƒ«æƒ…å ±ã¯æœªå–å¾—", "æˆæœç‰©ã®commitãƒ»å·®åˆ†ã¯æœªå–å¾—", "PRæå‡ºã¯æœªå®Ÿæ–½", "äººé–“ã®ãƒãƒ¼ã‚¸ã¯æœªå®Ÿæ–½"]);
+
+            var reportPath = Path.Combine(runDirectory, "report.md");
+            var report = string.Join(Environment.NewLine,
+            [
+                "# å®Ÿè¡Œæº–å‚™çµæœ",
+                "",
+                $"- å®Ÿè¡ŒID: `{runId}`",
+                $"- ã‚¿ã‚¹ã‚¯ID: `{contract.TaskId}`",
+                "- çŠ¶æ…‹: `Prepared`",
+                $"- å¥‘ç´„SHA-256: `{contractHash}`",
+                "- Agentå®Ÿè¡Œ: æœªå®Ÿæ–½ï¼ˆIssue #3 ã¯å¥‘ç´„ãƒ»çŠ¶æ…‹ãƒ»è¨˜éŒ²ã®éª¨æ ¼ã¾ã§ï¼‰",
+                "- PRæå‡º: æœªå®Ÿæ–½",
+                "- äººé–“ã®ãƒãƒ¼ã‚¸: æœªå®Ÿæ–½",
+                "",
+                "å¥‘ç´„JSONæœ¬æ–‡ã¯ã€æ©Ÿå¯†æƒ…å ±ã‚’ç„¡å·®åˆ¥ã«è¤‡è£½ã—ãªã„ãŸã‚å®Ÿè¡Œè¨˜éŒ²ã¸ã‚³ãƒ”ãƒ¼ã—ã¦ã„ã¾ã›ã‚“ã€‚ã‚¤ãƒ™ãƒ³ãƒˆè¨˜éŒ²ã¯å®Œå…¨ãªç›£æŸ»å°å¸³ã§ã¯ã‚ã‚Šã¾ã›ã‚“ã€‚",
+                ""
+            ]);
+            await File.WriteAllTextAsync(reportPath, report, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            eventStore.Append("report_written", "accepted", to: RunState.Prepared,
+                outputReference: Path.GetRelativePath(runDirectory, reportPath),
+                elapsedMilliseconds: elapsed.ElapsedMilliseconds,
+                unknownInformation: ["Agentå®Ÿè¡Œãƒ»ãƒ¢ãƒ‡ãƒ«æƒ…å ±ã¯æœªå–å¾—", "æˆæœç‰©ã®commitãƒ»å·®åˆ†ã¯æœªå–å¾—"]);
+
+            Console.WriteLine($"å®Ÿè¡Œæº–å‚™ã‚’è¨˜éŒ²ã—ã¾ã—ãŸ: {runId}");
+            Console.WriteLine("çŠ¶æ…‹: Preparedã€‚Agentå®Ÿè¡Œã€PRæå‡ºã€äººé–“ã®ãƒãƒ¼ã‚¸ã¯è¡Œã£ã¦ã„ã¾ã›ã‚“ã€‚");
+            Console.WriteLine($"è¨˜éŒ²å…ˆ: {runDirectory}");
+            return 0;
+        }
+
+        catch (IOException exception)
+        {
+            Console.Error.WriteLine($"å®Ÿè¡Œè¨˜éŒ²ã¾ãŸã¯ãƒ¬ãƒãƒ¼ãƒˆã‚’æ›¸ãè¾¼ã‚ã¾ã›ã‚“ã§ã—ãŸ: {exception.Message}");
+            Console.Error.WriteLine($"è¨˜éŒ²å…ˆ: {runDirectory}ï¼ˆéƒ¨åˆ†çš„ãªè¨˜éŒ²ãŒæ®‹ã£ã¦ã„ã‚‹å ´åˆã¯å†…å®¹ã‚’ç¢ºèªã—ã¦ãã ã•ã„ï¼‰");
+            return 3;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine($"å®Ÿè¡Œè¨˜éŒ²å…ˆã¸ã®æ›¸ãè¾¼ã¿æ¨©é™ãŒã‚ã‚Šã¾ã›ã‚“: {runDirectory}");
+            return 3;
+        }
+    }
+
+    /// <summary>å®Ÿè¡Œã‚¢ã‚»ãƒ³ãƒ–ãƒªã«åŸ‹ã‚è¾¼ã¾ã‚ŒãŸInformationalVersionã‚’è¿”ã—ã¾ã™ã€‚</summary>
+    internal static string GetVersion()
+    {
+        var assembly = typeof(OrchestratorCli).Assembly;
+        return assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+            .FirstOrDefault()?.InformationalVersion
+            ?? assembly.GetName().Version?.ToString()
+            ?? "unknown";
+    }
+
+    private static void WriteStructuredError(string code, string message, int exitCode, IReadOnlyList<string>? details = null) =>
+        Console.WriteLine(JsonSerializer.Serialize(new { protocolVersion = 1, ok = false, exitCode, error = new { code, message, details } }));
+
+    private static void WriteStructuredResult(bool ok, int exitCode, string? runId, string? state, string? runDirectory, string? errorCode, string? message) =>
+        Console.WriteLine(JsonSerializer.Serialize(new { protocolVersion = 1, ok, exitCode, runId, state, runDirectory,
+            error = errorCode is null ? null : new { code = errorCode, message } }, new JsonSerializerOptions { Converters = { new JsonStringEnumConverter() } }));
+
+    /// <summary>startã‚³ãƒãƒ³ãƒ‰ã®å¼•æ•°ã‹ã‚‰å®Ÿè¡Œè¨˜éŒ²ã®ä¿å­˜å…ˆã‚’è§£æ±ºã—ã¾ã™ã€‚</summary>
+    /// <param name="args">è§£ææ¸ˆã¿CLIå¼•æ•°ã§ã™ã€‚</param>
+    /// <param name="runsDirectory">å®Ÿè¡Œè¨˜éŒ²ã®ä¿å­˜å…ˆã¨ãªã‚‹çµ¶å¯¾ãƒ‘ã‚¹ã§ã™ã€‚</param>
+    /// <param name="error">å¼•æ•°ã¾ãŸã¯ãƒ‘ã‚¹ãŒä¸æ­£ãªå ´åˆã®èª¬æ˜ã§ã™ã€‚</param>
+    /// <returns>å¼•æ•°ã¨ãƒ‘ã‚¹ã‚’ä½¿ç”¨ã§ãã‚‹å ´åˆã¯trueã§ã™ã€‚</returns>
+    private static bool TryGetRunsDirectory(string[] args, out string runsDirectory, out string error)
+    {
+        if (args.Length == 2)
+            return TryResolveFullPath(Path.Combine(".ateliers-orchestrator", "runs"), "å®Ÿè¡Œè¨˜éŒ²å…ˆ", out runsDirectory, out error);
+        if (args.Length == 4 && args[2] == "--runs")
+            return TryResolveFullPath(args[3], "--runs", out runsDirectory, out error);
+        runsDirectory = string.Empty;
+        error = "start ã®ä»»æ„å¼•æ•°ã¯ --runs <ãƒ‡ã‚£ãƒ¬ã‚¯ãƒˆãƒª> ã§ã™ã€‚";
+        return false;
+    }
+
+    /// <summary>Fakeå®Ÿè¡Œã®ã‚·ãƒŠãƒªã‚ªã¨ä¿å­˜å…ˆã€å¤–éƒ¨è¨¼è·¡å…¥åŠ›ã‚’è§£æã—ã¾ã™ã€‚</summary>
+    /// <param name="args">ã‚³ãƒãƒ³ãƒ‰å¼•æ•°ã§ã™ã€‚</param>
+    /// <param name="scenario">é¸æŠã•ã‚ŒãŸFake Agentã‚·ãƒŠãƒªã‚ªã§ã™ã€‚</param>
+    /// <param name="runsDirectory">å®Ÿè¡Œè¨˜éŒ²ã®è¦ªãƒ‡ã‚£ãƒ¬ã‚¯ãƒˆãƒªã§ã™ã€‚</param>
+    /// <param name="evidencePath">æŒ‡å®šã•ã‚ŒãŸäººé–“ç¢ºèªè¨¼è·¡ãƒ•ã‚¡ã‚¤ãƒ«ã§ã™ã€‚</param>
+    /// <param name="error">è§£æå¤±æ•—æ™‚ã®èª¬æ˜ã§ã™ã€‚</param>
+    /// <returns>ã™ã¹ã¦ã®å¼•æ•°ãŒèªè­˜ã§ããŸå ´åˆã¯trueã§ã™ã€‚</returns>
+    private static bool TryParseRunOptions(string[] args, bool structuredRun, string workingDirectory, out FakeScenario scenario, out string runsDirectory,
+        out string lifecycleLogPath, out string? evidencePath, out string agentKind, out CodexCliRunnerOptions? codexOptions,
+        out bool notificationsDisabled, out bool useSlackTestChannel, out string? slackConfigurationPath,
+        out string? slackSecretsPath, out string error)
+    {
+        scenario = FakeScenario.Success;
+        var runBaseDirectory = structuredRun ? workingDirectory : Environment.CurrentDirectory;
+        runsDirectory = Path.GetFullPath(Path.Combine(runBaseDirectory, ".ateliers-orchestrator", "runs"));
+        lifecycleLogPath = Path.GetFullPath(Path.Combine(runBaseDirectory, ".ateliers-orchestrator", "lifecycle.jsonl"));
+        evidencePath = null;
+        agentKind = "fake";
+        codexOptions = null;
+        notificationsDisabled = false;
+        useSlackTestChannel = false;
+        slackConfigurationPath = null;
+        slackSecretsPath = null;
+        error = string.Empty;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        string? executable = null, implementerHome = null, reviewerHome = null;
+        for (var index = 2; index < args.Length; index += 2)
+        {
+            if (index + 1 >= args.Length || !seen.Add(args[index]))
+            {
+                error = "run ã®ã‚ªãƒ—ã‚·ãƒ§ãƒ³ã¯é‡è¤‡ã—ãªã„åå‰ã¨å€¤ã®çµ„ã§æŒ‡å®šã—ã¦ãã ã•ã„ã€‚";
+                return false;
+            }
+
+            switch (args[index])
+            {
+                case "--scenario":
+                    if (!Enum.TryParse(args[index + 1], ignoreCase: true, out scenario) || !Enum.IsDefined(scenario))
+                    {
+                        error = $"æœªå¯¾å¿œã®Fakeã‚·ãƒŠãƒªã‚ªã§ã™: {args[index + 1]}";
+                        return false;
+                    }
+                    break;
+                case "--agent":
+                    if (args[index + 1] is not ("fake" or "codex"))
+                    {
+                        error = "--agent ã¯ fake ã¾ãŸã¯ codex ã§ã™ã€‚";
+                        return false;
+                    }
+                    agentKind = args[index + 1];
+                    break;
+                case "--codex-exe":
+                    if (!TryResolveFullPath(args[index + 1], "--codex-exe", out executable, out error)) return false;
+                    break;
+                case "--implementer-codex-home":
+                    if (!TryResolveFullPath(args[index + 1], "--implementer-codex-home", out implementerHome, out error)) return false;
+                    break;
+                case "--reviewer-codex-home":
+                    if (!TryResolveFullPath(args[index + 1], "--reviewer-codex-home", out reviewerHome, out error)) return false;
+                    break;
+                case "--runs":
+                    if (!TryResolveFullPath(args[index + 1], "--runs", out var runPath, out error)) return false;
+                    runsDirectory = runPath;
+                    break;
+                case "--lifecycle-log":
+                    if (!TryResolveFullPath(args[index + 1], "--lifecycle-log", out lifecycleLogPath, out error)) return false;
+                    break;
+                case "--review-evidence":
+                    if (!TryResolveFullPath(args[index + 1], "--review-evidence", out var reviewPath, out error)) return false;
+                    evidencePath = reviewPath;
+                    break;
+                case "--slack-notifications":
+                    if (args[index + 1] is not ("auto" or "disabled" or "test"))
+                    {
+                        error = "--slack-notifications ã¯ autoã€disabledã€test ã®ã„ãšã‚Œã‹ã‚’æŒ‡å®šã—ã¦ãã ã•ã„ã€‚";
+                        return false;
+                    }
+                    notificationsDisabled = args[index + 1] == "disabled";
+                    useSlackTestChannel = args[index + 1] == "test";
+                    break;
+                case "--slack-config":
+                    if (!TryResolveFullPath(args[index + 1], "--slack-config", out var configurationPath, out error)) return false;
+                    slackConfigurationPath = configurationPath;
+                    break;
+                case "--slack-secrets":
+                    if (!TryResolveFullPath(args[index + 1], "--slack-secrets", out var secretsPath, out error)) return false;
+                    slackSecretsPath = secretsPath;
+                    break;
+                default:
+                    error = $"æœªå¯¾å¿œã®runã‚ªãƒ—ã‚·ãƒ§ãƒ³ã§ã™: {args[index]}";
+                    return false;
+            }
+        }
+        if ((slackConfigurationPath is null) != (slackSecretsPath is null))
+        {
+            error = "--slack-config ã¨ --slack-secrets ã¯ä¸¡æ–¹æŒ‡å®šã—ã¦ãã ã•ã„ã€‚";
+            return false;
+        }
+        if ((slackConfigurationPath is not null || slackSecretsPath is not null) && (notificationsDisabled || useSlackTestChannel))
+        {
+            error = "Slackè¨­å®šãƒ‘ã‚¹ã‚’æŒ‡å®šã™ã‚‹å ´åˆã€slack-notifications ã¯ auto ã«ã—ã¦ãã ã•ã„ã€‚";
+            return false;
+        }
+        if (agentKind == "codex")
+        {
+            if (seen.Contains("--scenario")) { error = "--scenario ã¯ --agent fake ã¨çµ„ã¿åˆã‚ã›ã¦ãã ã•ã„ã€‚"; return false; }
+            if (executable is null)
+            { error = "Codexå®Ÿè¡Œã«ã¯ --codex-exe ãŒå¿…è¦ã§ã™ã€‚"; return false; }
+            try
+            {
+                codexOptions = new CodexCliRunnerOptions(executable,
+                    CodexCliRunnerOptions.ResolveCodexHome(implementerHome),
+                    CodexCliRunnerOptions.ResolveCodexHome(reviewerHome)).Validate();
+            }
+            catch (ArgumentException exception) { error = exception.Message; return false; }
+        }
+        return true;
+    }
+
+    /// <summary>å¤–éƒ¨è¨¼è·¡ãƒ•ã‚¡ã‚¤ãƒ«ã‚’å®Ÿè¡Œé–‹å§‹å‰ã«èª­ã¿è¾¼ã¿ã€å…¥åŠ›ä¸å‚™ã‚’å ±å‘Šã—ã¾ã™ã€‚</summary>
+    /// <param name="evidencePath">è¨¼è·¡JSONã®çµ¶å¯¾ãƒ‘ã‚¹ã§ã™ã€‚æœªæŒ‡å®šãªã‚‰nullã§ã™ã€‚</param>
+    /// <param name="evidence">èª­ã¿è¾¼ã‚“ã è¨¼è·¡ã§ã™ã€‚</param>
+    /// <param name="error">èª­ã¿è¾¼ã¿ã‚„JSONå½¢å¼ã«å•é¡ŒãŒã‚ã‚‹å ´åˆã®èª¬æ˜ã§ã™ã€‚</param>
+    /// <returns>è¨¼è·¡ãŒæœªæŒ‡å®šã€ã¾ãŸã¯æ­£å¸¸ã«èª­ã¿è¾¼ã‚ãŸå ´åˆã¯trueã§ã™ã€‚</returns>
+    private static bool TryReadReviewEvidence(string? evidencePath, out HumanReviewEvidence? evidence, out string error)
+    {
+        evidence = null;
+        error = string.Empty;
+        if (evidencePath is null) return true;
+
+        try
+        {
+            evidence = JsonSerializer.Deserialize<HumanReviewEvidence>(File.ReadAllBytes(evidencePath), new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                PropertyNameCaseInsensitive = false,
+                UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
+            });
+            if (evidence is not null) return true;
+            error = "äººé–“ç¢ºèªè¨¼è·¡JSONãŒç©ºã§ã™ã€‚";
+            return false;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException or System.Security.SecurityException)
+        {
+            error = exception is JsonException
+                ? $"äººé–“ç¢ºèªè¨¼è·¡JSONãŒä¸æ­£ã§ã™: {exception.Message}"
+                : $"äººé–“ç¢ºèªè¨¼è·¡ãƒ•ã‚¡ã‚¤ãƒ«ã‚’èª­ã¿å–ã‚Œã¾ã›ã‚“: {exception.Message}";
+            return false;
+        }
+    }
+
+    /// <summary>å¿…é ˆãƒ‘ã‚¹å€¤ã‚’æ¤œè¨¼ã—ã¦çµ¶å¯¾ãƒ‘ã‚¹ã¸å¤‰æ›ã—ã¾ã™ã€‚</summary>
+    /// <param name="value">å…¥åŠ›ã•ã‚ŒãŸãƒ‘ã‚¹ã§ã™ã€‚</param>
+    /// <param name="optionName">ã‚¨ãƒ©ãƒ¼è¡¨ç¤ºã«ä½¿ã†å¼•æ•°åã§ã™ã€‚</param>
+    /// <param name="fullPath">å¤‰æ›å¾Œã®çµ¶å¯¾ãƒ‘ã‚¹ã§ã™ã€‚</param>
+    /// <param name="error">ç©ºã¾ãŸã¯ä¸æ­£ãªãƒ‘ã‚¹ã®å ´åˆã®èª¬æ˜ã§ã™ã€‚</param>
+    /// <returns>ãƒ‘ã‚¹ã‚’ä½¿ç”¨ã§ãã‚‹å ´åˆã¯trueã§ã™ã€‚</returns>
+    private static bool TryResolveFullPath(string value, string optionName, out string fullPath, out string error)
+    {
+        fullPath = string.Empty;
+        error = string.Empty;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            error = $"{optionName} ã«ç©ºã®ãƒ‘ã‚¹ã¯æŒ‡å®šã§ãã¾ã›ã‚“ã€‚";
+            return false;
+        }
+
+        try
+        {
+            fullPath = Path.GetFullPath(value);
+            return true;
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            error = $"{optionName} ã®ãƒ‘ã‚¹ãŒä¸æ­£ã§ã™: {exception.Message}";
+            return false;
+        }
+    }
+
+    /// <summary>åˆ©ç”¨ã§ãã‚‹ã‚³ãƒãƒ³ãƒ‰å½¢å¼ã‚’æŒ‡å®šã•ã‚ŒãŸå‡ºåŠ›å…ˆã¸è¡¨ç¤ºã—ã¾ã™ã€‚</summary>
+    private static void PrintUsage(TextWriter writer, string? command = null)
+    {
+        writer.WriteLine(command switch
+        {
+            "validate" => "ä½¿ç”¨æ–¹æ³•: ateliers-orchestrator validate <contract.json>",
+            "verify-slack" => "ä½¿ç”¨æ–¹æ³•: ateliers-orchestrator verify-slack <slack.json> <slack.secrets.json>",
+            "start" => "ä½¿ç”¨æ–¹æ³•: ateliers-orchestrator start <contract.json> [--runs <ãƒ‡ã‚£ãƒ¬ã‚¯ãƒˆãƒª>]",
+            "run" => "ä½¿ç”¨æ–¹æ³•: ateliers-orchestrator run <contract.json> [--agent fake|codex] [--scenario <FakeScenario>] [--codex-exe <çµ¶å¯¾ãƒ‘ã‚¹>] [--implementer-codex-home <çµ¶å¯¾ãƒ‘ã‚¹>] [--reviewer-codex-home <çµ¶å¯¾ãƒ‘ã‚¹>] [--runs <ãƒ‡ã‚£ãƒ¬ã‚¯ãƒˆãƒª>] [--lifecycle-log <JSONL>] [--review-evidence <è¨¼è·¡.json>] [--slack-notifications auto|disabled|test] [--slack-config <JSON>] [--slack-secrets <JSON>]",
+            _ => "ä½¿ç”¨æ–¹æ³•:"
+        });
+        if (command is not null) return;
+        writer.WriteLine("  Ateliers.Ai.Orchestrator.Cli --version");
+        writer.WriteLine("  Ateliers.Ai.Orchestrator.Cli --capabilities");
+        writer.WriteLine("  Ateliers.Ai.Orchestrator.Cli --contract-schema");
+        writer.WriteLine("  Ateliers.Ai.Orchestrator.Cli --orchestration-guide");
+        writer.WriteLine("  ateliers-orchestrator validate <contract.json>");
+        writer.WriteLine("  ateliers-orchestrator verify-slack <slack.json> <slack.secrets.json>");
+        writer.WriteLine("  ateliers-orchestrator start <contract.json> [--runs <ãƒ‡ã‚£ãƒ¬ã‚¯ãƒˆãƒª>]");
+        writer.WriteLine("  ateliers-orchestrator run <contract.json> [--agent fake|codex] [--scenario <FakeScenario>] [--codex-exe <çµ¶å¯¾ãƒ‘ã‚¹>] [--implementer-codex-home <çµ¶å¯¾ãƒ‘ã‚¹>] [--reviewer-codex-home <çµ¶å¯¾ãƒ‘ã‚¹>] [--runs <ãƒ‡ã‚£ãƒ¬ã‚¯ãƒˆãƒª>] [--lifecycle-log <JSONL>] [--review-evidence <è¨¼è·¡.json>] [--slack-notifications auto|disabled|test] [--slack-config <JSON>] [--slack-secrets <JSON>]");
+    }
+}
+
