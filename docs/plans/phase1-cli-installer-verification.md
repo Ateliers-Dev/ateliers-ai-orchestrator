@@ -19,6 +19,7 @@
 | Release build | `dotnet build Ateliers.Ai.Orchestrator.sln --configuration Release --no-restore` | 成功、警告0・エラー0 |
 | Fake-only Unit tests | `dotnet test tests/Ateliers.Ai.Orchestrator.UnitTests/Ateliers.Ai.Orchestrator.UnitTests.csproj --configuration Release --no-build --no-restore --filter Category=Unit` | 成功71、Skip 2、失敗0、合計73（WindowsでUnix mode依存の既存2件がSkip。新規CLIバージョンテストを含む） |
 | Release publishと版番号 | `dotnet publish ... --runtime win-x64 --self-contained true -p:Version=1.2.3 -p:InformationalVersion=1.2.3 -p:IncludeSourceRevisionInInformationalVersion=false` の出力CLIで `--version` | 成功。標準出力 `1.2.3` を確認 |
+| Pull Request CI | GitHub Actions run #88 | Windows・Ubuntu両ジョブ成功（restore、Release build、Fake-only Unit、Slack Unit） |
 | Windows PowerShell実行と配置確認 | ローカル配布ZIPを使って `-Version 1.2.2`、続けて `-Verify` | 成功。固定パス、実行ファイル、両マニフェスト、CLIの版番号を確認 |
 | 明示更新 | 別のローカル配布ZIPで `-Version 1.2.3`、続けて `-Verify` | 成功。確認結果が `1.2.3` へ変わり、通常終了後にstage/backup残留なし |
 | Releaseマニフェスト不一致 | `1.2.4` を要求し、別版マニフェスト入りZIPを与える | 非成功を確認。既存 `1.2.3` の配置と版番号は維持 |
@@ -39,7 +40,7 @@
 - PRマージ前のため、`.github/workflows/release-cli.yml` をタグpushでGitHub Actions実行していない。GitHub Releaseの作成、生成ZIPの実際のasset名・内容、checksum添付は未確認。
 - 公開GitHub Releaseからの実ダウンロード、および通常ユーザー権限の別Windows環境での初回インストール・更新は未確認。今回のローカルZIP試験は配布元への認証ではなく、検証関数を置き換えたもの。
 - SHA-256はZIPと同じGitHub Release権限で公開される。署名、署名者鍵、独立したアテステーション検証は未実装。
-- 通常CIはPR後のworkflow実行結果をまだ持たない。本記録のローカルUnitTestsは通過している。
+- PR後の通常CI run #88 はWindows・Ubuntu両方成功した。タグpush時にReleaseを作るworkflow自体はまだ実行していない。
 - MCPによる固定パス解決・プロセス起動・応答変換はPhase 2対象のため未実装・未検証。Phase 3の既定E2E起動確認も未実施。
 
 これらは未確認事項として扱い、成功やPhase 3完了を意味しない。
