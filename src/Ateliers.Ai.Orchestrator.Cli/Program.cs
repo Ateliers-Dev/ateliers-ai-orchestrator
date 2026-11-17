@@ -16,6 +16,12 @@ internal static class OrchestratorCli
     /// <returns>成功時は0、入力不備は2、実行記録の失敗は3です。</returns>
     public static async Task<int> RunAsync(string[] args)
     {
+        if (args.Length == 1 && (args[0] is "--version" or "version"))
+        {
+            Console.WriteLine(GetVersion());
+            return 0;
+        }
+
         if (args.Length == 0 || args[0] is "--help" or "-h")
         {
             PrintUsage(Console.Out);
@@ -231,6 +237,17 @@ internal static class OrchestratorCli
         }
     }
 
+    /// <summary>実行アセンブリに埋め込まれたInformationalVersionを返します。</summary>
+    internal static string GetVersion()
+    {
+        var assembly = typeof(OrchestratorCli).Assembly;
+        return assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+            .FirstOrDefault()?.InformationalVersion
+            ?? assembly.GetName().Version?.ToString()
+            ?? "unknown";
+    }
+
     /// <summary>startコマンドの引数から実行記録の保存先を解決します。</summary>
     /// <param name="args">解析済みCLI引数です。</param>
     /// <param name="runsDirectory">実行記録の保存先となる絶対パスです。</param>
@@ -437,6 +454,7 @@ internal static class OrchestratorCli
             _ => "使用方法:"
         });
         if (command is not null) return;
+        writer.WriteLine("  Ateliers.Ai.Orchestrator.Cli --version");
         writer.WriteLine("  ateliers-orchestrator validate <contract.json>");
         writer.WriteLine("  ateliers-orchestrator verify-slack <slack.json> <slack.secrets.json>");
         writer.WriteLine("  ateliers-orchestrator start <contract.json> [--runs <ディレクトリ>]");
