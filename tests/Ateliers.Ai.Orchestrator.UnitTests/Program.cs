@@ -6,20 +6,57 @@ using Ateliers.Ai.Orchestrator.Core;
 using Ateliers.Ai.Orchestrator.Cli;
 using Ateliers.Slack;
 
-Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
-if (args.Length >= 1 && args[0] == "--fake-codex-fixture") return RunFakeCodexFixture(args);
-if (args.Length >= 1 && args[0] == "--external-process-fixture") return RunExternalProcessFixture(args);
-if (args.Length >= 1 && args[0] == "--lifecycle-writer-fixture") return RunLifecycleWriterFixture(args);
-if (args.Length > 1 || (args.Length == 1 && args[0] is not ("--unit" or "--git-integration")))
+internal static class FixtureHost
 {
-    Console.Error.WriteLine("使用方法: Ateliers.Ai.Orchestrator.Tests [--unit | --git-integration]");
-    return 2;
+    public static int Main(string[] args)
+    {
+        Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+        if (args.Length >= 1 && args[0] == "--fake-codex-fixture") return UnitTestCatalog.RunFakeCodexFixture(args);
+        if (args.Length >= 1 && args[0] == "--external-process-fixture") return UnitTestCatalog.RunExternalProcessFixture(args);
+        if (args.Length >= 1 && args[0] == "--lifecycle-writer-fixture") return UnitTestCatalog.RunLifecycleWriterFixture(args);
+        return 0;
+    }
 }
 
-var suite = new TestSuite();
-if (args.Length == 1 && args[0] == "--git-integration") AddGitIntegrationTests(suite);
-else AddUnitTests(suite);
-return suite.Run().ExitCode;
+internal static class UnitTestCatalog
+{
+    private static string FixtureHostPath => Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet";
+    private static string FixtureAssemblyPath => typeof(UnitTestCatalog).Assembly.Location;
+
+    private static string[] FixtureArguments(params string[] arguments) => [FixtureAssemblyPath, .. arguments];
+
+    private static ProcessStartInfo CreateFixtureProcess(params string[] arguments)
+    {
+        var start = new ProcessStartInfo(FixtureHostPath) { UseShellExecute = false, CreateNoWindow = true };
+        foreach (var argument in FixtureArguments(arguments)) start.ArgumentList.Add(argument);
+        return start;
+    }
+
+    public static IEnumerable<object[]> UnitTestCases => GetTestCases(AddUnitTests);
+    public static IEnumerable<object[]> GitIntegrationTestCases => GetTestCases(AddGitIntegrationTests);
+    public static void RunUnitTest(string name) => RunTest(AddUnitTests, name);
+    public static void RunGitIntegrationTest(string name) => RunTest(AddGitIntegrationTests, name);
+    public static void RunUnixOnlyTest(string name) => RunTest(AddUnixOnlyTests, name);
+
+    public static int RunFakeCodexFixture(string[] args) => FakeCodexFixture(args);
+    public static int RunExternalProcessFixture(string[] args) => ExternalProcessFixture(args);
+    public static int RunLifecycleWriterFixture(string[] args) => LifecycleWriterFixture(args);
+
+    private static IEnumerable<object[]> GetTestCases(Action<TestSuite> register)
+    {
+        var suite = new TestSuite();
+        register(suite);
+        return suite.Tests.Select(test => new object[] { test.Name }).ToArray();
+    }
+
+    private static void RunTest(Action<TestSuite> register, string name)
+    {
+        var suite = new TestSuite();
+        register(suite);
+        var test = suite.Tests.Single(item => item.Name == name);
+        try { test.Test(); }
+        catch (TestSkippedException exception) { throw Xunit.Sdk.SkipException.ForSkip(exception.Message); }
+    }
 
 static void AddGitIntegrationTests(TestSuite suite)
 {
@@ -98,12 +135,16 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("Codex子プロセスへSystemDriveを渡す", CodexChildInheritsSystemDrive);
     suite.Add("Codex実行環境のjunctionがcheckout内を指す場合は起動前に拒否する", CodexEnvironmentJunctionIntoCheckoutIsRejected);
     suite.Add("Fake Codexが生成した未追跡バイナリを差分固定時に拒否する", CodexRejectsUntrackedBinaryChanges);
-    suite.Add("PR不要のCodex実行では実行bit変更を許容する", CodexNonPullRequestAllowsExecutableModeChange);
-    suite.Add("PR必須Codex snapshotは新規実行ファイルのmodeを保持する", CodexPullRequestSnapshotPreservesNewExecutableMode);
     suite.Add("既存CODEX_HOMEと通常のユーザープロファイルを使える", CodexExistingProfilesAreAccepted);
     suite.Add("再実装プロンプトの契約範囲をFake Codexが読み取る", CodexFakeParsesScopeBeforeRevisionFinding);
     suite.Add("Codex Fakeプロセスで独立レビューまで縦断し固定hashを引き継ぐ", CodexFakeProcessesCompleteIndependentReviewSlice);
     suite.Add("Codex一回モードは成功・指摘・失敗を記録し追加起動せず人間判断待ちで止まる", CodexOneShotStopsWithoutRetries);
+}
+
+static void AddUnixOnlyTests(TestSuite suite)
+{
+    suite.Add("PR不要のCodex実行では実行bit変更を許容する", CodexNonPullRequestAllowsExecutableModeChange);
+    suite.Add("PR必須Codex snapshotは新規実行ファイルのmodeを保持する", CodexPullRequestSnapshotPreservesNewExecutableMode);
 }
 
 static void GitHubRemoteUrlRequiresExactHostAndPath()
@@ -389,8 +430,8 @@ static void CodexChildChangesAreSnapshottedFromLinkedWorktree()
     Directory.CreateDirectory(runDirectory);
     Directory.CreateDirectory(implementerHome);
     Directory.CreateDirectory(reviewerHome);
-    var options = new CodexCliRunnerOptions(Environment.ProcessPath!, implementerHome, reviewerHome,
-        ["--fake-codex-fixture", "environment-artifact"]);
+    var options = new CodexCliRunnerOptions(FixtureHostPath, implementerHome, reviewerHome,
+        FixtureArguments("--fake-codex-fixture", "environment-artifact"));
     var request = new AgentRequest("git-integration", "Implementer", SampleContract() with
         { WorkingDirectory = fixture.Worktree }, 1, RunDirectory: runDirectory, RemainingTime: TimeSpan.FromSeconds(10));
     var response = new CodexCliAgentRunner(options).Implement(request);
@@ -923,7 +964,7 @@ static void RequiredPullRequestWorkflowFailsClosedOnPrFailure()
     finally { Directory.Delete(root, true); }
 }
 
-static int RunFakeCodexFixture(string[] args)
+static int FakeCodexFixture(string[] args)
 {
     Console.InputEncoding = new System.Text.UTF8Encoding(false);
     Console.OutputEncoding = new System.Text.UTF8Encoding(false);
@@ -974,11 +1015,8 @@ static int RunFakeCodexFixture(string[] args)
     }
     if (mode == "timeout-with-child")
     {
-        var child = Process.Start(new ProcessStartInfo(Environment.ProcessPath!)
-        {
-            UseShellExecute = false,
-            ArgumentList = { "--fake-codex-fixture", "child-sleeper" }
-        }) ?? throw new InvalidOperationException("fixture child process did not start");
+        var child = Process.Start(CreateFixtureProcess("--fake-codex-fixture", "child-sleeper"))
+            ?? throw new InvalidOperationException("fixture child process did not start");
         Console.WriteLine($"{{\"type\":\"fixture.child\",\"process_id\":{child.Id}}}");
         Console.Out.Flush();
         Thread.Sleep(10_000);
@@ -1089,7 +1127,7 @@ static void CodexPullRequestSnapshotPreservesNewExecutableMode()
     }
 }
 
-static int RunExternalProcessFixture(string[] args)
+static int ExternalProcessFixture(string[] args)
 {
     var mode = args.Length > 1 ? args[1] : "success";
     if (mode == "sleep") { Thread.Sleep(5_000); return 0; }
@@ -1098,7 +1136,7 @@ static int RunExternalProcessFixture(string[] args)
     return mode == "fail" ? 7 : 0;
 }
 
-static int RunLifecycleWriterFixture(string[] args)
+static int LifecycleWriterFixture(string[] args)
 {
     if (args.Length != 4 || !int.TryParse(args[3], out var count) || count < 1) return 2;
     var writer = new JsonlLifecycleEventWriter(args[1]);
@@ -1217,13 +1255,14 @@ static void CodexNpmShimsReceiveUtf8Prompt()
         var (_, request, root) = CreateCodexFixture("success");
         using (root)
         {
-            var executable = Environment.ProcessPath!;
+            var executable = FixtureHostPath;
+            var assembly = FixtureAssemblyPath;
             var implementerHome = Path.Combine(root.Path, "implementer-profile");
             var reviewerHome = Path.Combine(root.Path, "reviewer-profile");
             var shimPath = Path.Combine(root.Path, $"codex{extension}");
             var shim = extension == ".cmd"
-                ? $"@echo off\r\n\"{executable}\" --fake-codex-fixture success %*\r\n"
-                : $"& '{executable.Replace("'", "''", StringComparison.Ordinal)}' --fake-codex-fixture success @args\r\n";
+                ? $"@echo off\r\n\"{executable}\" \"{assembly}\" --fake-codex-fixture success %*\r\n"
+                : $"& '{executable.Replace("'", "''", StringComparison.Ordinal)}' '{assembly.Replace("'", "''", StringComparison.Ordinal)}' --fake-codex-fixture success @args\r\n";
             File.WriteAllText(shimPath, shim, new UTF8Encoding(false));
             var options = new CodexCliRunnerOptions(shimPath, implementerHome, reviewerHome);
             var response = new CodexCliAgentRunner(options).Implement(request);
@@ -1592,8 +1631,8 @@ static void CodexEnvironmentJunctionIntoCheckoutIsRejected()
                 Directory.CreateSymbolicLink(link, target);
             }
 
-            var options = new CodexCliRunnerOptions(Environment.ProcessPath!, link, Path.Combine(root.Path, "reviewer-profile"),
-                ["--fake-codex-fixture", "success"]);
+            var options = new CodexCliRunnerOptions(FixtureHostPath, link, Path.Combine(root.Path, "reviewer-profile"),
+                FixtureArguments("--fake-codex-fixture", "success"));
             var linkedProfileRunner = new CodexCliAgentRunner(options);
             Assert.Throws<InvalidOperationException>(() => linkedProfileRunner.Implement(request));
         }
@@ -1625,8 +1664,8 @@ static void CodexExistingProfilesAreAccepted()
     Directory.CreateDirectory(existingHome);
     File.WriteAllText(Path.Combine(existingHome, "auth.json"), "fixture credentials are not used by this test");
 
-    var options = new CodexCliRunnerOptions(Environment.ProcessPath!, existingHome, existingHome,
-        ["--fake-codex-fixture", "success"]).Validate();
+    var options = new CodexCliRunnerOptions(FixtureHostPath, existingHome, existingHome,
+        FixtureArguments("--fake-codex-fixture", "success")).Validate();
     Assert.True(options is not null, "既存のCODEX_HOMEを使用できませんでした。");
 
     var original = Environment.GetEnvironmentVariable("CODEX_HOME");
@@ -1805,9 +1844,8 @@ static (CodexCliAgentRunner Runner, AgentRequest Request, TemporaryDirectory Roo
     RunGitFixture(workspace, "-c", "user.name=Orchestrator Test", "-c", "user.email=orchestrator-test@example.invalid", "commit", "-qm", "baseline");
     foreach (var home in new[] { implementerHome, reviewerHome })
         Directory.CreateDirectory(home);
-    var executable = Environment.ProcessPath!;
-    var options = new CodexCliRunnerOptions(executable, implementerHome, reviewerHome,
-        ["--fake-codex-fixture", scenario], killOverride, cancellationToken, beforeTimeoutForTesting);
+    var options = new CodexCliRunnerOptions(FixtureHostPath, implementerHome, reviewerHome,
+        FixtureArguments("--fake-codex-fixture", scenario), killOverride, cancellationToken, beforeTimeoutForTesting);
     var request = new AgentRequest("fixture-run", "Implementer", SampleContract() with
         { WorkingDirectory = workspace, Reporting = new ReportingRequirements { PullRequestExpected = false, FinalReportFormat = "markdown" } }, 1,
         RunDirectory: runDirectory, RemainingTime: timeout ?? TimeSpan.FromSeconds(5));
@@ -2189,15 +2227,10 @@ static void LifecycleJsonlSerializesConcurrentProcesses()
     const int eventsPerWriter = 50;
     var children = Enumerable.Range(0, writerCount).Select(index =>
     {
-        var start = new ProcessStartInfo(Environment.ProcessPath!)
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-        foreach (var argument in new[] { "--lifecycle-writer-fixture", logPath, $"writer-{index}", eventsPerWriter.ToString(System.Globalization.CultureInfo.InvariantCulture) })
-            start.ArgumentList.Add(argument);
+        var start = CreateFixtureProcess("--lifecycle-writer-fixture", logPath, $"writer-{index}",
+            eventsPerWriter.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        start.RedirectStandardOutput = true;
+        start.RedirectStandardError = true;
         return Process.Start(start) ?? throw new Exception("ライフサイクルwriter fixture processを開始できません。");
     }).ToArray();
 
@@ -2886,6 +2919,7 @@ static TaskContract SampleContract() => new()
 sealed class TestSuite
 {
     private readonly List<(string Name, Action Test)> tests = [];
+    public IReadOnlyList<(string Name, Action Test)> Tests => tests;
     /// <summary>名前付きの検証処理をテスト集へ追加します。</summary>
     /// <param name="name">結果表示に使う検証名です。</param>
     /// <param name="test">実行する検証処理です。</param>
@@ -2947,13 +2981,13 @@ static class Assert
     /// <param name="reason">検証できなかった理由です。</param>
     public static void Skip(string reason) => throw new TestSkippedException(reason);
     /// <summary>条件が真であることを確認します。</summary>
-    public static void True(bool condition, string message = "条件が真ではありません。") { if (!condition) throw new Exception(message); }
+    public static void True(bool condition, string? message = null) => Xunit.Assert.True(condition, message ?? "条件が真ではありません。");
     /// <summary>条件が偽であることを確認します。</summary>
     public static void False(bool condition, string message = "条件が偽ではありません。") => True(!condition, message);
     /// <summary>期待値と実際の値が等しいことを確認します。</summary>
     public static void Equal<T>(T expected, T actual, string? message = null)
     {
-        if (!EqualityComparer<T>.Default.Equals(expected, actual)) throw new Exception(message ?? $"期待値: {expected} / 実際: {actual}");
+        Xunit.Assert.True(EqualityComparer<T>.Default.Equals(expected, actual), message ?? $"期待値: {expected} / 実際: {actual}");
     }
     /// <summary>処理が指定した例外型を投げることを確認します。</summary>
     /// <typeparam name="TException">期待する例外型です。</typeparam>
@@ -2961,9 +2995,9 @@ static class Assert
     /// <returns>処理が投げた例外です。</returns>
     public static TException Throws<TException>(Action action) where TException : Exception
     {
-        try { action(); }
-        catch (TException exception) { return exception; }
-        throw new Exception($"{typeof(TException).Name} が発生しませんでした。");
+        var exception = Xunit.Record.Exception(action);
+        Xunit.Assert.True(exception is TException, $"{typeof(TException).Name} またはその派生型が発生しませんでした。");
+        return (TException)exception!;
     }
 }
 
@@ -3330,5 +3364,7 @@ sealed class FailingEventWriter(string failureEventType, bool failReadyTransitio
 
 sealed class DiagnosticTestFailure(string details) : Exception(details)
 {
+}
+
 }
 

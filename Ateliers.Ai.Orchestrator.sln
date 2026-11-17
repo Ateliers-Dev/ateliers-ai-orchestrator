@@ -11,7 +11,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ateliers.Ai.Orchestrator.Cl
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ateliers.Ai.Orchestrator.Tests", "tests\Ateliers.Ai.Orchestrator.Tests\Ateliers.Ai.Orchestrator.Tests.csproj", "{D3E9EF4E-186E-4BEE-B049-2FC776FB4F2C}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ateliers.Ai.Orchestrator.UnitTests", "tests\Ateliers.Ai.Orchestrator.UnitTests\Ateliers.Ai.Orchestrator.UnitTests.csproj", "{D3E9EF4E-186E-4BEE-B049-2FC776FB4F2C}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ateliers.Ai.Orchestrator.IntegrationTests", "tests\Ateliers.Ai.Orchestrator.IntegrationTests\Ateliers.Ai.Orchestrator.IntegrationTests.csproj", "{BC6C9A39-98A6-4B74-90C0-382A5E4936CE}"
 EndProject
