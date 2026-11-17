@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Ateliers.Ai.Orchestrator.Core;
 using Ateliers.Ai.Orchestrator.Cli;
+using Ateliers.Slack;
 
 return await OrchestratorCli.RunAsync(args);
 
@@ -21,20 +22,45 @@ internal static class OrchestratorCli
             return 0;
         }
 
-        if (args[0] is "validate" or "start" or "run" && args.Skip(1).Any(argument => argument is "--help" or "-h"))
+        if (args[0] is "validate" or "start" or "run" or "verify-slack" && args.Skip(1).Any(argument => argument is "--help" or "-h"))
         {
             PrintUsage(Console.Out, args[0]);
             return 0;
         }
 
-        if (args.Length < 2 || args[0] is not ("validate" or "start" or "run") ||
+        if (args.Length < 2 || args[0] is not ("validate" or "start" or "run" or "verify-slack") ||
             (args[0] == "validate" && args.Length != 2) ||
+            (args[0] == "verify-slack" && args.Length != 3) ||
             (args[0] == "start" && args.Length is not (2 or 4)) ||
             (args[0] == "run" && (args.Length < 2 || args.Length % 2 != 0)))
         {
             Console.Error.WriteLine("コマンドまたは引数が不足しているか、不正です。");
             PrintUsage(Console.Error);
             return 2;
+        }
+
+        if (args[0] == "verify-slack")
+        {
+            if (!TryResolveFullPath(args[1], "Slack設定", out var slackConfigurationPath, out var slackPathError) ||
+                !TryResolveFullPath(args[2], "Slack secrets", out var slackSecretsPath, out slackPathError))
+            {
+                Console.Error.WriteLine(slackPathError);
+                return 2;
+            }
+
+            using var dispatcher = SlackLifecycleNotificationDispatcher.TryCreate(slackConfigurationPath, slackSecretsPath, out var warning);
+            if (dispatcher is null)
+            {
+                Console.Error.WriteLine(warning ?? "Slack設定を利用できません。");
+                return 3;
+            }
+            if (!await dispatcher.VerifyBotIdentitiesAsync())
+            {
+                Console.Error.WriteLine("Slack認証を照合できません。Bot ID不一致またはAPIエラーです。通知は送信していません。");
+                return 3;
+            }
+            Console.WriteLine("Slackの本番Bot認証と設定Bot IDを照合しました。通知は送信していません。");
+            return 0;
         }
 
         if (!TryResolveFullPath(args[1], "契約ファイル", out var contractPath, out var pathError))
@@ -62,7 +88,8 @@ internal static class OrchestratorCli
         if (args[0] == "run")
         {
             if (!TryParseRunOptions(args, out var scenario, out var runRoot, out var lifecycleLogPath, out var evidencePath, out var agentKind,
-                out var codexOptions, out var notificationsDisabled, out var useSlackTestChannel, out var optionError))
+                out var codexOptions, out var notificationsDisabled, out var useSlackTestChannel, out var slackConfigurationPath,
+                out var slackSecretsPath, out var optionError))
             {
                 Console.Error.WriteLine(optionError);
                 PrintUsage(Console.Error, "run");
@@ -91,7 +118,9 @@ internal static class OrchestratorCli
             {
                 Directory.CreateDirectory(fakeRunDirectory);
                 using var eventStore = JsonlRunEventStore.CreateNew(Path.Combine(fakeRunDirectory, "events.jsonl"), fakeRunId);
-                using var lifecycleWriter = new LifecycleNotificationEventWriter(lifecycleLogPath, notificationsDisabled, useSlackTestChannel);
+                using var lifecycleWriter = slackConfigurationPath is null
+                    ? new LifecycleNotificationEventWriter(lifecycleLogPath, notificationsDisabled, useSlackTestChannel)
+                    : new LifecycleNotificationEventWriter(lifecycleLogPath, notificationsDisabled, slackConfigurationPath, slackSecretsPath!);
                 IAgentRunner runner = agentKind == "codex" ? new CodexCliAgentRunner(codexOptions!) : new FakeAgentRunner(scenario);
                 using var publisher = agentKind == "codex" && contract.Reporting.PullRequestExpected
                     ? new GitHubWorkflowPublisher() : null;
@@ -227,7 +256,8 @@ internal static class OrchestratorCli
     /// <returns>すべての引数が認識できた場合はtrueです。</returns>
     private static bool TryParseRunOptions(string[] args, out FakeScenario scenario, out string runsDirectory,
         out string lifecycleLogPath, out string? evidencePath, out string agentKind, out CodexCliRunnerOptions? codexOptions,
-        out bool notificationsDisabled, out bool useSlackTestChannel, out string error)
+        out bool notificationsDisabled, out bool useSlackTestChannel, out string? slackConfigurationPath,
+        out string? slackSecretsPath, out string error)
     {
         scenario = FakeScenario.Success;
         runsDirectory = Path.GetFullPath(Path.Combine(".ateliers-orchestrator", "runs"));
@@ -237,6 +267,8 @@ internal static class OrchestratorCli
         codexOptions = null;
         notificationsDisabled = false;
         useSlackTestChannel = false;
+        slackConfigurationPath = null;
+        slackSecretsPath = null;
         error = string.Empty;
         var seen = new HashSet<string>(StringComparer.Ordinal);
         string? executable = null, implementerHome = null, reviewerHome = null;
@@ -294,10 +326,28 @@ internal static class OrchestratorCli
                     notificationsDisabled = args[index + 1] == "disabled";
                     useSlackTestChannel = args[index + 1] == "test";
                     break;
+                case "--slack-config":
+                    if (!TryResolveFullPath(args[index + 1], "--slack-config", out var configurationPath, out error)) return false;
+                    slackConfigurationPath = configurationPath;
+                    break;
+                case "--slack-secrets":
+                    if (!TryResolveFullPath(args[index + 1], "--slack-secrets", out var secretsPath, out error)) return false;
+                    slackSecretsPath = secretsPath;
+                    break;
                 default:
                     error = $"未対応のrunオプションです: {args[index]}";
                     return false;
             }
+        }
+        if ((slackConfigurationPath is null) != (slackSecretsPath is null))
+        {
+            error = "--slack-config と --slack-secrets は両方指定してください。";
+            return false;
+        }
+        if ((slackConfigurationPath is not null || slackSecretsPath is not null) && (notificationsDisabled || useSlackTestChannel))
+        {
+            error = "Slack設定パスを指定する場合、slack-notifications は auto にしてください。";
+            return false;
         }
         if (agentKind == "codex")
         {
@@ -381,14 +431,16 @@ internal static class OrchestratorCli
         writer.WriteLine(command switch
         {
             "validate" => "使用方法: ateliers-orchestrator validate <contract.json>",
+            "verify-slack" => "使用方法: ateliers-orchestrator verify-slack <slack.json> <slack.secrets.json>",
             "start" => "使用方法: ateliers-orchestrator start <contract.json> [--runs <ディレクトリ>]",
-            "run" => "使用方法: ateliers-orchestrator run <contract.json> [--agent fake|codex] [--scenario <FakeScenario>] [--codex-exe <絶対パス>] [--implementer-codex-home <絶対パス>] [--reviewer-codex-home <絶対パス>] [--runs <ディレクトリ>] [--lifecycle-log <JSONL>] [--review-evidence <証跡.json>] [--slack-notifications auto|disabled|test]",
+            "run" => "使用方法: ateliers-orchestrator run <contract.json> [--agent fake|codex] [--scenario <FakeScenario>] [--codex-exe <絶対パス>] [--implementer-codex-home <絶対パス>] [--reviewer-codex-home <絶対パス>] [--runs <ディレクトリ>] [--lifecycle-log <JSONL>] [--review-evidence <証跡.json>] [--slack-notifications auto|disabled|test] [--slack-config <JSON>] [--slack-secrets <JSON>]",
             _ => "使用方法:"
         });
         if (command is not null) return;
         writer.WriteLine("  ateliers-orchestrator validate <contract.json>");
+        writer.WriteLine("  ateliers-orchestrator verify-slack <slack.json> <slack.secrets.json>");
         writer.WriteLine("  ateliers-orchestrator start <contract.json> [--runs <ディレクトリ>]");
-        writer.WriteLine("  ateliers-orchestrator run <contract.json> [--agent fake|codex] [--scenario <FakeScenario>] [--codex-exe <絶対パス>] [--implementer-codex-home <絶対パス>] [--reviewer-codex-home <絶対パス>] [--runs <ディレクトリ>] [--lifecycle-log <JSONL>] [--review-evidence <証跡.json>] [--slack-notifications auto|disabled|test]");
+        writer.WriteLine("  ateliers-orchestrator run <contract.json> [--agent fake|codex] [--scenario <FakeScenario>] [--codex-exe <絶対パス>] [--implementer-codex-home <絶対パス>] [--reviewer-codex-home <絶対パス>] [--runs <ディレクトリ>] [--lifecycle-log <JSONL>] [--review-evidence <証跡.json>] [--slack-notifications auto|disabled|test] [--slack-config <JSON>] [--slack-secrets <JSON>]");
     }
 }
 

@@ -20,7 +20,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\e2e\run-codex-
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\e2e\run-codex-e2e.ps1 -ScenarioPath .\scripts\e2e\scenarios\testbed-review-cycle.json
 ~~~
 
-準備確認は本体のRelease build、Fake-only Unit tests、シナリオ対象GitHubリポジトリの認証・既定ブランチSHA・cleanな一時clone、生成した契約の現行CLI検証を行います。対象プロジェクト固有のbuildとベースラインチェックは、各シナリオ手順に従ってください。実Codexを起動しません。既存checkoutのファイルを変更したりstash/resetしたりしません。
+準備確認は本体のRelease build、シナリオ対象GitHubリポジトリの認証・既定ブランチSHA・cleanな一時clone、生成した契約の現行CLI検証を行います。単体テストは実行せず、E2Eの前提ゲートにも使いません。対象プロジェクト固有のbuildとベースラインチェックは、各シナリオ手順に従ってください。実Codexを起動しません。既存checkoutのファイルを変更したりstash/resetしたりしません。
 
 ## 実Codex実行
 
@@ -36,13 +36,21 @@ Codex CLIをPATHから解決できない環境では、絶対パスを指定で�
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\e2e\run-codex-e2e.ps1 -RunCodex -CodexExecutable 'C:\Tools\Codex\codex.exe'
 ~~~
 
-確認文は対象リポジトリ名を含みます。現在のTestbedシナリオでは次の文字列です。
+実行前に本番Slack設定を読み、通知先チャンネルIDを表示します。`config/slack.json` と `config/slack.secrets.json` が既定の場所にない場合は、両パスを `-SlackConfigurationPath` と `-SlackSecretsPath` で明示します。秘密ファイルの値は出力しません。設定がなければ通知を無効化せず停止します。確認文にはTestbedと本番通知先のチャンネルIDが含まれます。
 
-    RUN CODEX E2E FOR ATELIERS-DEV/ATELIERS-AI-ORCHESTRATOR-TESTBED WITH PUSH AND PR
+準備中に `verify-slack` を使って3つの本番Botの `auth.test` と設定済みBot IDを照合します。この確認は通知を投稿しません。さらにTestbed `main` のclean cloneで課題プロジェクトをRelease buildし、既知の `tabs and newlines` と `whitespace only` だけが失敗することをCodex起動前に確認します。基準状態が異なる場合は停止し、cloneと診断ログを保持します。
 
-実行は一意な一時cloneと専用作業ブランチを使います。PR作成、Reviewer結果コメント、head/base SHAの証跡が確認されても、自動マージはしません。シナリオ固有の後片付けや教材ブランチの扱いは各シナリオ手順に従ってください。
+現在のTestbedシナリオでは次の形です。
+
+    RUN CODEX E2E FOR ATELIERS-DEV/ATELIERS-AI-ORCHESTRATOR-TESTBED WITH PUSH AND PR AND SLACK TO <本番チャンネルID>
+
+実行時は `auto` で設定済みの本番通知先に送ります。Slack送信成功件数がない場合や送信失敗がある場合は、PR等の証跡があっても不合格です。E2E後にSlackでrun IDを含む通知を確認し、表示された確認文を入力します。到達確認を行えない場合は不合格として証跡を保持します。
+
+実行は一意な一時cloneと専用作業ブランチを使います。PR作成、Reviewer結果コメント、head/base SHA、GitHub上のPRがOPENでbaseがmainであること、Slack送信と人間による到達確認をすべて確認しない限り、合格を表示しません。自動マージはしません。PRは人間の確認後も開いたままにし、Testbed `main` へマージしません。
 
 Codex開始後の失敗、中断、証跡不一致では一時cloneと実行記録を保持します。GitHub上にpush済みブランチやPRが残った可能性がある場合、人間が状態を確認してください。正常終了した場合も記録は自動削除しません。
+
+Codex子プロセスには限定した環境変数だけを渡し、ユーザープロファイル・一時領域・.NET CLI homeを実行ごと・役割ごとに分離します。親のAPI秘密環境変数は引き継ぎません。`CODEX_HOME` は明示指定がなければ親環境の値（未設定ならユーザー既定）を使うため、開始前に表示される認証プロファイルを確認してください。Codex認証ファイルは自動複製しません。E2EではGitHubから取得したfreshなclean cloneを使用し、利用者のcheckout内の `clean` 状態やファイルを変更しません。
 
 ## 外部コマンドとPowerShell
 
