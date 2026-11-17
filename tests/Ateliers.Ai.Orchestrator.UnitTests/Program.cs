@@ -20,10 +20,21 @@ internal static class FixtureHost
 
 internal static class UnitTestCatalog
 {
-    private static string FixtureHostPath => Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet";
+    private static string FixtureHostPath
+    {
+        get
+        {
+            var assemblyPath = FixtureAssemblyPath;
+            var fileName = Path.GetFileNameWithoutExtension(assemblyPath) + (OperatingSystem.IsWindows() ? ".exe" : string.Empty);
+            var fixtureHostPath = Path.Combine(Path.GetDirectoryName(assemblyPath)!, fileName);
+            return File.Exists(fixtureHostPath)
+                ? fixtureHostPath
+                : throw new FileNotFoundException("UnitTests apphost が見つかりません。", fixtureHostPath);
+        }
+    }
     private static string FixtureAssemblyPath => typeof(UnitTestCatalog).Assembly.Location;
 
-    private static string[] FixtureArguments(params string[] arguments) => [FixtureAssemblyPath, .. arguments];
+    private static string[] FixtureArguments(params string[] arguments) => arguments;
 
     private static ProcessStartInfo CreateFixtureProcess(params string[] arguments)
     {
@@ -1256,13 +1267,12 @@ static void CodexNpmShimsReceiveUtf8Prompt()
         using (root)
         {
             var executable = FixtureHostPath;
-            var assembly = FixtureAssemblyPath;
             var implementerHome = Path.Combine(root.Path, "implementer-profile");
             var reviewerHome = Path.Combine(root.Path, "reviewer-profile");
             var shimPath = Path.Combine(root.Path, $"codex{extension}");
             var shim = extension == ".cmd"
-                ? $"@echo off\r\n\"{executable}\" \"{assembly}\" --fake-codex-fixture success %*\r\n"
-                : $"& '{executable.Replace("'", "''", StringComparison.Ordinal)}' '{assembly.Replace("'", "''", StringComparison.Ordinal)}' --fake-codex-fixture success @args\r\n";
+                ? $"@echo off\r\n\"{executable}\" --fake-codex-fixture success %*\r\n"
+                : $"& '{executable.Replace("'", "''", StringComparison.Ordinal)}' --fake-codex-fixture success @args\r\n";
             File.WriteAllText(shimPath, shim, new UTF8Encoding(false));
             var options = new CodexCliRunnerOptions(shimPath, implementerHome, reviewerHome);
             var response = new CodexCliAgentRunner(options).Implement(request);
