@@ -1,6 +1,6 @@
 # E2E実行基盤
 
-`scripts/e2e/run-codex-e2e.ps1` は、シナリオ契約を受け取り、契約の `inputs[].reference` にある単一のGitHubリポジトリを使って準備確認または明示許可後のCodex実行を行います。共通の起動、終了コード確認、一時領域、公開操作ゲート、証跡確認を担当します。シナリオ固有の作業範囲と受入条件は `scripts/e2e/scenarios/` の契約ファイルに置きます。
+`scripts/e2e/run-codex-e2e.ps1` は、シナリオ契約を受け取り、契約の `inputs[].reference` にある単一のGitHubリポジトリを使って準備確認または明示許可後のCodex実行を行います。参照形式はGitHubのblob、issue、commitなどを使えますが、全参照は `https://github.com/{owner}/{repo}/...` 形式で同じリポジトリを指す必要があります。形式が不明、または複数のリポジトリを指す場合は停止します。共通の起動、終了コード確認、一時領域、公開操作ゲート、証跡確認を担当します。シナリオ固有の作業範囲と受入条件は `scripts/e2e/scenarios/` の契約ファイルに置きます。
 
 現在のシナリオは [Testbedレビューサイクル](testbed-review-cycle.md) です。新しいシナリオを追加するときは、既存CLIが受け付ける契約スキーマに沿ったJSONを追加し、実行基盤の共通動作を重複して定義しないでください。
 
@@ -36,9 +36,9 @@ Codex CLIをPATHから解決できない環境では、絶対パスを指定で�
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\e2e\run-codex-e2e.ps1 -RunCodex -CodexExecutable 'C:\Tools\Codex\codex.exe'
 ~~~
 
-確認文:
+確認文は対象リポジトリ名を含みます。現在のTestbedシナリオでは次の文字列です。
 
-    RUN CODEX E2E WITH PUSH AND PR
+    RUN CODEX E2E FOR ATELIERS-DEV/ATELIERS-AI-ORCHESTRATOR-TESTBED WITH PUSH AND PR
 
 実行は一意な一時cloneと専用作業ブランチを使います。PR作成、Reviewer結果コメント、head/base SHAの証跡が確認されても、自動マージはしません。シナリオ固有の後片付けや教材ブランチの扱いは各シナリオ手順に従ってください。
 
@@ -46,4 +46,4 @@ Codex開始後の失敗、中断、証跡不一致では一時cloneと実行記�
 
 ## 外部コマンドとPowerShell
 
-Git、dotnet、gh、CLIは終了コードで成否を判定します。ネイティブコマンドの標準エラーは診断出力として扱い、Windows PowerShell 5.1の `$ErrorActionPreference = 'Stop'` により終了コード確認前に停止しないよう、呼び出し単位でネイティブ出力を捕捉します。
+Git、dotnet、gh、CLIは終了コードで成否を判定します。ネイティブコマンドの標準エラーは診断出力として扱い、Windows PowerShell 5.1の `$ErrorActionPreference = 'Stop'` により終了コード確認前に停止しないよう、呼び出し単位でネイティブ出力を捕捉します。機械処理に使うブランチ名やSHAの戻り値には標準出力だけを返します。

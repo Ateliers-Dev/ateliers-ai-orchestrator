@@ -25,7 +25,7 @@ Fake-only Unit testsには、FakeScenario.RevisionThenSuccessを使い、指摘�
 
 準備確認を成功させた後、 [E2E実行基盤の実行手順](README.md#実codex実行) に従って実行します。確認文は次のとおりです。
 
-    RUN CODEX E2E WITH PUSH AND PR
+    RUN CODEX E2E FOR ATELIERS-DEV/ATELIERS-AI-ORCHESTRATOR-TESTBED WITH PUSH AND PR
 
 実行ではCodex CLIとモデルを使い、cleanな一時cloneに対して契約を実行します。契約のPR必須経路は、専用ブランチへのcommit/push、固定差分の独立Reviewer確認、必要な場合のみの上限内修正と再レビュー、PR作成、head/base SHA検証、Reviewer結果コメントの投稿と再読込照合、NeedsHumanInputでの停止を行います。pushやPR作成に失敗した場合、成功扱いにはしません。
 

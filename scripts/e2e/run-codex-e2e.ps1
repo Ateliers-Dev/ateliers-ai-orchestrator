@@ -29,19 +29,72 @@ function Invoke-CheckedNative {
 
 function Get-CheckedNativeOutput {
     param([string]$FilePath, [string[]]$Arguments, [string]$Description)
-    $savedErrorActionPreference = $ErrorActionPreference
+    $standardErrorPath = [System.IO.Path]::GetTempFileName()
     try {
-        $ErrorActionPreference = 'Continue'
-        $nativeOutput = @(& $FilePath @Arguments 2>&1)
-        $nativeExitCode = $LASTEXITCODE
+        $savedErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $nativeOutput = @(& $FilePath @Arguments 2> $standardErrorPath)
+            $nativeExitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $savedErrorActionPreference
+        }
+
+        $standardOutputText = (($nativeOutput | ForEach-Object { "$($_)" }) -join [Environment]::NewLine).Trim()
+        $standardErrorContent = Get-Content -LiteralPath $standardErrorPath -Raw -ErrorAction SilentlyContinue
+        $standardErrorText = if ($null -eq $standardErrorContent) { '' } else { $standardErrorContent.Trim() }
+        if (-not [string]::IsNullOrWhiteSpace($standardErrorText)) {
+            [Console]::Error.WriteLine($standardErrorText)
+        }
+        if ($nativeExitCode -ne 0) {
+            $diagnosticParts = @()
+            if (-not [string]::IsNullOrWhiteSpace($standardOutputText)) { $diagnosticParts += $standardOutputText }
+            if (-not [string]::IsNullOrWhiteSpace($standardErrorText)) { $diagnosticParts += $standardErrorText }
+            $diagnostics = $diagnosticParts -join ' '
+            if ($diagnostics.Length -gt 4000) { $diagnostics = $diagnostics.Substring(0, 4000) }
+            throw ("{0} に失敗しました (exit code {1}): {2}" -f $Description, $nativeExitCode, $diagnostics)
+        }
+        return $standardOutputText
     }
     finally {
-        $ErrorActionPreference = $savedErrorActionPreference
+        Remove-Item -LiteralPath $standardErrorPath -Force -ErrorAction SilentlyContinue
     }
-    if ($nativeExitCode -ne 0) {
-        throw ("{0} に失敗しました (exit code {1}): {2}" -f $Description, $nativeExitCode, ($nativeOutput -join ' '))
+}
+
+function Get-ScenarioRepositoryIdentity {
+    param($Contract)
+    if ($null -eq $Contract.inputs -or @($Contract.inputs).Count -eq 0) {
+        throw 'E2Eシナリオにinputs.referenceがありません。'
     }
-    return (($nativeOutput -join [Environment]::NewLine).Trim())
+
+    $repositoryIdentities = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($item in $Contract.inputs) {
+        $referenceText = [string]$item.reference
+        $referenceUri = $null
+        if ([string]::IsNullOrWhiteSpace($referenceText) -or
+            -not [System.Uri]::TryCreate($referenceText, [System.UriKind]::Absolute, [ref]$referenceUri) -or
+            $referenceUri.Scheme -cne 'https' -or $referenceUri.Host -cne 'github.com' -or
+            -not [string]::IsNullOrEmpty($referenceUri.UserInfo)) {
+            throw ("E2Eシナリオの参照URLはすべてhttps://github.comのリポジトリURLである必要があります: {0}" -f $referenceText)
+        }
+        $referenceSegments = @($referenceUri.AbsolutePath.Trim('/').Split('/'))
+        if ($referenceSegments.Count -lt 2 -or
+            $referenceSegments[0] -notmatch '^[A-Za-z0-9][A-Za-z0-9-]*$' -or
+            $referenceSegments[1] -notmatch '^[A-Za-z0-9_.-]+$') {
+            throw ("E2Eシナリオの参照URLからGitHubリポジトリを特定できません: {0}" -f $referenceText)
+        }
+        $repositoryIdentity = ('{0}/{1}' -f $referenceSegments[0], $referenceSegments[1]).ToLowerInvariant()
+        if ($repositoryIdentity.EndsWith('.git', [System.StringComparison]::OrdinalIgnoreCase)) {
+            $repositoryIdentity = $repositoryIdentity.Substring(0, $repositoryIdentity.Length - 4)
+        }
+        if (-not $repositoryIdentities.Contains($repositoryIdentity)) { $repositoryIdentities.Add($repositoryIdentity) }
+    }
+
+    if ($repositoryIdentities.Count -ne 1) {
+        throw ("E2Eシナリオのinputs.referenceは単一のGitHubリポジトリを指す必要があります: {0}" -f ($repositoryIdentities -join ', '))
+    }
+    return $repositoryIdentities[0]
 }
 
 function Invoke-FakeUnitTests {
@@ -110,17 +163,7 @@ try {
     if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot '.git'))) { throw ("Gitリポジトリが見つかりません: {0}" -f $repositoryRoot) }
     if (-not (Test-Path -LiteralPath $scenarioPath -PathType Leaf)) { throw ("E2Eシナリオが見つかりません: {0}" -f $scenarioPath) }
     $contract = Get-Content -LiteralPath $scenarioPath -Raw | ConvertFrom-Json
-    $repositoryIdentities = New-Object 'System.Collections.Generic.List[string]'
-    foreach ($item in $contract.inputs) {
-        if ($item.reference -match '^https://github\.com/([^/]+/[^/]+)/blob/[^/]+/') {
-            $repositoryIdentity = [string]$Matches[1]
-            if (-not $repositoryIdentities.Contains($repositoryIdentity)) { $repositoryIdentities.Add($repositoryIdentity) }
-        }
-    }
-    if ($repositoryIdentities.Count -ne 1) {
-        throw 'E2Eシナリオのinputs.referenceから単一のGitHubリポジトリを特定できません。'
-    }
-    $repositoryIdentity = $repositoryIdentities[0]
+    $repositoryIdentity = Get-ScenarioRepositoryIdentity -Contract $contract
     $repositoryUrl = 'https://github.com/' + $repositoryIdentity + '.git'
 
     $gitCommand = Get-Command 'git.exe' -ErrorAction SilentlyContinue
@@ -195,9 +238,11 @@ try {
     }
 
     Write-Host ''
+    Write-Host ("対象GitHubリポジトリ: {0}" -f $repositoryIdentity)
     Write-Host 'この公開リポジトリで実Codexを実行します。Codex利用枠・費用が発生する場合があり、成功時は一意なブランチへのpush、公開PR、Reviewer結果コメントの投稿が行われます。自動マージはしません。失敗後にpush済みブランチやPRが残った場合は保持し、人間が確認して扱います。'
-    $confirmation = Read-Host '続行するには RUN CODEX E2E WITH PUSH AND PR と入力してください'
-    if ($confirmation -cne 'RUN CODEX E2E WITH PUSH AND PR') { throw '確認文字列が一致しないため、実Codex E2Eを開始しませんでした。' }
+    $confirmationText = 'RUN CODEX E2E FOR {0} WITH PUSH AND PR' -f $repositoryIdentity.ToUpperInvariant()
+    $confirmation = Read-Host ("続行するには {0} と入力してください" -f $confirmationText)
+    if ($confirmation -cne $confirmationText) { throw '確認文字列が一致しないため、実Codex E2Eを開始しませんでした。' }
 
     $runRoot = Join-Path $executionRoot 'runs'
     $lifecycleLog = Join-Path $executionRoot 'lifecycle.jsonl'
