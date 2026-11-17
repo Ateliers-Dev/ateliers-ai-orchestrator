@@ -13,7 +13,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Ateliers.Ai.Orchestrator.Tests" />
+    <InternalsVisibleTo Include="Ateliers.Ai.Orchestrator.UnitTests" />
   </ItemGroup>
 
 </Project>

@@ -55,7 +55,7 @@
 - システムに影響しない文書のみの修正では、テストは実施しなくてよい。
 - テストの対象プロジェクト、起動方法、事前の restore/build は `.github/workflows/` の該当する GitHub Actions 定義を確認し、それに合わせる。
 
-### Fake-only Unit tests（`--unit`）
+### Fake-only Unit tests（xUnit）
 
 - CI と同じテストをローカルで実行する場合は、まずリポジトリルートで次の restore と Release build を行う。
 
@@ -64,14 +64,12 @@
   dotnet build Ateliers.Ai.Orchestrator.sln --configuration Release --no-restore
   ```
 
-- Fake-only Unit tests の標準起動コマンドは次のとおり。対象プロジェクトは `tests/Ateliers.Ai.Orchestrator.Tests/Ateliers.Ai.Orchestrator.Tests.csproj`。
+- Fake-only Unit tests の標準起動コマンドは次のとおり。対象プロジェクトは `tests/Ateliers.Ai.Orchestrator.UnitTests/Ateliers.Ai.Orchestrator.UnitTests.csproj`。
 
   ```powershell
-  dotnet run --project tests/Ateliers.Ai.Orchestrator.Tests/Ateliers.Ai.Orchestrator.Tests.csproj --configuration Release --no-build --no-restore -- --unit
+  dotnet test tests/Ateliers.Ai.Orchestrator.UnitTests/Ateliers.Ai.Orchestrator.UnitTests.csproj --configuration Release --no-build --no-restore --filter Category=Unit
   ```
 
-- この起動方法は `.github/workflows/unit-tests.yml` の Windows・Ubuntu 両方の CI と一致する。Windows CI は同じ `dotnet run` を PowerShell から実行し、Unix mode に依存する所定のスキップ2件だけを許容して、その他の失敗がないことを確認する。
-- `dotnet <Tests.dll> --unit` によるテスト DLL の直接起動は、標準の検証方法にしない。Windows ローカルでは、変更前の main と PR #56 の両方で DLL 直接起動時に同一の16件が失敗し、CI と同じ `dotnet run` では両方とも失敗0件だった。PR #56 の GitHub Actions は Windows・Ubuntu とも成功した。
-- `Environment.ProcessPath` と子プロセス fixture の起動方法がこの差に関係する可能性が高いが、原因機序は未確定である。仮説を確定原因として報告しない。
-- 標準コマンドで失敗した場合も、環境問題と断定しない。実行コマンド、コミット、OS、.NET SDK/runtime、失敗したテスト、成功・スキップ・失敗件数を記録し、テスト対象と起動条件を CI や変更前の状態と比較して調査する。原因が確認できなければ未確定として指示者に報告する。
+- GitHub Actions は同じ Unit カテゴリだけを実行し、`Integration` カテゴリとCodex連携用IntegrationTestsプロジェクトは実行しない。
+- WindowsではUnix modeに依存する所定のテストがxUnitのSkipとして表示される。失敗とSkipを分けて報告する。
 - 他のテストプロジェクトやテスト種別には、このコマンドを流用せず、該当する CI 定義を確認する。

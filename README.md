@@ -111,13 +111,13 @@ JSONLには実行ID、連番、UTC時刻、役割、イベント種別、状態�
 
 ## テスト
 
-依存パッケージを使わないUnit/Fakeテストを実行します。Coreの状態・保存処理とCLI/Codex実行境界をFakeで検証し、実モデルや外部実行基盤を起動しません。
+Unit/FakeテストはxUnitを使用し、Coreの状態・保存処理とCLI/Codex実行境界をFakeで検証します。通常の実行で実モデルや外部実行基盤は起動しません。
 
 ```powershell
-dotnet run --project tests/Ateliers.Ai.Orchestrator.Tests
+dotnet test tests/Ateliers.Ai.Orchestrator.UnitTests/Ateliers.Ai.Orchestrator.UnitTests.csproj --configuration Release
 ```
 
-実Codex連携を一時Gitリポジトリで確認するIntegrationTestsは、xUnitプロジェクトです。通常の `dotnet test`、Visual Studioの全件実行、通常CIでは実Codex連携テストがSkipされ、モデル通信は起動しません。Issue #20のUnit/Fakeテストプロジェクトは今回変更していません。
+実Codex連携を一時Gitリポジトリで確認するIntegrationTestsは、別のxUnitプロジェクトです。通常の `dotnet test`、Visual Studioの全件実行、通常CIでは実Codex連携テストがSkipされ、モデル通信は起動しません。Unit/Fakeテストは通常CIで実行し、ローカル実Gitテストは同じ UnitTests プロジェクト内の `Integration` カテゴリとして分けています。
 
 明示的に実Codexを使う場合は、Windowsのユーザー環境変数に `ATELIERS_RUN_CODEX_INTEGRATION_TESTS=1` と `ATELIERS_CODEX_CLI_PATH=C:\絶対パス\codex.exe` を設定し、認証済みCodex CLIが使える環境でテストを実行してください。Visual Studioを使う場合は、環境変数を設定してからVisual Studioを起動し直し、テストエクスプローラーから個別テストまたは全件を実行します。環境変数が設定されていなければテストはSkipされます。
 
