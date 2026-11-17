@@ -4,14 +4,68 @@ param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-try {
-    if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA) -or -not [System.IO.Path]::IsPathRooted($env:LOCALAPPDATA)) {
-        throw 'LOCALAPPDATA が設定されていないか、絶対パスではありません。Windowsのユーザー環境で実行してください。'
+function Assert-NoReparsePointsInPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $currentPath = [System.IO.Path]::GetFullPath($Path)
+    while (-not [string]::IsNullOrWhiteSpace($currentPath)) {
+        if (Test-Path -LiteralPath $currentPath) {
+            $item = Get-Item -LiteralPath $currentPath -Force -ErrorAction Stop
+            if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "安全のため、reparse pointを含むパスは使用できません: $currentPath"
+            }
+        }
+
+        $parentPath = [System.IO.Path]::GetDirectoryName($currentPath)
+        if ([string]::IsNullOrWhiteSpace($parentPath) -or [string]::Equals($parentPath, $currentPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+            break
+        }
+        $currentPath = $parentPath
     }
+}
+
+function Assert-NoReparsePointsInTree {
+    param([Parameter(Mandatory = $true)][string]$Directory)
+
+    $directories = [System.Collections.Generic.Stack[string]]::new()
+    $directories.Push($Directory)
+    while ($directories.Count -gt 0) {
+        $currentDirectory = $directories.Pop()
+        foreach ($entryPath in [System.IO.Directory]::EnumerateFileSystemEntries($currentDirectory)) {
+            $attributes = [System.IO.File]::GetAttributes($entryPath)
+            if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "安全のため、MCP配置先にreparse pointが含まれる場合は削除しません: $entryPath"
+            }
+            if (($attributes -band [System.IO.FileAttributes]::Directory) -ne 0) {
+                $directories.Push($entryPath)
+            }
+        }
+    }
+}
+
+try {
+    $localAppDataValue = $env:LOCALAPPDATA
+    $isFullyQualifiedLocalAppData = $localAppDataValue -match '^[A-Za-z]:\\' -or $localAppDataValue -match '^\\\\[^\\]+\\[^\\]+(?:\\|$)'
+    if ([string]::IsNullOrWhiteSpace($localAppDataValue) -or -not $isFullyQualifiedLocalAppData) {
+        throw 'LOCALAPPDATA は完全修飾されたドライブパスまたはUNCパスで指定してください。'
+    }
+
+    $localAppDataDirectory = [System.IO.Path]::GetFullPath($localAppDataValue)
+    $localAppDataRoot = [System.IO.Path]::GetPathRoot($localAppDataDirectory)
+    if ([string]::Equals($localAppDataDirectory.TrimEnd('\'), $localAppDataRoot.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "LOCALAPPDATA にドライブまたは共有のルートは指定できません: $localAppDataDirectory"
+    }
+    if (-not $localAppDataDirectory.TrimEnd('\').EndsWith('\AppData\Local', [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "LOCALAPPDATA はユーザーの AppData\Local ディレクトリを指定してください: $localAppDataDirectory"
+    }
+    if (-not (Test-Path -LiteralPath $localAppDataDirectory -PathType Container)) {
+        throw "LOCALAPPDATA ディレクトリが存在しません: $localAppDataDirectory"
+    }
+    Assert-NoReparsePointsInPath -Path $localAppDataDirectory
 
     $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
     $projectPath = Join-Path $repositoryRoot 'src\Ateliers.Ai.Orchestrator.Mcp\Ateliers.Ai.Orchestrator.Mcp.csproj'
-    $installDirectory = [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Ateliers-Dev\Ai-Orchestrator\Mcp'))
+    $installDirectory = [System.IO.Path]::GetFullPath((Join-Path $localAppDataDirectory 'Ateliers-Dev\Ai-Orchestrator\Mcp'))
     if (-not (Test-Path -LiteralPath $projectPath -PathType Leaf)) {
         throw "MCPプロジェクトがありません。リポジトリ内のスクリプトから実行してください: $projectPath"
     }
@@ -32,10 +86,12 @@ try {
         }
 
         if (Test-Path -LiteralPath $installDirectory) {
+            Assert-NoReparsePointsInPath -Path $installDirectory
             $installItem = Get-Item -LiteralPath $installDirectory -Force
             if (-not $installItem.PSIsContainer) {
                 throw "MCP配置先がディレクトリではありません。既存ファイルは削除していません: $installDirectory"
             }
+            Assert-NoReparsePointsInTree -Directory $installDirectory
 
             try {
                 Remove-Item -LiteralPath $installDirectory -Recurse -Force -ErrorAction Stop

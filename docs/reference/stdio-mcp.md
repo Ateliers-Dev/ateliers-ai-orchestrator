@@ -79,7 +79,7 @@ Phase 2対応CLIを含むReleaseが別途発行・配置されるまでは、現
 & .\scripts\mcp-installer\Install-AteliersAiOrchestratorMcp.ps1
 ```
 
-配置先は`%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\Mcp`です。スクリプトはRelease / `win-x64` / self-contained / single-fileで一時ディレクトリへpublishし、成功とMCP実行ファイルを確認した後、既存のMCP配置先ディレクトリだけを全削除して成果物一式をコピーします。publish失敗時は既存配置を変更しません。MCPなどの実行中プロセスがファイルを使用して削除できない場合は失敗を表示します。その場合は該当プロセスを終了してから再実行してください。
+配置先は`%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\Mcp`です。`LOCALAPPDATA`には存在するユーザーの`AppData\Local`ディレクトリを指定してください。スクリプトはRelease / `win-x64` / self-contained / single-fileで一時ディレクトリへpublishし、成功とMCP実行ファイルを確認した後、既存のMCP配置先ディレクトリだけを全削除して成果物一式をコピーします。配置先、その祖先、配置先内にreparse point（junction、symlink等）がある場合は安全のため削除を中止します。publish失敗時は既存配置を変更しません。MCPなどの実行中プロセスがファイルを使用して削除できない場合は失敗を表示します。その場合は該当プロセスを終了してから再実行してください。
 
 この暫定スクリプトは開発・検証用です。再実行するとMCP配置先のファイル一式を全削除・全置換します。配置先に手動で置いたファイルも削除されます。差分比較、バックアップ、ロールバック、バージョン管理、自動更新、正式Release配布は行いません。CLIはPhase 1 installerで別途明示的に配置し、`Install-AteliersAiOrchestrator.ps1 -Verify`で確認してください。CLIの`bin`、runデータ、その他のフォルダはこのスクリプトの対象ではありません。
 
