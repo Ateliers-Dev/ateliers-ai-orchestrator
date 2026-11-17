@@ -1,10 +1,54 @@
 using System.Text.Json;
+using Ateliers.Ai.Orchestrator.Core;
 using Xunit;
 
 namespace Ateliers.Ai.Orchestrator.UnitTests;
 
 public sealed class StdioJsonCliTests
 {
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task Cli_publishes_contract_schema_guide_and_capability_flags()
+    {
+        var originalOut = Console.Out;
+        using var output = new StringWriter();
+        try
+        {
+            Console.SetOut(output);
+            Assert.Equal(0, await OrchestratorCli.RunAsync(["--contract-schema"]));
+            using var schema = JsonDocument.Parse(output.ToString());
+            var root = schema.RootElement;
+            Assert.Equal("object", root.GetProperty("type").GetString());
+            Assert.False(root.GetProperty("additionalProperties").GetBoolean());
+            Assert.Equal(1, root.GetProperty("properties").GetProperty("schemaVersion").GetProperty("const").GetInt32());
+            Assert.Contains("taskId", root.GetProperty("required").EnumerateArray().Select(item => item.GetString()));
+            Assert.Equal("^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$", root.GetProperty("properties").GetProperty("taskId").GetProperty("pattern").GetString());
+            Assert.NotNull(root.GetProperty("properties").GetProperty("workingDirectory").GetProperty("pattern").GetString());
+            Assert.Equal(1, root.GetProperty("$defs").GetProperty("executionLimits").GetProperty("properties").GetProperty("maxDurationMinutes").GetProperty("minimum").GetInt32());
+            Assert.Equal(int.MaxValue, root.GetProperty("$defs").GetProperty("executionLimits").GetProperty("properties").GetProperty("maxDurationMinutes").GetProperty("maximum").GetInt32());
+            AssertSchemaMatches(typeof(TaskContract), root);
+            AssertSchemaMatches(typeof(TaskScope), root.GetProperty("$defs").GetProperty("taskScope"));
+            AssertSchemaMatches(typeof(TaskInput), root.GetProperty("$defs").GetProperty("taskInput"));
+            AssertSchemaMatches(typeof(ExecutionLimits), root.GetProperty("$defs").GetProperty("executionLimits"));
+            AssertSchemaMatches(typeof(ReportingRequirements), root.GetProperty("$defs").GetProperty("reportingRequirements"));
+            Assert.Equal("markdown", TaskContractReader.ReadJson(ValidExampleContract()).Contract?.Reporting.FinalReportFormat);
+
+            output.GetStringBuilder().Clear();
+            Assert.Equal(0, await OrchestratorCli.RunAsync(["--orchestration-guide"]));
+            Assert.Contains("workingDirectory", output.ToString());
+            Assert.Equal(OrchestrationGuide.GetText(), output.ToString());
+
+            output.GetStringBuilder().Clear();
+            Assert.Equal(0, await OrchestratorCli.RunAsync(["--capabilities"]));
+            using var capabilities = JsonDocument.Parse(output.ToString());
+            var commands = capabilities.RootElement.GetProperty("commands");
+            Assert.True(commands.GetProperty("runStdinJson").GetBoolean());
+            Assert.True(commands.GetProperty("contractSchema").GetBoolean());
+            Assert.True(commands.GetProperty("orchestrationGuide").GetBoolean());
+        }
+        finally { Console.SetOut(originalOut); }
+    }
+
     [Fact]
     [Trait("Category", "Unit")]
     public async Task Run_stdin_json_writes_a_single_structured_success_response()
@@ -82,5 +126,26 @@ public sealed class StdioJsonCliTests
         node["workingDirectory"] = workingDirectory;
         node["reporting"]!["pullRequestExpected"] = false;
         return node.ToJsonString();
+    }
+
+    private static string ValidExampleContract()
+    {
+        var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "examples", "task-contract.json"));
+        var node = System.Text.Json.Nodes.JsonNode.Parse(source)!;
+        node["workingDirectory"] = Directory.GetCurrentDirectory();
+        return node.ToJsonString();
+    }
+
+    private static void AssertSchemaMatches(Type contractType, JsonElement schema)
+    {
+        var names = contractType.GetProperties()
+            .Select(property => System.Text.Json.JsonNamingPolicy.CamelCase.ConvertName(property.Name))
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+        var schemaNames = schema.GetProperty("properties").EnumerateObject().Select(property => property.Name)
+            .OrderBy(name => name, StringComparer.Ordinal).ToArray();
+        Assert.Equal(names, schemaNames);
+        Assert.Equal(names, schema.GetProperty("required").EnumerateArray().Select(item => item.GetString()!).OrderBy(name => name, StringComparer.Ordinal).ToArray());
+        Assert.False(schema.GetProperty("additionalProperties").GetBoolean());
     }
 }

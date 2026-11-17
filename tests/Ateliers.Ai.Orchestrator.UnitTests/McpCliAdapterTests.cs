@@ -124,6 +124,69 @@ public sealed class McpCliAdapterTests
         }
     }
 
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task Adapter_forwards_contract_schema_and_guide_from_installed_cli()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        var root = Path.Combine(Path.GetTempPath(), "ateliers-mcp-resource-test-" + Guid.NewGuid().ToString("N"));
+        var originalLocalAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        try
+        {
+            var bin = Path.Combine(root, "Ateliers-Dev", "Ai-Orchestrator", "bin");
+            Directory.CreateDirectory(bin);
+            var cliOutput = Path.GetDirectoryName(typeof(OrchestratorCli).Assembly.Location)!;
+            foreach (var pattern in new[] { "Ateliers.Ai.Orchestrator.Cli.*", "Ateliers.Ai.Orchestrator.Core.*", "Ateliers.Slack.*" })
+                foreach (var source in Directory.GetFiles(cliOutput, pattern))
+                    File.Copy(source, Path.Combine(bin, Path.GetFileName(source)), overwrite: true);
+            await File.WriteAllTextAsync(Path.Combine(bin, "install.json"), JsonSerializer.Serialize(new
+            {
+                version = OrchestratorCli.GetVersion().Split('+', 2)[0],
+                runtimeIdentifier = "win-x64"
+            }));
+            Environment.SetEnvironmentVariable("LOCALAPPDATA", root);
+
+            var service = new CliExecutionService();
+            var schemaText = await service.GetCliResourceAsync("--contract-schema", "contractSchema", CancellationToken.None);
+            using var schema = JsonDocument.Parse(schemaText);
+            Assert.Equal("object", schema.RootElement.GetProperty("type").GetString());
+            var guide = await service.GetCliResourceAsync("--orchestration-guide", "orchestrationGuide", CancellationToken.None);
+            Assert.True(guide.Contains("workingDirectory", StringComparison.Ordinal), guide);
+            Assert.DoesNotContain("\"error\"", guide);
+            var cancelled = await service.GetCliResourceAsync("--contract-schema", "contractSchema", new CancellationToken(canceled: true));
+            using var cancellationError = JsonDocument.Parse(cancelled);
+            Assert.Equal("cli_cancelled", cancellationError.RootElement.GetProperty("error").GetProperty("code").GetString());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LOCALAPPDATA", originalLocalAppData);
+            DeleteTemporaryDirectory(root);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task Adapter_returns_structured_error_when_cli_is_missing()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var root = Path.Combine(Path.GetTempPath(), "ateliers-mcp-no-cli-test-" + Guid.NewGuid().ToString("N"));
+        var originalLocalAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        try
+        {
+            Directory.CreateDirectory(root);
+            Environment.SetEnvironmentVariable("LOCALAPPDATA", root);
+            var response = await new CliExecutionService().GetCliResourceAsync("--contract-schema", "contractSchema", CancellationToken.None);
+            using var error = JsonDocument.Parse(response);
+            Assert.Equal("cli_not_installed", error.RootElement.GetProperty("error").GetProperty("code").GetString());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LOCALAPPDATA", originalLocalAppData);
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static string CreateContract(string workingDirectory) => JsonSerializer.Serialize(new
     {
         schemaVersion = 1,

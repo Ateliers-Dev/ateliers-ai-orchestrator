@@ -1,6 +1,6 @@
 # STDIO MCP 技術仕様・導入手順
 
-> 対象: `src/Ateliers.Ai.Orchestrator.Mcp`、CLI `--capabilities` と `run --stdin-json`。Phase 2の実装仕様。
+> 対象: `src/Ateliers.Ai.Orchestrator.Mcp`、CLI Schema/guide公開、`--capabilities` と `run --stdin-json`。Phase 2の実装仕様。
 
 ## 1. 責務と構成
 
@@ -13,7 +13,7 @@ flowchart LR
   C --> E[既存Orchestrator Core]
 ```
 
-MCP専用プロジェクトは公式C# MCP SDKを使い、`run_orchestration`を登録する。Tool引数は既存TaskContractの`contract` JSON objectと実行設定で、契約の作成・意味解釈・検証はしない。MCPはCLI起動とプロトコル応答の受け渡しだけを担い、Coreや業務ロジックを参照・複製しない。
+MCP専用プロジェクトは公式C# MCP SDKを使い、`get_contract_schema`、`get_orchestration_guide`、`run_orchestration`を登録する。SchemaとガイドはCore管理のCLI出力をMCPが薄く中継し、MCPに固定コピーを持たない。親AIへ初回ガイド確認・契約生成前Schema取得を勧めるが、実際の参照保証はない。
 
 CLIは `LOCALAPPDATA` 下の固定実行ファイルと `install.json` を検査し、毎回`--capabilities`でprotocol v1の対応を確認する。非対応CLIは実行しない。契約を一時ファイルへ書かず、CLIの標準入力へUTF-8で渡す。既存の`run <contract.json>`、`start`、`validate`等は維持する。
 
@@ -26,8 +26,14 @@ CLIは `LOCALAPPDATA` 下の固定実行ファイルと `install.json` を検査
 ```
 
 ```json
-{"cliVersion":"0.0.2","protocolVersion":1,"commands":{"runStdinJson":true}}
+{"cliVersion":"0.0.2","protocolVersion":1,"commands":{"runStdinJson":true,"contractSchema":true,"orchestrationGuide":true}}
 ```
+
+### 契約Schemaとガイド
+
+`--contract-schema` はCoreのTaskContract型とvalidator規則に沿ったJSON Schema Draft 2020-12をstdoutへ出します。`--orchestration-guide` はCore assemblyに埋め込んだ単一Markdownガイドをstdoutへ出します。MCPの対応Toolは各CLI出力を中継し、旧CLI・不在・起動失敗・不正出力・timeout・キャンセル時に構造化エラーを返します。組込みSchema/ガイドへフォールバックしません。
+
+Schemaで表現するrequired、型、配列、整数範囲、taskId pattern、report formatはCore validatorと整合させます。作業ディレクトリの存在と `scope.included` / `scope.excluded` の重複はSchemaで検証できず、ガイドで説明します。Core validatorが最終判定です。
 
 ### 実行
 
@@ -100,7 +106,7 @@ Codex CLI実行パスは`codex.exe`またはnpm配置の`codex.ps1`/`codex.cmd`�
 
 ### 起動と動作確認
 
-Codexを再起動するとMCPサーバーが子プロセスとして起動する。stdio protocolの疎通確認用PoCは再試験しない。ツール一覧に`run_orchestration`があること、CLIをインストールして`--capabilities`がprotocol v1を返すことを確認する。テストは`agent="fake"`で隔離した一時workingDirectoryを指定し、結果JSONの`ok`, `state`, `runDirectory`と出力先の記録を照合する。Codexの通常実行は本番契約とCodex CLI設定が必要。
+Codexを再起動するとMCPサーバーが子プロセスとして起動する。ツール一覧の3 Tool、Schema/ガイド取得、CLIの能力情報を確認する。追加の実機統合ゲートでは、AIが実際にガイドを読みSchemaを取得する順序、生成契約のCLI validator適合、`agent="fake"`でのMCP→CLI実行結果を観測する。ログはTool名と順序を中心に残し、契約本文を不要に重複保存しない。Codexの通常実行は本番契約とCodex CLI設定が必要。
 
 PowerShellの実行ポリシーでスクリプト起動が制限される環境では、リポジトリルートで次のように現在のプロセスに限りBypassを指定できます。
 
@@ -110,4 +116,4 @@ powershell -ExecutionPolicy Bypass -File .\scripts\mcp-installer\Install-Atelier
 
 PowerShell 7を使用する場合は`powershell`を`pwsh`に置き換えてください。
 
-未配置CLIでは`cli_not_installed`、起動失敗や能力照会timeoutでは`cli_start_failed`または`cli_capabilities_timeout`、旧CLIまたは非対応protocolでは`unsupported_cli_protocol`、Codex path未設定では`codex_cli_not_configured`を返す。MCP/CLI更新により別のコンポーネントを自動更新しない。
+未配置CLIでは`cli_not_installed`、起動失敗や能力照会timeoutでは`cli_start_failed`または`cli_capabilities_timeout`、Schema/guide取得timeoutでは`cli_resource_timeout`、キャンセルでは`cli_cancelled`、旧CLIまたは非対応protocolでは`unsupported_cli_protocol`、不正出力では`invalid_cli_response`、Codex path未設定では`codex_cli_not_configured`を返す。MCP/CLI更新により別のコンポーネントを自動更新しない。

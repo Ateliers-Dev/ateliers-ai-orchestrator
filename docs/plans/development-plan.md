@@ -31,11 +31,11 @@ Phase 1の完了条件は、UnitTests成功、Release publish/package定義の�
 
 ### Phase 2 — STDIO MCP
 
-MCPは既存契約スキーマをCLIへ中継する薄いアダプターとする。親AI側で契約を作成する。CLIのオーケストレーション機能をMCPに複製しない。MCPのSTDIO起動経路はAteliersの他ツールでWork/Codexから検証済みであり、この計画で再検証作業を設けない。
+MCPは既存契約スキーマをCLIへ中継する薄いアダプターとする。初期要求には契約構造を親AIへ渡す手段がなく、親AIが `run_orchestration(JsonElement contract)` 用の契約を生成できなかった。この失敗を「要件定義不足、ツールを使うための必須実装の考慮漏れ」と記録し、承認済み要求変更として単一Toolから `get_contract_schema` / `get_orchestration_guide` / `run_orchestration` の3 Toolへ変更する。Schema・ガイドはCoreで単一管理し、CLI公開コマンドと薄いMCP中継を設ける。CLIのオーケストレーション機能をMCPに複製しない。
 
-MCPは分離可能な専用プロジェクトとし、公式C# MCP SDKを使って単一の `run_orchestration` toolを提供する。CLIとの内部境界は契約JSON stdin、結果JSON stdout、診断stderrとする。CLI既存のファイル引数経路は維持する。プロトコル版、終了コード、機密情報を含む環境変数の継承、応答長、キャンセルを明記する。STDIO MCP transport自体のPoCは再実施しない。
+MCPは分離可能な専用プロジェクトとし、公式C# MCP SDKを使う。CLIとの内部境界は契約JSON stdin、結果JSON stdout、診断stderrとする。CLI既存のファイル引数経路は維持する。
 
-Phase 2の完了は、MCPからプロトコル互換性を確認したインストール済み固定バージョンCLIへの契約受け渡し・起動・結果返却を検証し、CLI不在・非互換・CLIエラー・キャンセルを成功と誤認しないことの確認とする。技術仕様、導入・登録・起動手順、実測検証記録を作成する。Phase 3の既定スクリプト起動確認はPhase 2の完了条件に含めない。
+Phase 2では、CLI能力情報にSchema・ガイド取得対応を追加し、古いCLI・不在・起動失敗・不正出力・timeout・キャンセルを構造化エラーとする。Schemaやガイドの組込みフォールバックは行わない。追加ゲートでは、AIが実際にガイドを参照し、契約生成前にSchemaを取得する順序、生成契約のCLI validator適合、MCP→CLI実行を同一の実機試行で観測する。ガイド/Schema取得可否とAI実際の参照は別評価とし、ログはTool名・順序中心で契約本文を不要に複製しない。実機証跡が揃うまでPhase 2統合ゲートはInconclusiveとする。Phase 3の既定スクリプト起動確認は含めない。
 
 ### Phase 3 — 既定スクリプトでCLIが起動することの確認
 

@@ -19,7 +19,10 @@ internal sealed class CliExecutionService
         if (!TryResolveInstallation(out var cliPath, out var installedVersion, out var resolutionError))
             return Error("cli_not_installed", resolutionError!);
 
-        var capability = await SupportsStdinProtocolAsync(cliPath, installedVersion, cancellationToken);
+        (bool Supported, string? ErrorCode) capability;
+        try { capability = await SupportsStdinProtocolAsync(cliPath, installedVersion, cancellationToken); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        { return Error("cli_cancelled", "MCP呼び出しがキャンセルされました。CLI処理の最終状態は不明です。"); }
         if (!capability.Supported)
             return capability.ErrorCode is null
                 ? Error("unsupported_cli_protocol", $"インストール済みCLI {installedVersion} はrun stdin JSON protocol v{CliProtocolVersion}に対応していません。対応するRelease CLIを明示的にインストールしてください。")
@@ -86,7 +89,7 @@ internal sealed class CliExecutionService
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            throw;
+            return Error("cli_cancelled", "MCP呼び出しがキャンセルされました。CLI処理の最終状態は不明です。");
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException)
         {
@@ -95,6 +98,79 @@ internal sealed class CliExecutionService
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or Win32Exception)
         {
             return Error("cli_execution_failed", $"Release CLIを実行できませんでした ({exception.GetType().Name})。");
+        }
+    }
+
+    public async Task<string> GetCliResourceAsync(string option, string capability, CancellationToken cancellationToken)
+    {
+        if (!TryResolveInstallation(out var cliPath, out _, out var resolutionError))
+            return Error("cli_not_installed", resolutionError!);
+
+        try
+        {
+            var start = new ProcessStartInfo(cliPath)
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+            start.ArgumentList.Add(option);
+            SetChildEnvironment(start);
+            using var process = new Process { StartInfo = start };
+            if (!process.Start()) return Error("cli_start_failed", "Release CLIプロセスを開始できませんでした。");
+
+            var outputTask = ReadBoundedAsync(process.StandardOutput.BaseStream, MaxCapturedResponseBytes);
+            var errorTask = ReadBoundedAsync(process.StandardError.BaseStream, 4096);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(5));
+            try { await process.WaitForExitAsync(timeout.Token); }
+            catch (OperationCanceledException)
+            {
+                try { process.Kill(entireProcessTree: true); }
+                catch (Exception exception) when (exception is InvalidOperationException or Win32Exception or NotSupportedException) { }
+                try { await process.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10)); }
+                catch (TimeoutException) { }
+                return Error(cancellationToken.IsCancellationRequested ? "cli_cancelled" : "cli_resource_timeout",
+                    cancellationToken.IsCancellationRequested ? "CLI情報の取得がキャンセルされました。" : "CLI情報の取得がタイムアウトしました。");
+            }
+
+            var captured = await outputTask;
+            _ = await errorTask;
+            if (process.ExitCode != 0)
+                return Error("unsupported_cli_protocol", $"インストール済みCLIは {capability} の取得に対応していません。対応するRelease CLIを明示的にインストールしてください。");
+            if (captured.Truncated)
+                return Error("invalid_cli_response", "CLI情報が上限を超えたため破棄しました。");
+
+            var content = Encoding.UTF8.GetString(captured.Bytes);
+            if (string.IsNullOrWhiteSpace(content))
+                return Error("invalid_cli_response", "CLIが空の情報を返しました。");
+            if (option == "--contract-schema")
+            {
+                using var json = JsonDocument.Parse(content);
+                var root = json.RootElement;
+                if (root.ValueKind != JsonValueKind.Object ||
+                    !root.TryGetProperty("$schema", out var schemaUri) || schemaUri.ValueKind != JsonValueKind.String ||
+                    !root.TryGetProperty("properties", out var properties) || properties.ValueKind != JsonValueKind.Object ||
+                    !root.TryGetProperty("required", out var required) || required.ValueKind != JsonValueKind.Array ||
+                    !root.TryGetProperty("$defs", out var definitions) || definitions.ValueKind != JsonValueKind.Object)
+                    return Error("invalid_cli_response", "CLIがSchemaオブジェクトを返しませんでした。");
+            }
+            else if (option == "--orchestration-guide" && !content.TrimStart('\uFEFF', '\r', '\n', ' ').StartsWith("# オーケストレーション契約ガイド", StringComparison.Ordinal))
+                return Error("invalid_cli_response", "CLIがオーケストレーションガイドを返しませんでした。");
+            return content;
+        }
+        catch (OperationCanceledException)
+        {
+            return Error("cli_cancelled", "CLI情報の取得がキャンセルされました。");
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException)
+        {
+            return Error("invalid_cli_response", "CLIが有効な情報を返しませんでした。");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or Win32Exception)
+        {
+            return Error("cli_start_failed", $"Release CLIを起動できませんでした ({exception.GetType().Name})。");
         }
     }
 
