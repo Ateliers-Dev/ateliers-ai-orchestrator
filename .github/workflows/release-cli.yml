@@ -1,0 +1,71 @@
+name: Release CLI
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  publish-windows-cli:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore solution
+        run: dotnet restore Ateliers.Ai.Orchestrator.sln
+
+      - name: Build solution
+        run: dotnet build Ateliers.Ai.Orchestrator.sln --configuration Release --no-restore
+
+      - name: Run Fake-only unit tests
+        run: dotnet test tests/Ateliers.Ai.Orchestrator.UnitTests/Ateliers.Ai.Orchestrator.UnitTests.csproj --configuration Release --no-build --no-restore --filter Category=Unit
+
+      - name: Publish self-contained Windows x64 CLI
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          dotnet publish src/Ateliers.Ai.Orchestrator.Cli/Ateliers.Ai.Orchestrator.Cli.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            --output artifacts/publish `
+            -p:Version=$version `
+            -p:InformationalVersion=$version `
+            -p:IncludeSourceRevisionInInformationalVersion=false
+          if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed: $LASTEXITCODE" }
+          $manifest = [ordered]@{
+            version = $version
+            runtimeIdentifier = 'win-x64'
+            commit = $env:GITHUB_SHA
+          }
+          $manifest | ConvertTo-Json | Set-Content artifacts/publish/release-manifest.json -Encoding utf8
+
+      - name: Package and checksum
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          $name = "Ateliers.Ai.Orchestrator-win-x64-v$version.zip"
+          Compress-Archive -Path artifacts/publish/* -DestinationPath "artifacts/$name"
+          $hash = (Get-FileHash "artifacts/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $name" | Set-Content "artifacts/$name.sha256" -Encoding ascii
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          $name = "Ateliers.Ai.Orchestrator-win-x64-v$version.zip"
+          gh release create $env:GITHUB_REF_NAME "artifacts/$name" "artifacts/$name.sha256" `
+            --title $env:GITHUB_REF_NAME `
+            --generate-notes
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed: $LASTEXITCODE" }

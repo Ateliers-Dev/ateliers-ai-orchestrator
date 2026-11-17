@@ -39,7 +39,24 @@ Phase 1のCore、CLI、通常テストはDockerプロジェクトに依存しま
 
 追加NuGetパッケージはありません。
 
+## Windows x64 Release CLIのインストール
+
+PowerShellでバージョンを明示してRelease CLIをユーザー単位でインストールします。管理者権限は不要です。
+
+```powershell
+& .\scripts\cli-installer\Install-AteliersAiOrchestrator.ps1 -Version 1.2.3
+& .\scripts\cli-installer\Install-AteliersAiOrchestrator.ps1 -Verify
+```
+
+配置先は `%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\bin\Ateliers.Ai.Orchestrator.Cli.exe` です。初回インストール・更新のたびに対象バージョンを明示します。インストーラーはGitHub Release ZIPのSHA-256とCLIのバージョン表示を確認します。インストール、更新、配置確認の挙動と制約は[CLIインストーラー技術仕様](docs/reference/cli-installer.md)を参照してください。
+
 ## 使い方
+
+実行中CLIのバージョンを表示します。
+
+```powershell
+dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- --version
+```
 
 契約を検証します。
 

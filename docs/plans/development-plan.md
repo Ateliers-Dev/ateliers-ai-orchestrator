@@ -1,18 +1,18 @@
-# Ateliers AI Orchestrator 開発計画書（案）
+# Ateliers AI Orchestrator 開発計画書
 
-> 状態: ユーザー確認用の草案。承認前のため、実装着手の基準としては未確定。
+> 状態: 承認済み。Phase 1 の実装・進行基準。
 
 ## 1. 目的と進め方
 
 本書は、Ateliers AI Orchestrator の立て直しにおける作業順序、各Phaseの完了条件、進行・変更管理を固定する。Phaseごとの完了判定は、そのPhaseに記載した条件だけに基づく。レビュー合格、Phase完了、最終リリース受入はそれぞれ別に記録する。
 
-実装開始前に本計画書、[CLIインストーラー要求仕様](../requirements/cli-installer-requirements.md)、[MCP要求仕様](../requirements/mcp-requirements.md)をユーザーが確認する。仕様や完了条件は、ユーザーが変更を承認し記録するまで変更しない。
+本計画書とPhase 1対象の[CLIインストーラー要求仕様](../requirements/cli-installer-requirements.md)はユーザー確認済みである。MCPを実装するPhase 2では、[MCP要求仕様](../requirements/mcp-requirements.md)をその着手基準として扱う。仕様や完了条件は、ユーザーが変更を承認し記録するまで変更しない。
 
 ## 2. 固定フェーズ
 
 | Phase | 作業 | 完了条件 |
 |---|---|---|
-| 0 | Issue #20: UnitTests の xUnit 移行 | Issue #20 の完了条件を満たし、既存Unit/Fakeテストが xUnit と `dotnet test` で実行・成功する。通常CIが実Codexを起動しないことを確認する。 |
+| 0 | Issue #20: UnitTests の xUnit 移行 | **完了** — Issue #20 を満たし、xUnit移行・Test Explorer確認・CI確認を経てPR #67 と Issue #20 を完了した。 |
 | 1 | Release CLI インストーラー | 承認済み要求仕様に従い、選択した固定バージョンのRelease CLIをユーザー単位のインストール先へ配置し、起動対象バージョンを一意に識別できる。 |
 | 2 | STDIO MCP | 承認済み要求仕様に従い、既存契約スキーマを受け取り、インストール済み固定バージョンCLIに渡して実行し、結果または失敗を呼び出し元へ返せる。 |
 | 3 | 既定スクリプトによるRelease CLI起動確認 | `run-codex-e2e.ps1` を追加パラメータなしで実行し、Release CLIプロセスが起動したことを証跡で確認する。CLIの正常終了やオーケストレーション完了は要求しない。 |
@@ -25,7 +25,9 @@ Phase 0の完了記録には、変更された対象、`dotnet test` の結果�
 
 ### Phase 1 — CLIインストーラー
 
-固定バージョンRelease CLIをユーザー単位でインストールする。インストール先は `%LOCALAPPDATA%` 配下を第一候補とし、詳細は要求仕様の確認時に確定する。MCPが実行するCLIバージョンと実体のパスが曖昧にならないようにする。Phase 1の完了は配置・識別の確認であり、MCP実装やE2E受入を含めない。
+固定バージョンRelease CLIをユーザー単位でインストールする。確定パスは `%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\bin\Ateliers.Ai.Orchestrator.Cli.exe`。対象は Windows x64 自己完結型ZIPで、指定バージョンのGitHub Releaseから取得する。タグ起動のRelease workflowでZIP、マニフェスト、SHA-256ファイルを作成・添付する。インストーラーはSHA-256、対象RID、マニフェスト、CLI自身の `--version` を検証してから `bin` を切り替え、`-Verify` で実体とバージョンを再確認する。
+
+Phase 1の完了条件は、UnitTests成功、Release publish/package定義の確認、指定バージョンを使う配置手順と更新/再実行の確認、配置・バージョン確認と失敗ケースの検証、およびこの実装を根拠とした技術仕様書の作成とする。Phase 1の検証記録（[CLIインストーラー検証記録](phase1-cli-installer-verification.md)）では、実行したコマンド、件数、失敗・Skip、未確認事項を区別する。MCP実装、Phase 3 E2E、オーケストレーション機能追加は含めない。
 
 ### Phase 2 — STDIO MCP
 
@@ -69,6 +71,6 @@ PhaseのPassを記録した後、後続Phaseや最終リリースの条件を遡
 
 最終受入の判定で用いる「正常終了」の具体的な観測基準、必要な実行証跡、環境条件は、最終受入を実施する前に別途明記し、ユーザー確認を得る。受入の結果もPass、Fail、Inconclusiveのいずれかで証跡とともに記録する。
 
-## 6. 今回の文書作成の範囲
+## 6. Phase 1 技術仕様
 
-本案の作成は実装承認を意味しない。ユーザー確認後、必要な修正を文書へ反映してからPhase 0の着手判断を行う。今回、コード、インストーラー、MCP、GitHub Issue、PR、マージは変更しない。
+Phase 1の実装詳細は[CLIインストーラー技術仕様](../reference/cli-installer.md)に記録する。技術仕様は実装された動作・制約を記述し、後続Phaseの計画機能を実装済みと扱わない。
