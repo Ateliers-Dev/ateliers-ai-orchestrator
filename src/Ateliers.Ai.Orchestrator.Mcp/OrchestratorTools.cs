@@ -6,7 +6,7 @@ using ModelContextProtocol.Server;
 internal sealed class OrchestratorTools(CliExecutionService cli)
 {
     [McpServerTool(Name = "run_orchestration")]
-    [Description("Ateliers AI Orchestratorの契約を実行します。初回は get_orchestration_guide を呼び、契約を生成する前に get_contract_schema を取得してください。ツール参照を省略しないでください。contractはTaskContract v1のJSONオブジェクトです。失敗時も構造化JSONを返します。")]
+    [Description("Ateliers AI Orchestratorの契約を実行します。初回は get_orchestration_guide の参照を推奨し、契約を生成する前に get_contract_schema を使うとTaskContract v1に適合しやすくなります。contractはTaskContract v1のJSONオブジェクトです。失敗時も構造化JSONを返します。")]
     public Task<string> RunOrchestrationAsync(
         [Description("既存TaskContractスキーマのJSONオブジェクト。MCPは内容を再設計せずCLIへ渡します。")]
         JsonElement contract,
@@ -29,3 +29,4 @@ internal sealed class OrchestratorTools(CliExecutionService cli)
     public Task<string> GetOrchestrationGuideAsync(CancellationToken cancellationToken = default) =>
         cli.GetCliResourceAsync("--orchestration-guide", "orchestrationGuide", cancellationToken);
 }
+
