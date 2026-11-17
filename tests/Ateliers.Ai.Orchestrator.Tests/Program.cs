@@ -126,6 +126,7 @@ static void CliHelpAndInputErrorsAreSeparated()
                  {
                      Array.Empty<string>(), ["--help"], ["-h"],
                      ["validate", "--help"], ["validate", "-h"],
+                     ["verify-slack", "--help"], ["verify-slack", "-h"],
                      ["start", "--help"], ["start", "-h"],
                      ["run", "--help"], ["run", "-h"]
                  })
