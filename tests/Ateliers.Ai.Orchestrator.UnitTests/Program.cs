@@ -14,6 +14,44 @@ internal static class FixtureHost
         if (args.Length >= 1 && args[0] == "--fake-codex-fixture") return UnitTestCatalog.RunFakeCodexFixture(args);
         if (args.Length >= 1 && args[0] == "--external-process-fixture") return UnitTestCatalog.RunExternalProcessFixture(args);
         if (args.Length >= 1 && args[0] == "--lifecycle-writer-fixture") return UnitTestCatalog.RunLifecycleWriterFixture(args);
+        if (args.Length == 1 && args[0] == "--mcp-cli-adapter-fixture")
+        {
+            var tests = new Ateliers.Ai.Orchestrator.UnitTests.McpCliAdapterTests();
+            tests.Adapter_passes_contract_to_cli_stdin_and_returns_cli_json().GetAwaiter().GetResult();
+            tests.Adapter_forwards_contract_schema_and_guide_from_installed_cli().GetAwaiter().GetResult();
+            tests.Adapter_returns_structured_error_when_cli_is_missing().GetAwaiter().GetResult();
+            tests.Adapter_rejects_multibyte_cli_output_over_64_KiB().GetAwaiter().GetResult();
+            tests.Adapter_starts_npm_cmd_codex_shim_and_returns_structured_result_on_windows().GetAwaiter().GetResult();
+            UnitTestCatalog.RunUnitTest("npm codex.cmdとcodex.ps1 shimで日本語プロンプトを渡す");
+            Console.WriteLine("MCP-to-CLI fixture passed.");
+            return 0;
+        }
+        if (args.Length == 1 && args[0] == "--stdio-json-cli-fixture")
+        {
+            var tests = new Ateliers.Ai.Orchestrator.UnitTests.StdioJsonCliTests();
+            tests.Cli_publishes_contract_schema_guide_and_capability_flags().GetAwaiter().GetResult();
+            tests.Run_stdin_json_writes_a_single_structured_success_response().GetAwaiter().GetResult();
+            tests.Run_stdin_json_reports_invalid_contract_as_json_and_exit_two().GetAwaiter().GetResult();
+            Console.WriteLine("CLI stdin JSON fixtures passed.");
+            return 0;
+        }
+        if (args.Length == 1 && args[0] == "--run-unit-cases-direct")
+        {
+            var names = UnitTestCatalog.UnitTestCases.Select(testCase => (string)testCase[0]).ToArray();
+            var skipped = 0;
+            foreach (var name in names)
+            {
+                try { UnitTestCatalog.RunUnitTest(name); }
+                catch (Xunit.Sdk.SkipException) { skipped++; }
+                catch (Exception exception)
+                {
+                    Console.Error.WriteLine($"Unit case failed: {name}: {exception.GetType().Name}: {exception.Message}");
+                    return 1;
+                }
+            }
+            Console.WriteLine($"Existing Fake-only unit cases passed: {names.Length - skipped}; skipped: {skipped}.");
+            return 0;
+        }
         return 0;
     }
 }

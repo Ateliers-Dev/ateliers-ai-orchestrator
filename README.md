@@ -50,6 +50,10 @@ PowerShellでバージョンを明示してRelease CLIをユーザー単位で�
 
 配置先は `%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\bin\Ateliers.Ai.Orchestrator.Cli.exe` です。初回インストール・更新のたびに対象バージョンを明示します。インストーラーはGitHub Release ZIPのSHA-256とCLIのバージョン表示を確認します。インストール、更新、配置確認の挙動と制約は[CLIインストーラー技術仕様](docs/reference/cli-installer.md)を参照してください。
 
+## STDIO MCP
+
+Phase 2のMCPは既存TaskContractを固定インストールCLIへ渡す薄いアダプターです。CLI stdin/stdoutプロトコル、Codexへの登録手順、機密情報・キャンセルの扱いは[STDIO MCP技術仕様](docs/reference/stdio-mcp.md)、要求は[MCP要求仕様](docs/requirements/mcp-requirements.md)、実測結果は[Phase 2検証記録](docs/plans/phase2-stdio-mcp-verification.md)を参照してください。現在のCLI v0.0.1は新protocolに未対応です。対応CLI Releaseの発行・配置後にMCPを実行できます。
+
 ## 使い方
 
 実行中CLIのバージョンを表示します。

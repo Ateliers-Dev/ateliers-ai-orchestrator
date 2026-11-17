@@ -1,12 +1,12 @@
 # Ateliers AI Orchestrator 開発計画書
 
-> 状態: 承認済み。Phase 1 の実装・進行基準。
+> 状態: 承認済み。Phase 1の完了とPhase 2の実装・進行基準。
 
 ## 1. 目的と進め方
 
 本書は、Ateliers AI Orchestrator の立て直しにおける作業順序、各Phaseの完了条件、進行・変更管理を固定する。Phaseごとの完了判定は、そのPhaseに記載した条件だけに基づく。レビュー合格、Phase完了、最終リリース受入はそれぞれ別に記録する。
 
-本計画書とPhase 1対象の[CLIインストーラー要求仕様](../requirements/cli-installer-requirements.md)はユーザー確認済みである。MCPを実装するPhase 2では、[MCP要求仕様](../requirements/mcp-requirements.md)をその着手基準として扱う。仕様や完了条件は、ユーザーが変更を承認し記録するまで変更しない。
+本計画書とPhase 1対象の[CLIインストーラー要求仕様](../requirements/cli-installer-requirements.md)はユーザー確認済みである。Phase 2では[承認済みMCP要求仕様](../requirements/mcp-requirements.md)を着手・実装基準とする。長期的な拡張性・保守性を優先し、現行CLIに不足する構造化プロセス境界は後方互換を保って拡張する。仕様や完了条件は、ユーザーが変更を承認し記録するまで変更しない。
 
 ## 2. 固定フェーズ
 
@@ -31,9 +31,11 @@ Phase 1の完了条件は、UnitTests成功、Release publish/package定義の�
 
 ### Phase 2 — STDIO MCP
 
-MCPは既存契約スキーマをCLIへ中継する薄いアダプターとする。親AI側で契約を作成する。CLIのオーケストレーション機能をMCPに複製しない。MCPのSTDIO起動経路はAteliersの他ツールでWork/Codexから検証済みであり、この計画で再検証作業を設けない。
+MCPは既存契約スキーマをCLIへ中継する薄いアダプターとする。初期要求には契約構造を親AIへ渡す手段がなく、親AIが `run_orchestration(JsonElement contract)` 用の契約を生成できなかった。この失敗を「要件定義不足、ツールを使うための必須実装の考慮漏れ」と記録し、承認済み要求変更として単一Toolから `get_contract_schema` / `get_orchestration_guide` / `run_orchestration` の3 Toolへ変更する。Schema・ガイドはCoreで単一管理し、CLI公開コマンドと薄いMCP中継を設ける。CLIのオーケストレーション機能をMCPに複製しない。
 
-Phase 2の完了は、MCPからインストール済み固定バージョンCLIへの受け渡し・起動・結果返却の確認とする。Phase 3の既定スクリプト起動確認はPhase 2の完了条件に含めない。
+MCPは分離可能な専用プロジェクトとし、公式C# MCP SDKを使う。CLIとの内部境界は契約JSON stdin、結果JSON stdout、診断stderrとする。CLI既存のファイル引数経路は維持する。
+
+Phase 2では、CLI能力情報にSchema・ガイド取得対応を追加し、古いCLI・不在・起動失敗・不正出力・timeout・キャンセルを構造化エラーとする。Schemaやガイドの組込みフォールバックは行わない。追加ゲートでは、AIが実際にガイドを参照し、契約生成前にSchemaを取得する順序、生成契約のCLI validator適合、MCP→CLI実行を同一の実機試行で観測する。ガイド/Schema取得可否とAI実際の参照は別評価とし、ログはTool名・順序中心で契約本文を不要に複製しない。実機証跡が揃うまでPhase 2統合ゲートはInconclusiveとする。Phase 3の既定スクリプト起動確認は含めない。
 
 ### Phase 3 — 既定スクリプトでCLIが起動することの確認
 
@@ -74,3 +76,7 @@ PhaseのPassを記録した後、後続Phaseや最終リリースの条件を遡
 ## 6. Phase 1 技術仕様
 
 Phase 1の実装詳細は[CLIインストーラー技術仕様](../reference/cli-installer.md)に記録する。技術仕様は実装された動作・制約を記述し、後続Phaseの計画機能を実装済みと扱わない。
+
+## 7. Phase 2 技術仕様と検証記録
+
+Phase 2の実装仕様は[STDIO MCP技術仕様](../reference/stdio-mcp.md)、Phaseゲートの実測結果は[STDIO MCP検証記録](phase2-stdio-mcp-verification.md)に記録する。Release CLIにstdin JSON protocolを追加した場合、対応版Releaseの発行・配置は別の明示的なRelease/installer操作とし、Phase 2コード変更を理由にタグ作成やRelease発行を自動で行わない。

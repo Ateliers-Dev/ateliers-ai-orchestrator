@@ -131,6 +131,27 @@ public static class TaskContractReader
         }
     }
 
+    /// <summary>UTF-8 JSON契約をメモリから読み込み、ファイル入力と同じ検証を行います。</summary>
+    /// <param name="content">契約JSONのUTF-8テキストです。</param>
+    /// <returns>契約、検証エラー、入力内容のハッシュを含む結果です。</returns>
+    public static ContractReadResult ReadJson(string content)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        var bytes = System.Text.Encoding.UTF8.GetBytes(content);
+        try
+        {
+            var contract = JsonSerializer.Deserialize<TaskContract>(bytes, JsonOptions);
+            var hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
+            if (contract is null) return new(null, ["契約JSONが空です。"], hash);
+            var errors = Validate(contract);
+            return errors.Count == 0 ? new(contract, errors, hash) : new(null, errors, hash);
+        }
+        catch (JsonException exception)
+        {
+            return new(null, [$"契約JSONを読み取れません: {exception.Message}"], null);
+        }
+    }
+
     /// <summary>契約の必須値、サポート対象バージョン、範囲と上限の整合性を検証します。</summary>
     /// <param name="contract">検証する契約です。</param>
     /// <returns>検出した問題の一覧です。問題がなければ空です。</returns>
