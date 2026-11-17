@@ -8,6 +8,23 @@ public sealed class McpCliAdapterTests
 {
     [Fact]
     [Trait("Category", "Unit")]
+    public void Adapter_requires_the_requested_capability_to_be_true_for_the_installed_cli_version()
+    {
+        using var missing = JsonDocument.Parse("""{"cliVersion":"1.2.3","protocolVersion":1,"commands":{}}""");
+        using var unsupported = JsonDocument.Parse("""{"cliVersion":"1.2.3","protocolVersion":1,"commands":{"contractSchema":false,"orchestrationGuide":false}}""");
+        using var supported = JsonDocument.Parse("""{"cliVersion":"v1.2.3+build","protocolVersion":1,"commands":{"contractSchema":true,"orchestrationGuide":true}}""");
+
+        foreach (var capability in new[] { "contractSchema", "orchestrationGuide" })
+        {
+            Assert.False(CliExecutionService.HasCapability(missing.RootElement, "1.2.3", capability));
+            Assert.False(CliExecutionService.HasCapability(unsupported.RootElement, "1.2.3", capability));
+            Assert.True(CliExecutionService.HasCapability(supported.RootElement, "1.2.3", capability));
+            Assert.False(CliExecutionService.HasCapability(supported.RootElement, "1.2.4", capability));
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
     public async Task Adapter_rejects_multibyte_cli_output_over_64_KiB()
     {
         const int maxBytes = 64 * 1024;
@@ -128,6 +145,7 @@ public sealed class McpCliAdapterTests
     [Trait("Category", "Unit")]
     public async Task Adapter_forwards_contract_schema_and_guide_from_installed_cli()
     {
+        Adapter_requires_the_requested_capability_to_be_true_for_the_installed_cli_version();
         if (!OperatingSystem.IsWindows()) return;
 
         var root = Path.Combine(Path.GetTempPath(), "ateliers-mcp-resource-test-" + Guid.NewGuid().ToString("N"));

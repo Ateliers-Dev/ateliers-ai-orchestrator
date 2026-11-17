@@ -16,7 +16,7 @@ public static class TaskContractSchema
       "properties": {
         "schemaVersion": { "type": "integer", "const": 1 },
         "taskId": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
-        "purpose": { "type": "string", "minLength": 1, "pattern": "^.*\\S.*$" },
+        "purpose": { "type": "string", "minLength": 1, "pattern": "^[\\s\\S]*\\S[\\s\\S]*$" },
         "workingDirectory": { "type": "string", "minLength": 1, "pattern": "^(?:[A-Za-z]:[\\\\/]|\\\\\\\\[^\\\\/]+[\\\\/][^\\\\/]+|/).*$" },
         "scope": { "$ref": "#/$defs/taskScope" },
         "inputs": { "type": "array", "items": { "$ref": "#/$defs/taskInput" } },
@@ -28,7 +28,7 @@ public static class TaskContractSchema
         "reporting": { "$ref": "#/$defs/reportingRequirements" }
       },
       "$defs": {
-        "nonBlankString": { "type": "string", "minLength": 1, "pattern": "^.*\\S.*$" },
+        "nonBlankString": { "type": "string", "minLength": 1, "pattern": "^[\\s\\S]*\\S[\\s\\S]*$" },
         "taskScope": {
           "type": "object", "additionalProperties": false, "required": ["included", "excluded"],
           "properties": {

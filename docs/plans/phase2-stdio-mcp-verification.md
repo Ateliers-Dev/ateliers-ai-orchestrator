@@ -29,8 +29,8 @@
 | CLI stdin JSON 成功/不正契約 | Pass | Release CLIの直接テストfixtureで成功JSON/NeedsHumanInput/exit 0と契約エラーJSON/exit 2を確認。stdoutは1 JSON、診断はstderr。 |
 | MCP→CLI Fake実行 | Pass | Release CLIファイル一式と固定インストールマニフェストを一時LOCALAPPDATAへ配置した統合fixture。`install.json`とcapabilityのCLI版照合、protocol handshake、stdin契約送信、stdout JSON読取、exit code照合、run記録作成を確認。実Codexは起動していない。 |
 | UTF-8 64 KiB応答上限 | Pass | `あ`を含みUTF-8バイト数が64 KiBを超える一方、文字数は64 KiB未満の応答を捕捉し、`cli_response_too_large`を返すことを確認。 |
-| CLI Schema / guideコマンドと整合テスト | Pass | `--contract-schema`のJSON parse、required/type/additionalProperties/taskId pattern/int範囲を確認。既存`examples/task-contract.json`の作業ディレクトリを実在パスへ差し替えた契約がCore validatorを通過。`--orchestration-guide`出力をCore resourceと照合し、能力フラグを確認。 |
-| MCP Schema / guide中継 | Pass（Windows fixture） | 固定配置を模したRelease相当CLIに対して両方のCLI出力がMCP adapterから取得できることを確認。不在CLIとキャンセルは構造化エラーを確認。旧CLI非対応・起動失敗・不正出力・timeoutはfixtureで未検証。 |
+| CLI Schema / guideコマンドと整合テスト | Pass | `--contract-schema`のJSON parse、required/type/additionalProperties/taskId pattern/int範囲を確認。単一行・複数行・空白のみの文字列についてSchema patternとCore validatorの受理を照合。既存`examples/task-contract.json`の作業ディレクトリを実在パスへ差し替えた契約がCore validatorを通過。`--orchestration-guide`出力をCore resourceと照合し、能力フラグを確認。
+| MCP Schema / guide中継 | Pass（Windows fixture） | 固定配置を模したRelease相当CLIに対して両方のCLI出力がMCP adapterから取得でき、`--capabilities`のCLI版・protocolVersion・該当するtrue capabilityを確認してからresourceを起動することを確認。能力JSONのフラグ欠落/false/CLI版不一致は能力判定fixtureで確認し、resource取得経路は対応CLIで中継成功を確認。不在CLIとキャンセルも構造化エラーを確認。旧CLI非対応・起動失敗・不正出力・timeoutはfixtureで未検証。
 | CLI stdin / Schema / guide fixtures（今回） | Pass | apphost fixture経由で既存stdin成功/不正契約テストと、新規Schema/guide/capability、Core DTOとのrequired/properties整合テストを直接実行。 |
 | MCP adapter resource / stdin fixtures（今回） | Pass | apphost fixture経由で固定インストールCLIのSchema・guide取得、不在/キャンセルエラー、既存MCP→CLI Fake実行、Codex shim、出力上限テストを直接実行。 |
 | 標準VSTest Unit（今回） | Inconclusive | testhostへの接続待ちが90秒後に失敗し、実行が中断された。 |

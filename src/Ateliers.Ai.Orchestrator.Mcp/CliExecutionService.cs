@@ -103,11 +103,17 @@ internal sealed class CliExecutionService
 
     public async Task<string> GetCliResourceAsync(string option, string capability, CancellationToken cancellationToken)
     {
-        if (!TryResolveInstallation(out var cliPath, out _, out var resolutionError))
+        if (!TryResolveInstallation(out var cliPath, out var installedVersion, out var resolutionError))
             return Error("cli_not_installed", resolutionError!);
 
         try
         {
+            var capabilityStatus = await SupportsCapabilityAsync(cliPath, installedVersion, capability, cancellationToken);
+            if (!capabilityStatus.Supported)
+                return capabilityStatus.ErrorCode is null
+                    ? Error("unsupported_cli_protocol", $"インストール済みCLIは {capability} の取得に対応していません。対応するRelease CLIを明示的にインストールしてください。")
+                    : Error(capabilityStatus.ErrorCode, $"インストール済みRelease CLIを確認できませんでした ({capabilityStatus.ErrorCode})。");
+
             var start = new ProcessStartInfo(cliPath)
             {
                 UseShellExecute = false,
@@ -218,7 +224,10 @@ internal sealed class CliExecutionService
         }
     }
 
-    private static async Task<(bool Supported, string? ErrorCode)> SupportsStdinProtocolAsync(string cliPath, string installedVersion, CancellationToken cancellationToken)
+    private static Task<(bool Supported, string? ErrorCode)> SupportsStdinProtocolAsync(string cliPath, string installedVersion, CancellationToken cancellationToken) =>
+        SupportsCapabilityAsync(cliPath, installedVersion, "runStdinJson", cancellationToken);
+
+    private static async Task<(bool Supported, string? ErrorCode)> SupportsCapabilityAsync(string cliPath, string installedVersion, string capability, CancellationToken cancellationToken)
     {
         try
         {
@@ -244,16 +253,23 @@ internal sealed class CliExecutionService
             var captured = await outputTask;
             if (captured.Truncated) return (false, null);
             using var json = JsonDocument.Parse(captured.Bytes);
-            return (json.RootElement.TryGetProperty("cliVersion", out var cliVersion) && cliVersion.ValueKind == JsonValueKind.String &&
-                string.Equals(NormalizeVersion(cliVersion.GetString()!), NormalizeVersion(installedVersion), StringComparison.OrdinalIgnoreCase) &&
-                json.RootElement.TryGetProperty("protocolVersion", out var protocol) && protocol.ValueKind == JsonValueKind.Number && protocol.GetInt32() == CliProtocolVersion &&
-                json.RootElement.TryGetProperty("commands", out var commands) &&
-                commands.TryGetProperty("runStdinJson", out var runStdin) && runStdin.ValueKind == JsonValueKind.True, null);
+            return (HasCapability(json.RootElement, installedVersion, capability), null);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException) { return (false, null); }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or Win32Exception or InvalidOperationException)
         { return (false, "cli_start_failed"); }
+    }
+
+    internal static bool HasCapability(JsonElement root, string installedVersion, string capability)
+    {
+        return root.ValueKind == JsonValueKind.Object &&
+            root.TryGetProperty("cliVersion", out var cliVersion) && cliVersion.ValueKind == JsonValueKind.String &&
+            string.Equals(NormalizeVersion(cliVersion.GetString()!), NormalizeVersion(installedVersion), StringComparison.OrdinalIgnoreCase) &&
+            root.TryGetProperty("protocolVersion", out var protocol) && protocol.ValueKind == JsonValueKind.Number &&
+            protocol.TryGetInt32(out var protocolVersion) && protocolVersion == CliProtocolVersion &&
+            root.TryGetProperty("commands", out var commands) && commands.ValueKind == JsonValueKind.Object &&
+            commands.TryGetProperty(capability, out var supported) && supported.ValueKind == JsonValueKind.True;
     }
 
     private static string NormalizeVersion(string value) => value.Trim().TrimStart('v', 'V').Split('+', 2)[0];

@@ -26,6 +26,16 @@ public sealed class StdioJsonCliTests
             Assert.NotNull(root.GetProperty("properties").GetProperty("workingDirectory").GetProperty("pattern").GetString());
             Assert.Equal(1, root.GetProperty("$defs").GetProperty("executionLimits").GetProperty("properties").GetProperty("maxDurationMinutes").GetProperty("minimum").GetInt32());
             Assert.Equal(int.MaxValue, root.GetProperty("$defs").GetProperty("executionLimits").GetProperty("properties").GetProperty("maxDurationMinutes").GetProperty("maximum").GetInt32());
+            var nonBlankPattern = root.GetProperty("$defs").GetProperty("nonBlankString").GetProperty("pattern").GetString()!;
+            Assert.Equal("^[\\s\\S]*\\S[\\s\\S]*$", nonBlankPattern);
+            Assert.Matches(nonBlankPattern, "first line\nsecond line");
+            Assert.DoesNotMatch(nonBlankPattern, " \r\n\t ");
+            var multilineContract = System.Text.Json.Nodes.JsonNode.Parse(ValidExampleContract())!;
+            multilineContract["purpose"] = "first line\nsecond line";
+            multilineContract["requirements"]![0] = "first line\nsecond line";
+            Assert.NotNull(TaskContractReader.ReadJson(multilineContract.ToJsonString()).Contract);
+            multilineContract["requirements"]![0] = " \r\n\t ";
+            Assert.Null(TaskContractReader.ReadJson(multilineContract.ToJsonString()).Contract);
             AssertSchemaMatches(typeof(TaskContract), root);
             AssertSchemaMatches(typeof(TaskScope), root.GetProperty("$defs").GetProperty("taskScope"));
             AssertSchemaMatches(typeof(TaskInput), root.GetProperty("$defs").GetProperty("taskInput"));
