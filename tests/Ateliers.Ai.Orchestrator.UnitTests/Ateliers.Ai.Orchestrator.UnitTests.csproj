@@ -4,6 +4,7 @@
     <ProjectReference Include="..\..\src\Ateliers.Ai.Orchestrator.Core\Ateliers.Ai.Orchestrator.Core.csproj" />
     <ProjectReference Include="..\..\src\Ateliers.Ai.Orchestrator.Cli\Ateliers.Ai.Orchestrator.Cli.csproj" />
     <ProjectReference Include="..\..\src\Ateliers.Slack\Ateliers.Slack.csproj" />
+    <ProjectReference Include="..\..\src\Ateliers.Ai.Orchestrator.Mcp\Ateliers.Ai.Orchestrator.Mcp.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

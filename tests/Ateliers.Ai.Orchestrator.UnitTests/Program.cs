@@ -14,6 +14,37 @@ internal static class FixtureHost
         if (args.Length >= 1 && args[0] == "--fake-codex-fixture") return UnitTestCatalog.RunFakeCodexFixture(args);
         if (args.Length >= 1 && args[0] == "--external-process-fixture") return UnitTestCatalog.RunExternalProcessFixture(args);
         if (args.Length >= 1 && args[0] == "--lifecycle-writer-fixture") return UnitTestCatalog.RunLifecycleWriterFixture(args);
+        if (args.Length == 1 && args[0] == "--mcp-cli-adapter-fixture")
+        {
+            new Ateliers.Ai.Orchestrator.UnitTests.McpCliAdapterTests().Adapter_passes_contract_to_cli_stdin_and_returns_cli_json().GetAwaiter().GetResult();
+            Console.WriteLine("MCP-to-CLI fixture passed.");
+            return 0;
+        }
+        if (args.Length == 1 && args[0] == "--stdio-json-cli-fixture")
+        {
+            var tests = new Ateliers.Ai.Orchestrator.UnitTests.StdioJsonCliTests();
+            tests.Run_stdin_json_writes_a_single_structured_success_response().GetAwaiter().GetResult();
+            tests.Run_stdin_json_reports_invalid_contract_as_json_and_exit_two().GetAwaiter().GetResult();
+            Console.WriteLine("CLI stdin JSON fixtures passed.");
+            return 0;
+        }
+        if (args.Length == 1 && args[0] == "--run-unit-cases-direct")
+        {
+            var names = UnitTestCatalog.UnitTestCases.Select(testCase => (string)testCase[0]).ToArray();
+            var skipped = 0;
+            foreach (var name in names)
+            {
+                try { UnitTestCatalog.RunUnitTest(name); }
+                catch (Xunit.Sdk.SkipException) { skipped++; }
+                catch (Exception exception)
+                {
+                    Console.Error.WriteLine($"Unit case failed: {name}: {exception.GetType().Name}: {exception.Message}");
+                    return 1;
+                }
+            }
+            Console.WriteLine($"Existing Fake-only unit cases passed: {names.Length - skipped}; skipped: {skipped}.");
+            return 0;
+        }
         return 0;
     }
 }

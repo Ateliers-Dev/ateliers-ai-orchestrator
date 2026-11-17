@@ -68,9 +68,9 @@ HTTPSでGitHub Releaseから取得し、同じReleaseに添付したSHA-256で�
 
 ## 7. 後続STDIO MCPとの連携境界
 
-Phase 1が提供する安定境界は固定インストール先の実行ファイルパスと `install.json` / `release-manifest.json` / `--version` である。後続MCPはこのパスからCLIを起動し、未配置・破損・起動失敗を識別できる。Phase 1ではMCPコード、設定登録、STDIO通信、契約の受け渡し、プロセス終了・出力のMCP応答への変換を実装していない。
+Phase 1が提供する安定境界は固定インストール先の実行ファイルパスと `install.json` / `release-manifest.json` / `--version` である。後続MCPはこのパスからCLIを起動し、未配置・破損・起動失敗を識別できる。Phase 1ではMCPコード、設定登録、STDIO通信、契約の受け渡し、プロセス終了・出力のMCP応答への変換を実装していない。Phase 2はRelease CLIへ後方互換の `--capabilities` と `run --stdin-json` を追加し、従来のファイル入力コマンドを維持する。MCPは `install.json` のインストール版と `--capabilities` のプロトコル版を実行ごとに確認する。
 
-CLIとMCPは個別にRelease/バージョン管理される。CLIの固定パスと既存契約インターフェースが保たれる限り、CLI更新はインストーラーの明示実行だけで行え、MCPの再ビルド・再インストールを要求しない。ただし将来、CLIの契約互換性を破る変更を行う場合は、対応関係を後続MCP仕様で扱う。
+CLIとMCPは個別にRelease/バージョン管理される。CLIの固定パスと既存契約インターフェースが保たれる限り、CLI更新はインストーラーの明示実行だけで行え、MCPの再ビルド・再インストールを要求しない。Capability handshakeにより未対応の古いCLIは明示的な互換性エラーとして扱う。現在インストールされているv0.0.1はPhase 2の新stdin protocolを含まないため、Phase 2対応CLI Releaseを別途発行・配置するまでMCP実行は拒否される。
 
 ## 8. 検証範囲と未実施事項
 

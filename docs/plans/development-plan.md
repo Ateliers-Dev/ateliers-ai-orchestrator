@@ -1,12 +1,12 @@
 # Ateliers AI Orchestrator 開発計画書
 
-> 状態: 承認済み。Phase 1 の実装・進行基準。
+> 状態: 承認済み。Phase 1の完了とPhase 2の実装・進行基準。
 
 ## 1. 目的と進め方
 
 本書は、Ateliers AI Orchestrator の立て直しにおける作業順序、各Phaseの完了条件、進行・変更管理を固定する。Phaseごとの完了判定は、そのPhaseに記載した条件だけに基づく。レビュー合格、Phase完了、最終リリース受入はそれぞれ別に記録する。
 
-本計画書とPhase 1対象の[CLIインストーラー要求仕様](../requirements/cli-installer-requirements.md)はユーザー確認済みである。MCPを実装するPhase 2では、[MCP要求仕様](../requirements/mcp-requirements.md)をその着手基準として扱う。仕様や完了条件は、ユーザーが変更を承認し記録するまで変更しない。
+本計画書とPhase 1対象の[CLIインストーラー要求仕様](../requirements/cli-installer-requirements.md)はユーザー確認済みである。Phase 2では[承認済みMCP要求仕様](../requirements/mcp-requirements.md)を着手・実装基準とする。長期的な拡張性・保守性を優先し、現行CLIに不足する構造化プロセス境界は後方互換を保って拡張する。仕様や完了条件は、ユーザーが変更を承認し記録するまで変更しない。
 
 ## 2. 固定フェーズ
 
@@ -33,7 +33,9 @@ Phase 1の完了条件は、UnitTests成功、Release publish/package定義の�
 
 MCPは既存契約スキーマをCLIへ中継する薄いアダプターとする。親AI側で契約を作成する。CLIのオーケストレーション機能をMCPに複製しない。MCPのSTDIO起動経路はAteliersの他ツールでWork/Codexから検証済みであり、この計画で再検証作業を設けない。
 
-Phase 2の完了は、MCPからインストール済み固定バージョンCLIへの受け渡し・起動・結果返却の確認とする。Phase 3の既定スクリプト起動確認はPhase 2の完了条件に含めない。
+MCPは分離可能な専用プロジェクトとし、公式C# MCP SDKを使って単一の `run_orchestration` toolを提供する。CLIとの内部境界は契約JSON stdin、結果JSON stdout、診断stderrとする。CLI既存のファイル引数経路は維持する。プロトコル版、終了コード、機密情報を含む環境変数の継承、応答長、キャンセルを明記する。STDIO MCP transport自体のPoCは再実施しない。
+
+Phase 2の完了は、MCPからプロトコル互換性を確認したインストール済み固定バージョンCLIへの契約受け渡し・起動・結果返却を検証し、CLI不在・非互換・CLIエラー・キャンセルを成功と誤認しないことの確認とする。技術仕様、導入・登録・起動手順、実測検証記録を作成する。Phase 3の既定スクリプト起動確認はPhase 2の完了条件に含めない。
 
 ### Phase 3 — 既定スクリプトでCLIが起動することの確認
 
@@ -74,3 +76,7 @@ PhaseのPassを記録した後、後続Phaseや最終リリースの条件を遡
 ## 6. Phase 1 技術仕様
 
 Phase 1の実装詳細は[CLIインストーラー技術仕様](../reference/cli-installer.md)に記録する。技術仕様は実装された動作・制約を記述し、後続Phaseの計画機能を実装済みと扱わない。
+
+## 7. Phase 2 技術仕様と検証記録
+
+Phase 2の実装仕様は[STDIO MCP技術仕様](../reference/stdio-mcp.md)、Phaseゲートの実測結果は[STDIO MCP検証記録](phase2-stdio-mcp-verification.md)に記録する。Release CLIにstdin JSON protocolを追加した場合、対応版Releaseの発行・配置は別の明示的なRelease/installer操作とし、Phase 2コード変更を理由にタグ作成やRelease発行を自動で行わない。

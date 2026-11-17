@@ -6,6 +6,12 @@ using Ateliers.Ai.Orchestrator.Core;
 using Ateliers.Ai.Orchestrator.Cli;
 using Ateliers.Slack;
 
+if (args.Length >= 2 && args[0] == "run" && args[1] == "--stdin-json")
+{
+    Console.InputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+    Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+}
+
 return await OrchestratorCli.RunAsync(args);
 
 /// <summary>タスク契約の検証と実行準備記録を扱うコマンドライン入口です。</summary>
@@ -16,9 +22,16 @@ internal static class OrchestratorCli
     /// <returns>成功時は0、入力不備は2、実行記録の失敗は3です。</returns>
     public static async Task<int> RunAsync(string[] args)
     {
+        var structuredRun = args.Length >= 2 && args[0] == "run" && args[1] == "--stdin-json";
         if (args.Length == 1 && (args[0] is "--version" or "version"))
         {
             Console.WriteLine(GetVersion());
+            return 0;
+        }
+
+        if (args.Length == 1 && args[0] == "--capabilities")
+        {
+            Console.WriteLine(JsonSerializer.Serialize(new { cliVersion = GetVersion(), protocolVersion = 1, commands = new { runStdinJson = true } }));
             return 0;
         }
 
@@ -41,7 +54,8 @@ internal static class OrchestratorCli
             (args[0] == "run" && (args.Length < 2 || args.Length % 2 != 0)))
         {
             Console.Error.WriteLine("コマンドまたは引数が不足しているか、不正です。");
-            PrintUsage(Console.Error);
+            if (structuredRun) WriteStructuredError("invalid_arguments", "コマンド引数が不正です。", 2);
+            else PrintUsage(Console.Error);
             return 2;
         }
 
@@ -69,16 +83,22 @@ internal static class OrchestratorCli
             return 0;
         }
 
-        if (!TryResolveFullPath(args[1], "契約ファイル", out var contractPath, out var pathError))
+        ContractReadResult read;
+        if (structuredRun)
+        {
+            read = TaskContractReader.ReadJson(await Console.In.ReadToEndAsync());
+        }
+        else if (!TryResolveFullPath(args[1], "契約ファイル", out var contractPath, out var pathError))
         {
             Console.Error.WriteLine(pathError);
             PrintUsage(Console.Error);
             return 2;
         }
-        var read = TaskContractReader.Read(contractPath);
+        else read = TaskContractReader.Read(contractPath);
         if (!read.IsValid)
         {
             foreach (var error in read.Errors) Console.Error.WriteLine($"契約エラー: {error}");
+            if (structuredRun) WriteStructuredError("invalid_contract", "契約JSONが不正です。", 2, read.Errors);
             return 2;
         }
 
@@ -93,19 +113,21 @@ internal static class OrchestratorCli
 
         if (args[0] == "run")
         {
-            if (!TryParseRunOptions(args, out var scenario, out var runRoot, out var lifecycleLogPath, out var evidencePath, out var agentKind,
+            if (!TryParseRunOptions(args, structuredRun, contract.WorkingDirectory, out var scenario, out var runRoot, out var lifecycleLogPath, out var evidencePath, out var agentKind,
                 out var codexOptions, out var notificationsDisabled, out var useSlackTestChannel, out var slackConfigurationPath,
                 out var slackSecretsPath, out var optionError))
             {
                 Console.Error.WriteLine(optionError);
-                PrintUsage(Console.Error, "run");
+                if (structuredRun) WriteStructuredError("invalid_arguments", optionError, 2);
+                else PrintUsage(Console.Error, "run");
                 return 2;
             }
 
             if (!TryReadReviewEvidence(evidencePath, out var evidence, out var evidenceError))
             {
                 Console.Error.WriteLine(evidenceError);
-                PrintUsage(Console.Error, "run");
+                if (structuredRun) WriteStructuredError("invalid_review_evidence", evidenceError, 2);
+                else PrintUsage(Console.Error, "run");
                 return 2;
             }
 
@@ -141,33 +163,45 @@ internal static class OrchestratorCli
                     try { Console.Error.WriteLine($"警告: Slack通知に{lifecycleWriter.FailedSlackSends}件失敗しました。実行結果は継続しています。"); }
                     catch (Exception) { }
                 }
-                if (lifecycleWriter.SentSlackSends > 0)
+                if (!structuredRun && lifecycleWriter.SentSlackSends > 0)
                     Console.WriteLine($"Slack通知送信成功: {lifecycleWriter.SentSlackSends}件");
                 if (!result.PersistenceSucceeded)
                 {
                     Console.Error.WriteLine($"実行は人間判断待ちで停止しましたが、成果物または実行記録の保存に失敗しました: {fakeRunDirectory}");
                     if (result.Detail is not null) Console.Error.WriteLine(result.Detail);
+                    if (structuredRun) WriteStructuredResult(false, 3, fakeRunId, result.State.ToString(), fakeRunDirectory,
+                        "persistence_failed", "実行記録または成果物の保存に失敗しました。");
                     return 3;
                 }
-                Console.WriteLine($"{(agentKind == "codex" ? "Codex CLI実行" : "Fake実行")}を記録しました: {fakeRunId}");
-                Console.WriteLine($"状態: {result.State}");
-                Console.WriteLine($"記録先: {fakeRunDirectory}");
-                return result.State == RunState.Failed ? 3 : 0;
+                var exitCode = result.State == RunState.Failed ? 3 : 0;
+                if (structuredRun)
+                    WriteStructuredResult(exitCode == 0, exitCode, fakeRunId, result.State.ToString(), fakeRunDirectory,
+                        exitCode == 0 ? null : "workflow_failed", exitCode == 0 ? null : "オーケストレーションが失敗しました。");
+                else
+                {
+                    Console.WriteLine($"{(agentKind == "codex" ? "Codex CLI実行" : "Fake実行")}を記録しました: {fakeRunId}");
+                    Console.WriteLine($"状態: {result.State}");
+                    Console.WriteLine($"記録先: {fakeRunDirectory}");
+                }
+                return exitCode;
             }
             catch (IOException exception)
             {
                 Console.Error.WriteLine($"Fake実行の成果物または記録を書き込めませんでした: {exception.Message}");
                 Console.Error.WriteLine($"記録先: {fakeRunDirectory}（部分的な記録が残っている場合は内容を確認してください）");
+                if (structuredRun) WriteStructuredResult(false, 3, fakeRunId, null, fakeRunDirectory, "persistence_failed", "実行記録を書き込めませんでした。");
                 return 3;
             }
             catch (UnauthorizedAccessException)
             {
                 Console.Error.WriteLine($"Fake実行の保存先への書き込み権限がありません: {fakeRunDirectory}");
+                if (structuredRun) WriteStructuredResult(false, 3, fakeRunId, null, fakeRunDirectory, "persistence_failed", "実行記録先への書き込み権限がありません。");
                 return 3;
             }
             catch (JsonException exception)
             {
                 Console.Error.WriteLine($"Fake実行記録をJSONへ変換できませんでした: {exception.Message}");
+                if (structuredRun) WriteStructuredResult(false, 3, fakeRunId, null, fakeRunDirectory, "persistence_failed", "実行記録をJSONへ変換できませんでした。");
                 return 3;
             }
             finally
@@ -248,6 +282,13 @@ internal static class OrchestratorCli
             ?? "unknown";
     }
 
+    private static void WriteStructuredError(string code, string message, int exitCode, IReadOnlyList<string>? details = null) =>
+        Console.WriteLine(JsonSerializer.Serialize(new { protocolVersion = 1, ok = false, exitCode, error = new { code, message, details } }));
+
+    private static void WriteStructuredResult(bool ok, int exitCode, string? runId, string? state, string? runDirectory, string? errorCode, string? message) =>
+        Console.WriteLine(JsonSerializer.Serialize(new { protocolVersion = 1, ok, exitCode, runId, state, runDirectory,
+            error = errorCode is null ? null : new { code = errorCode, message } }, new JsonSerializerOptions { Converters = { new JsonStringEnumConverter() } }));
+
     /// <summary>startコマンドの引数から実行記録の保存先を解決します。</summary>
     /// <param name="args">解析済みCLI引数です。</param>
     /// <param name="runsDirectory">実行記録の保存先となる絶対パスです。</param>
@@ -271,14 +312,15 @@ internal static class OrchestratorCli
     /// <param name="evidencePath">指定された人間確認証跡ファイルです。</param>
     /// <param name="error">解析失敗時の説明です。</param>
     /// <returns>すべての引数が認識できた場合はtrueです。</returns>
-    private static bool TryParseRunOptions(string[] args, out FakeScenario scenario, out string runsDirectory,
+    private static bool TryParseRunOptions(string[] args, bool structuredRun, string workingDirectory, out FakeScenario scenario, out string runsDirectory,
         out string lifecycleLogPath, out string? evidencePath, out string agentKind, out CodexCliRunnerOptions? codexOptions,
         out bool notificationsDisabled, out bool useSlackTestChannel, out string? slackConfigurationPath,
         out string? slackSecretsPath, out string error)
     {
         scenario = FakeScenario.Success;
-        runsDirectory = Path.GetFullPath(Path.Combine(".ateliers-orchestrator", "runs"));
-        lifecycleLogPath = Path.GetFullPath(Path.Combine(".ateliers-orchestrator", "lifecycle.jsonl"));
+        var runBaseDirectory = structuredRun ? workingDirectory : Environment.CurrentDirectory;
+        runsDirectory = Path.GetFullPath(Path.Combine(runBaseDirectory, ".ateliers-orchestrator", "runs"));
+        lifecycleLogPath = Path.GetFullPath(Path.Combine(runBaseDirectory, ".ateliers-orchestrator", "lifecycle.jsonl"));
         evidencePath = null;
         agentKind = "fake";
         codexOptions = null;

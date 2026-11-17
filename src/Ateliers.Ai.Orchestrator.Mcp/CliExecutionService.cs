@@ -1,0 +1,219 @@
+using System.Diagnostics;
+using System.ComponentModel;
+using System.Text;
+using System.Text.Json;
+
+internal sealed class CliExecutionService
+{
+    private const int CliProtocolVersion = 1;
+    private const int MaxCapturedCharacters = 64 * 1024;
+
+    public async Task<string> RunAsync(JsonElement contract, string agent, string? codexExecutablePath,
+        string? runsDirectory, CancellationToken cancellationToken)
+    {
+        if (contract.ValueKind != JsonValueKind.Object)
+            return Error("invalid_contract_input", "contractにはJSONオブジェクトを指定してください。");
+        if (agent is not ("codex" or "fake"))
+            return Error("invalid_agent", "agentはcodexまたはfakeを指定してください。");
+
+        if (!TryResolveInstallation(out var cliPath, out var installedVersion, out var resolutionError))
+            return Error("cli_not_installed", resolutionError!);
+
+        var capability = await SupportsStdinProtocolAsync(cliPath, installedVersion, cancellationToken);
+        if (!capability.Supported)
+            return capability.ErrorCode is null
+                ? Error("unsupported_cli_protocol", $"インストール済みCLI {installedVersion} はrun stdin JSON protocol v{CliProtocolVersion}に対応していません。対応するRelease CLIを明示的にインストールしてください。")
+                : Error(capability.ErrorCode, $"インストール済みRelease CLIを確認できませんでした ({capability.ErrorCode})。");
+
+        var codexPath = codexExecutablePath ?? Environment.GetEnvironmentVariable("ATELIERS_CODEX_CLI_PATH");
+        if (agent == "codex" && (string.IsNullOrWhiteSpace(codexPath) || !Path.IsPathFullyQualified(codexPath) || !File.Exists(codexPath)))
+            return Error("codex_cli_not_configured", "Codex実行ファイルの絶対パスをcodexExecutablePathまたはATELIERS_CODEX_CLI_PATHで設定してください。");
+
+        if (runsDirectory is not null && !Path.IsPathFullyQualified(runsDirectory))
+            return Error("invalid_runs_directory", "runsDirectoryには絶対パスを指定してください。");
+
+        var start = new ProcessStartInfo(cliPath)
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        start.ArgumentList.Add("run");
+        start.ArgumentList.Add("--stdin-json");
+        start.ArgumentList.Add("--agent");
+        start.ArgumentList.Add(agent);
+        if (agent == "codex")
+        {
+            start.ArgumentList.Add("--codex-exe");
+            start.ArgumentList.Add(codexPath!);
+        }
+        if (runsDirectory is not null)
+        {
+            start.ArgumentList.Add("--runs");
+            start.ArgumentList.Add(runsDirectory);
+        }
+        SetChildEnvironment(start);
+
+        try
+        {
+            using var process = new Process { StartInfo = start };
+            if (!process.Start()) return Error("cli_start_failed", "Release CLIプロセスを開始できませんでした。");
+            try
+            {
+                var stdoutTask = ReadBoundedAsync(process.StandardOutput, MaxCapturedCharacters);
+                var stderrTask = ReadBoundedAsync(process.StandardError, MaxCapturedCharacters);
+                var contractBytes = Encoding.UTF8.GetBytes(contract.GetRawText());
+                await process.StandardInput.BaseStream.WriteAsync(contractBytes, cancellationToken);
+                await process.StandardInput.BaseStream.FlushAsync(cancellationToken);
+                process.StandardInput.Close();
+                await process.WaitForExitAsync(cancellationToken);
+
+                var stdout = await stdoutTask;
+                _ = await stderrTask; // Drain child diagnostics without returning potentially sensitive log text to the MCP caller.
+                if (stdout.Truncated) return Error("cli_response_too_large", "CLI応答が上限を超えたため破棄しました。");
+                using var result = JsonDocument.Parse(stdout.Text);
+                var root = result.RootElement;
+                if (!root.TryGetProperty("protocolVersion", out var version) || version.ValueKind != JsonValueKind.Number || version.GetInt32() != CliProtocolVersion ||
+                    !root.TryGetProperty("exitCode", out var exitCode) || exitCode.ValueKind != JsonValueKind.Number || exitCode.GetInt32() != process.ExitCode ||
+                    !root.TryGetProperty("ok", out var ok) || ok.ValueKind is not (JsonValueKind.True or JsonValueKind.False) || ok.GetBoolean() != (process.ExitCode == 0))
+                    return Error("invalid_cli_response", "CLI応答のprotocolVersionまたは終了コードが一致しません。");
+                return root.GetRawText();
+            }
+            finally
+            {
+                try
+                {
+                    if (!process.HasExited) process.Kill(entireProcessTree: true);
+                    if (!process.HasExited) await process.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+                }
+                catch (Exception exception) when (exception is InvalidOperationException or Win32Exception or NotSupportedException or TimeoutException) { }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException)
+        {
+            return Error("invalid_cli_response", "CLIが有効な構造化JSON応答を返しませんでした。");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or Win32Exception)
+        {
+            return Error("cli_execution_failed", $"Release CLIを実行できませんでした ({exception.GetType().Name})。");
+        }
+    }
+
+    private static bool TryResolveInstallation(out string cliPath, out string version, out string? error)
+    {
+        cliPath = string.Empty;
+        version = "unknown";
+        error = null;
+        var localAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        if (string.IsNullOrWhiteSpace(localAppData) || !Path.IsPathFullyQualified(localAppData))
+        {
+            error = "LOCALAPPDATAが設定されていません。CLIインストーラーのユーザー単位配置を確認してください.";
+            return false;
+        }
+        var bin = Path.Combine(localAppData, "Ateliers-Dev", "Ai-Orchestrator", "bin");
+        cliPath = Path.Combine(bin, "Ateliers.Ai.Orchestrator.Cli.exe");
+        var installManifest = Path.Combine(bin, "install.json");
+        if (!File.Exists(cliPath) || !File.Exists(installManifest))
+        {
+            error = $"インストール済みRelease CLIまたはinstall.jsonがありません: {cliPath}";
+            return false;
+        }
+        try
+        {
+            using var manifest = JsonDocument.Parse(File.ReadAllBytes(installManifest));
+            var root = manifest.RootElement;
+            if (!root.TryGetProperty("runtimeIdentifier", out var runtime) || runtime.GetString() != "win-x64" ||
+                !root.TryGetProperty("version", out var versionNode) || string.IsNullOrWhiteSpace(versionNode.GetString()))
+            {
+                error = "install.jsonのCLIバージョンまたはwin-x64 runtimeIdentifierを確認できません。";
+                return false;
+            }
+            version = versionNode.GetString()!;
+            if (!OperatingSystem.IsWindows() || !Environment.Is64BitOperatingSystem)
+            {
+                error = "インストール済みRelease CLIはWindows x64用です。";
+                return false;
+            }
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            error = $"install.jsonを読み取れません ({exception.GetType().Name})。";
+            return false;
+        }
+    }
+
+    private static async Task<(bool Supported, string? ErrorCode)> SupportsStdinProtocolAsync(string cliPath, string installedVersion, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var start = new ProcessStartInfo(cliPath) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+            start.ArgumentList.Add("--capabilities");
+            SetChildEnvironment(start);
+            using var process = new Process { StartInfo = start };
+            if (!process.Start()) return (false, "cli_start_failed");
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(5));
+            var outputTask = ReadBoundedAsync(process.StandardOutput, 4096);
+            var stderrTask = ReadBoundedAsync(process.StandardError, 4096);
+            try { await process.WaitForExitAsync(timeout.Token); }
+            catch (OperationCanceledException)
+            {
+                try { process.Kill(entireProcessTree: true); } catch (Exception exception) when (exception is InvalidOperationException or Win32Exception or NotSupportedException) { }
+                try { await process.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10)); } catch (TimeoutException) { }
+                if (cancellationToken.IsCancellationRequested) throw;
+                return (false, "cli_capabilities_timeout");
+            }
+            _ = await stderrTask;
+            if (process.ExitCode != 0) return (false, null);
+            var captured = await outputTask;
+            if (captured.Truncated) return (false, null);
+            using var json = JsonDocument.Parse(captured.Text);
+            return (json.RootElement.TryGetProperty("cliVersion", out var cliVersion) && cliVersion.ValueKind == JsonValueKind.String &&
+                string.Equals(NormalizeVersion(cliVersion.GetString()!), NormalizeVersion(installedVersion), StringComparison.OrdinalIgnoreCase) &&
+                json.RootElement.TryGetProperty("protocolVersion", out var protocol) && protocol.ValueKind == JsonValueKind.Number && protocol.GetInt32() == CliProtocolVersion &&
+                json.RootElement.TryGetProperty("commands", out var commands) &&
+                commands.TryGetProperty("runStdinJson", out var runStdin) && runStdin.ValueKind == JsonValueKind.True, null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException) { return (false, null); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or Win32Exception or InvalidOperationException)
+        { return (false, "cli_start_failed"); }
+    }
+
+    private static string NormalizeVersion(string value) => value.Trim().TrimStart('v', 'V').Split('+', 2)[0];
+
+    private static void SetChildEnvironment(ProcessStartInfo start)
+    {
+        start.Environment.Clear();
+        foreach (var name in new[] { "PATH", "SystemDrive", "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS", "DOTNET_ROOT", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "TMPDIR", "CODEX_HOME", "ATELIERS_CODEX_CLI_PATH", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy" })
+        {
+            var value = Environment.GetEnvironmentVariable(name);
+            if (value is not null) start.Environment[name] = value;
+        }
+    }
+
+    private static async Task<CapturedText> ReadBoundedAsync(StreamReader reader, int maxCharacters)
+    {
+        var buffer = new char[4096];
+        var captured = new StringBuilder(Math.Min(maxCharacters, 4096));
+        var truncated = false;
+        int read;
+        while ((read = await reader.ReadAsync(buffer)) > 0)
+        {
+            var remaining = maxCharacters - captured.Length;
+            if (remaining > 0) captured.Append(buffer, 0, Math.Min(read, remaining));
+            if (read > remaining) truncated = true;
+        }
+        return new(captured.ToString(), truncated);
+    }
+
+    private static string Error(string code, string message) => JsonSerializer.Serialize(new { protocolVersion = 1, ok = false, error = new { code, message } });
+    private sealed record CapturedText(string Text, bool Truncated);
+}
