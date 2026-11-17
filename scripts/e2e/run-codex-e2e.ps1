@@ -1,5 +1,6 @@
 ﻿[CmdletBinding()]
 param(
+    [string]$ScenarioPath,
     [switch]$RunCodex,
     [string]$CodexExecutable
 )
@@ -9,15 +10,34 @@ Set-StrictMode -Version Latest
 
 function Invoke-CheckedNative {
     param([string]$FilePath, [string[]]$Arguments, [string]$Description)
-    & $FilePath @Arguments
-    $nativeExitCode = $LASTEXITCODE
-    if ($nativeExitCode -ne 0) { throw ("{0} に失敗しました (exit code {1})。" -f $Description, $nativeExitCode) }
+    $savedErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $nativeOutput = @(& $FilePath @Arguments 2>&1)
+        $nativeExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    foreach ($line in $nativeOutput) { Write-Host $line }
+    if ($nativeExitCode -ne 0) {
+        $diagnostics = ($nativeOutput -join ' ')
+        if ($diagnostics.Length -gt 4000) { $diagnostics = $diagnostics.Substring(0, 4000) }
+        throw ("{0} に失敗しました (exit code {1}): {2}" -f $Description, $nativeExitCode, $diagnostics)
+    }
 }
 
 function Get-CheckedNativeOutput {
     param([string]$FilePath, [string[]]$Arguments, [string]$Description)
-    $nativeOutput = @(& $FilePath @Arguments 2>&1)
-    $nativeExitCode = $LASTEXITCODE
+    $savedErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $nativeOutput = @(& $FilePath @Arguments 2>&1)
+        $nativeExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
     if ($nativeExitCode -ne 0) {
         throw ("{0} に失敗しました (exit code {1}): {2}" -f $Description, $nativeExitCode, ($nativeOutput -join ' '))
     }
@@ -26,8 +46,15 @@ function Get-CheckedNativeOutput {
 
 function Invoke-FakeUnitTests {
     param([string]$DotnetPath, [string]$ProjectPath)
-    $output = @(& $DotnetPath run --project $ProjectPath --configuration Release --no-build --no-restore -- --unit 2>&1)
-    $testExitCode = $LASTEXITCODE
+    $savedErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = @(& $DotnetPath run --project $ProjectPath --configuration Release --no-build --no-restore -- --unit 2>&1)
+        $testExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
     $outputLines = @($output | ForEach-Object { "$($_)".TrimEnd([char]13) })
     $outputLines | ForEach-Object { Write-Host $_ }
     $expectedSkips = @(
@@ -55,19 +82,24 @@ function Invoke-FakeUnitTests {
 }
 
 function Write-TaskContract {
-    param($Contract, [string]$WorkingDirectory, [string]$TestbedSha, [string]$Path)
+    param($Contract, [string]$WorkingDirectory, [string]$RepositorySha, [string]$Path)
     $Contract.workingDirectory = $WorkingDirectory
-    foreach ($item in $Contract.inputs) { $item.revision = "testbed main $TestbedSha" }
+    foreach ($item in $Contract.inputs) { $item.revision = "GitHub default branch $RepositorySha" }
     $json = $Contract | ConvertTo-Json -Depth 20
     [System.IO.File]::WriteAllText($Path, $json, (New-Object System.Text.UTF8Encoding($false)))
 }
 
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
-$contractTemplatePath = Join-Path $PSScriptRoot 'task-contract.template.json'
+$defaultScenarioPath = Join-Path $PSScriptRoot 'scenarios\testbed-review-cycle.json'
+if ([string]::IsNullOrWhiteSpace($ScenarioPath)) { $ScenarioPath = $defaultScenarioPath }
+if ([System.IO.Path]::IsPathRooted($ScenarioPath)) {
+    $scenarioPath = [System.IO.Path]::GetFullPath($ScenarioPath)
+}
+else {
+    $scenarioPath = [System.IO.Path]::GetFullPath((Join-Path $repositoryRoot $ScenarioPath))
+}
 $cliExecutable = Join-Path $repositoryRoot 'src\Ateliers.Ai.Orchestrator.Cli\bin\Release\net10.0\Ateliers.Ai.Orchestrator.Cli.exe'
-$testbedIdentity = 'Ateliers-Dev/ateliers-ai-orchestrator-testbed'
-$testbedUrl = 'https://github.com/' + $testbedIdentity + '.git'
-$executionRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('AteliersAiOrchestrator\v7\checkout-' + [Guid]::NewGuid().ToString('N'))
+$executionRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('AteliersAiOrchestrator\e2e\checkout-' + [Guid]::NewGuid().ToString('N'))
 $checkoutPath = Join-Path $executionRoot 'repository'
 $tempContractPath = Join-Path $executionRoot 'task-contract.json'
 $runStarted = $false
@@ -76,7 +108,20 @@ $keepExecutionRoot = $false
 Push-Location $repositoryRoot
 try {
     if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot '.git'))) { throw ("Gitリポジトリが見つかりません: {0}" -f $repositoryRoot) }
-    if (-not (Test-Path -LiteralPath $contractTemplatePath -PathType Leaf)) { throw ("v7契約テンプレートが見つかりません: {0}" -f $contractTemplatePath) }
+    if (-not (Test-Path -LiteralPath $scenarioPath -PathType Leaf)) { throw ("E2Eシナリオが見つかりません: {0}" -f $scenarioPath) }
+    $contract = Get-Content -LiteralPath $scenarioPath -Raw | ConvertFrom-Json
+    $repositoryIdentities = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($item in $contract.inputs) {
+        if ($item.reference -match '^https://github\.com/([^/]+/[^/]+)/blob/[^/]+/') {
+            $repositoryIdentity = [string]$Matches[1]
+            if (-not $repositoryIdentities.Contains($repositoryIdentity)) { $repositoryIdentities.Add($repositoryIdentity) }
+        }
+    }
+    if ($repositoryIdentities.Count -ne 1) {
+        throw 'E2Eシナリオのinputs.referenceから単一のGitHubリポジトリを特定できません。'
+    }
+    $repositoryIdentity = $repositoryIdentities[0]
+    $repositoryUrl = 'https://github.com/' + $repositoryIdentity + '.git'
 
     $gitCommand = Get-Command 'git.exe' -ErrorAction SilentlyContinue
     if ($null -eq $gitCommand) { $gitCommand = Get-Command 'git' -ErrorAction SilentlyContinue }
@@ -96,58 +141,42 @@ try {
     if (-not (Test-Path -LiteralPath $cliExecutable -PathType Leaf)) { throw ("Release CLI が見つかりません: {0}" -f $cliExecutable) }
     Invoke-FakeUnitTests -DotnetPath $dotnetCommand.Source -ProjectPath (Join-Path $repositoryRoot 'tests\Ateliers.Ai.Orchestrator.Tests\Ateliers.Ai.Orchestrator.Tests.csproj')
 
-    Write-Host 'GitHub認証とTestbed mainの最新SHAを確認します。'
-    $null = & $ghCommand.Source auth status --hostname github.com 2>&1
-    if ($LASTEXITCODE -ne 0) { throw 'GitHub CLI が github.com に認証されていません。認証状態を確認してください。' }
-    $defaultBranch = Get-CheckedNativeOutput -FilePath $ghCommand.Source -Arguments @(
-        'repo', 'view', $testbedIdentity, '--json', 'defaultBranchRef', '--template', '{{.defaultBranchRef.name}}'
-    ) -Description 'Testbed既定ブランチの確認'
-    if ([string]::IsNullOrWhiteSpace($defaultBranch)) { throw 'Testbedの既定ブランチを特定できません。' }
-    $branchApiPath = 'repos/{0}/branches/{1}' -f $testbedIdentity, [System.Uri]::EscapeDataString($defaultBranch)
-    $remoteHead = Get-CheckedNativeOutput -FilePath $ghCommand.Source -Arguments @('api', $branchApiPath, '--jq', '.commit.sha') -Description 'Testbed既定ブランチSHAの確認'
-
-    Write-Host 'Testbed mainを一時ディレクトリへcloneし、未修正教材の状態を確認します。'
-    New-Item -ItemType Directory -Path $executionRoot -Force | Out-Null
-    Invoke-CheckedNative -FilePath $gitCommand.Source -Arguments @(
-        'clone', '--single-branch', '--branch', $defaultBranch, $testbedUrl, $checkoutPath
-    ) -Description 'Testbed一時cloneの作成'
-    $localHead = Get-CheckedNativeOutput -FilePath $gitCommand.Source -Arguments @('-C', $checkoutPath, 'rev-parse', 'HEAD') -Description 'Testbed一時cloneのSHA確認'
-    if (-not $localHead.Equals($remoteHead, [System.StringComparison]::OrdinalIgnoreCase)) { throw '一時cloneがGitHub Testbed mainの確認済み最新SHAと一致しません。' }
-    $gitStatus = @(& $gitCommand.Source -C $checkoutPath status --porcelain=v1 --untracked-files=all 2>&1)
-    if ($LASTEXITCODE -ne 0 -or ($gitStatus.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace(($gitStatus -join '')))) {
-        throw 'Testbedの一時cloneがcleanではありません。Codexは起動しません。'
-    }
-
-    Write-Host 'Testbedの初期Release buildが成功することを確認します。'
-    $testProjectPath = Join-Path $checkoutPath 'tests\WordCounter.Tests\WordCounter.Tests.csproj'
-    Invoke-CheckedNative -FilePath $dotnetCommand.Source -Arguments @('build', $testProjectPath, '--configuration', 'Release') -Description 'Testbed初期Release build'
-    Write-Host '教材のチェックが既知の2件だけで失敗することを確認します。'
+    Write-Host ("GitHub認証と{0}の既定ブランチSHAを確認します。" -f $repositoryIdentity)
     $savedErrorActionPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        $baselineOutput = @(& $dotnetCommand.Source run --project $testProjectPath --configuration Release 2>&1)
-        $baselineExitCode = $LASTEXITCODE
+        $authOutput = @(& $ghCommand.Source auth status --hostname github.com 2>&1)
+        $authExitCode = $LASTEXITCODE
     }
     finally {
         $ErrorActionPreference = $savedErrorActionPreference
     }
-    $baselineText = ($baselineOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
-    $baselineText -split [Environment]::NewLine | ForEach-Object { Write-Host $_ }
-    if ($baselineExitCode -eq 0 -or
-        -not $baselineText.Contains('tabs and newlines:') -or
-        -not $baselineText.Contains('whitespace only:') -or
-        -not $baselineText.Contains('2 check(s) failed.')) {
-        throw ("Testbed教材の既知の失敗2件を再現できませんでした。結果を確認してください。{0}{1}" -f [Environment]::NewLine, $baselineText)
-    }
-    if ($baselineText.Contains('ordinary spaces:') -or $baselineText.Contains('repeated spaces:') -or $baselineText.Contains('empty input:')) {
-        throw ("Testbed教材に予期しないチェック失敗があります。Codexは起動しません。{0}{1}" -f [Environment]::NewLine, $baselineText)
+    if ($authExitCode -ne 0) { throw 'GitHub CLI が github.com に認証されていません。認証状態を確認してください。' }
+    $defaultBranch = Get-CheckedNativeOutput -FilePath $ghCommand.Source -Arguments @(
+        'repo', 'view', $repositoryIdentity, '--json', 'defaultBranchRef', '--template', '{{.defaultBranchRef.name}}'
+    ) -Description 'GitHub既定ブランチの確認'
+    if ([string]::IsNullOrWhiteSpace($defaultBranch)) { throw 'GitHubリポジトリの既定ブランチを特定できません。' }
+    $branchApiPath = 'repos/{0}/branches/{1}' -f $repositoryIdentity, [System.Uri]::EscapeDataString($defaultBranch)
+    $remoteHead = Get-CheckedNativeOutput -FilePath $ghCommand.Source -Arguments @('api', $branchApiPath, '--jq', '.commit.sha') -Description 'GitHub既定ブランチSHAの確認'
+
+    Write-Host 'シナリオ対象リポジトリを一時ディレクトリへcloneし、clean状態を確認します。'
+    New-Item -ItemType Directory -Path $executionRoot -Force | Out-Null
+    Invoke-CheckedNative -FilePath $gitCommand.Source -Arguments @(
+        'clone', '--single-branch', '--branch', $defaultBranch, $repositoryUrl, $checkoutPath
+    ) -Description 'シナリオ対象リポジトリの一時clone作成'
+    $localHead = Get-CheckedNativeOutput -FilePath $gitCommand.Source -Arguments @('-C', $checkoutPath, 'rev-parse', 'HEAD') -Description '一時cloneのSHA確認'
+    if (-not $localHead.Equals($remoteHead, [System.StringComparison]::OrdinalIgnoreCase)) { throw '一時cloneがGitHub既定ブランチの確認済み最新SHAと一致しません。' }
+    $gitStatus = Get-CheckedNativeOutput -FilePath $gitCommand.Source -Arguments @(
+        '-C', $checkoutPath, 'status', '--porcelain=v1', '--untracked-files=all'
+    ) -Description '一時cloneの状態確認'
+    if (-not [string]::IsNullOrWhiteSpace($gitStatus)) {
+        throw 'シナリオ対象リポジトリの一時cloneがcleanではありません。Codexは起動しません。'
     }
 
-    $contract = Get-Content -LiteralPath $contractTemplatePath -Raw | ConvertFrom-Json
-    Write-TaskContract -Contract $contract -WorkingDirectory $checkoutPath -TestbedSha $remoteHead -Path $tempContractPath
-    Write-Host '現行Release CLIでv7契約を検証します。'
-    Invoke-CheckedNative -FilePath $cliExecutable -Arguments @('validate', $tempContractPath) -Description 'v7契約の検証'
-    Write-Host ("準備完了: testbed main {0}。実Codexはまだ起動していません。" -f $remoteHead)
+    Write-TaskContract -Contract $contract -WorkingDirectory $checkoutPath -RepositorySha $remoteHead -Path $tempContractPath
+    Write-Host '現行Release CLIでシナリオ契約を検証します。'
+    Invoke-CheckedNative -FilePath $cliExecutable -Arguments @('validate', $tempContractPath) -Description 'E2Eシナリオ契約の検証'
+    Write-Host ("準備完了: {0} {1} {2}。実Codexはまだ起動していません。" -f $repositoryIdentity, $defaultBranch, $remoteHead)
 
     if (-not $RunCodex) {
         Write-Host '準備確認だけで終了します。実行するには -RunCodex を指定し、開始時に確認文を入力してください。'
@@ -167,8 +196,8 @@ try {
 
     Write-Host ''
     Write-Host 'この公開リポジトリで実Codexを実行します。Codex利用枠・費用が発生する場合があり、成功時は一意なブランチへのpush、公開PR、Reviewer結果コメントの投稿が行われます。自動マージはしません。失敗後にpush済みブランチやPRが残った場合は保持し、人間が確認して扱います。'
-    $confirmation = Read-Host '続行するには RUN V7 TESTBED E2E WITH PUSH AND PR と入力してください'
-    if ($confirmation -cne 'RUN V7 TESTBED E2E WITH PUSH AND PR') { throw '確認文字列が一致しないため、実Codex E2Eを開始しませんでした。' }
+    $confirmation = Read-Host '続行するには RUN CODEX E2E WITH PUSH AND PR と入力してください'
+    if ($confirmation -cne 'RUN CODEX E2E WITH PUSH AND PR') { throw '確認文字列が一致しないため、実Codex E2Eを開始しませんでした。' }
 
     $runRoot = Join-Path $executionRoot 'runs'
     $lifecycleLog = Join-Path $executionRoot 'lifecycle.jsonl'
@@ -177,11 +206,18 @@ try {
         '--runs', $runRoot, '--lifecycle-log', $lifecycleLog, '--slack-notifications', 'disabled')
     $runStarted = $true
     $keepExecutionRoot = $true
-    Write-Host 'v7 Codex E2Eを開始します。cleanな一時cloneを対象にします。'
-    $runOutput = @(& $cliExecutable @runArguments 2>&1)
-    $runExitCode = $LASTEXITCODE
+    Write-Host 'Codex E2Eを開始します。cleanな一時cloneを対象にします。'
+    $savedErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $runOutput = @(& $cliExecutable @runArguments 2>&1)
+        $runExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
     foreach ($line in $runOutput) { Write-Host $line }
-    if ($runExitCode -ne 0) { throw ("v7 Codex E2Eが失敗しました (exit code {0})。一時cloneと証跡、GitHub上のブランチ・PRを確認してください。" -f $runExitCode) }
+    if ($runExitCode -ne 0) { throw ("Codex E2Eが失敗しました (exit code {0})。一時cloneと証跡、GitHub上のブランチ・PRを確認してください。" -f $runExitCode) }
 
     $runDirectories = @(Get-ChildItem -LiteralPath $runRoot -Directory)
     if ($runDirectories.Count -ne 1) { throw '実行記録ディレクトリを一意に特定できません。作業領域と証跡を保持します。' }
@@ -206,7 +242,7 @@ try {
     Write-Host '一時cloneとrun記録は自動削除しません。'
 }
 catch {
-    [Console]::Error.WriteLine(("v7 E2E準備または実行を停止しました: {0}" -f $_.Exception.Message))
+    [Console]::Error.WriteLine(("E2E準備または実行を停止しました: {0}" -f $_.Exception.Message))
     if ($runStarted -or $keepExecutionRoot) {
         [Console]::Error.WriteLine(("証跡を保持しています。一時cloneとrun記録: {0}" -f $executionRoot))
         [Console]::Error.WriteLine('GitHub上ですでにpushまたはPR作成が行われている場合、ブランチやPRを削除・クローズ・マージせず、人間が証跡と状態を確認してください。')

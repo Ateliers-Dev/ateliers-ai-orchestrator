@@ -1,7 +1,7 @@
 ﻿{
   "schemaVersion": 1,
-  "taskId": "v7-testbed-word-counter",
-  "purpose": "Ateliers AI Orchestrator v7の実Codex E2E経路で、Testbedの単語数カウント課題を修正し、独立Reviewer、必要な場合のみの修正ループ、専用ブランチへのpush、PR作成、Reviewer結果コメント証跡、人間確認待ちまでを検証する",
+  "taskId": "testbed-word-counter-review-cycle",
+  "purpose": "Testbedの単語数カウント課題を修正し、独立Reviewer、必要な場合のみの修正ループ、専用ブランチへのpush、PR作成、Reviewer結果コメント証跡、人間確認待ちまでのE2E経路を検証する",
   "workingDirectory": "__WORKING_DIRECTORY_SET_BY_SCRIPT__",
   "scope": {
     "included": [
@@ -16,7 +16,7 @@
   },
   "inputs": [
     {
-      "description": "Ateliers AI Orchestrator Testbed v7 E2E scenario",
+      "description": "Ateliers AI Orchestrator Testbed review-cycle scenario",
       "reference": "https://github.com/Ateliers-Dev/ateliers-ai-orchestrator-testbed/blob/main/docs/v7-e2e-scenario.md",
       "revision": "実行時に確認したTestbed mainのSHAをスクリプトが設定する"
     },
