@@ -1,0 +1,70 @@
+﻿{
+  "schemaVersion": 1,
+  "taskId": "v7-testbed-word-counter",
+  "purpose": "Ateliers AI Orchestrator v7の実Codex E2E経路で、Testbedの単語数カウント課題を修正し、独立Reviewer、必要な場合のみの修正ループ、専用ブランチへのpush、PR作成、Reviewer結果コメント証跡、人間確認待ちまでを検証する",
+  "workingDirectory": "__WORKING_DIRECTORY_SET_BY_SCRIPT__",
+  "scope": {
+    "included": [
+      "src/WordCounter/",
+      "tests/WordCounter.Tests/"
+    ],
+    "excluded": [
+      "TestbedのAGENTS.md、README.md、docs/、CI、その他の教材保守",
+      "依存関係の追加、外部通信、秘密情報の取扱い、デプロイ、実データ処理",
+      "Testbedのmainへの変更、既存の利用者ブランチ・PRへの変更、force push、自動マージ"
+    ]
+  },
+  "inputs": [
+    {
+      "description": "Ateliers AI Orchestrator Testbed v7 E2E scenario",
+      "reference": "https://github.com/Ateliers-Dev/ateliers-ai-orchestrator-testbed/blob/main/docs/v7-e2e-scenario.md",
+      "revision": "実行時に確認したTestbed mainのSHAをスクリプトが設定する"
+    },
+    {
+      "description": "Testbedの作業範囲と安全ルール",
+      "reference": "https://github.com/Ateliers-Dev/ateliers-ai-orchestrator-testbed/blob/main/AGENTS.md",
+      "revision": "実行時に確認したTestbed mainのSHAをスクリプトが設定する"
+    }
+  ],
+  "requirements": [
+    "TextMetrics.CountWordsを空白文字で区切られた語数を数える実装に修正する。連続空白は空語として数えず、空文字列と空白のみは0を返す。",
+    "テストの期待値を弱めたり削除したりせず、ordinary spaces、repeated spaces、tabs and newlines、empty input、whitespace onlyの全チェックを通す。",
+    "Testbedの指示にあるビルドとチェック実行を行い、その実際の終了コードと結果を報告する。",
+    "提出差分と検証結果を独立Reviewerに確認させる。指摘がある場合だけ契約の上限内で修正・再レビューし、指摘がなければ修正ループを作らない。",
+    "検証用の一意な作業ブランチをpushし、PRを作成する。PRのhead/base SHAとレビュー結果コメントの証跡を実行記録へ保存する。",
+    "PRとReviewer結果コメントの証跡を確認した後、人間の確認待ちで停止する。"
+  ],
+  "acceptanceCriteria": [
+    "Release buildが成功する。",
+    "5つの単語数チェックがすべて成功し、期待値を変更・削除していない。",
+    "独立Reviewerの判定、対象差分と結果が実行記録に保存されている。修正指摘の不存在は受入失敗としない。",
+    "実行記録に一意なブランチ、PR URL、レビュー対象のhead/base SHAがある。",
+    "PR上のReviewer結果コメントと投稿照合証跡が実行記録に保存されている。",
+    "自動マージを行わず、人間確認待ちで停止する。"
+  ],
+  "delegatedOperations": [
+    "Testbedのシナリオ、AGENTS.md、対象コードとチェックを確認する。",
+    "src/WordCounter/とtests/WordCounter.Tests/の課題に必要な最小差分だけを変更する。",
+    "指定されたRelease buildと全チェックを実行し、結果を確認する。",
+    "固定した差分と検証結果を独立Reviewerに渡し、必要な指摘がある場合だけ上限内で対応する。",
+    "一意な検証ブランチをpushし、PRとReviewer結果コメントを作成・照合して証跡を保存する。",
+    "変更、検証、レビュー、PR、実行証跡の場所と残課題を報告する。"
+  ],
+  "limits": {
+    "maxDurationMinutes": 60,
+    "maxRevisionAttempts": 2,
+    "maxRetries": 1
+  },
+  "stopConditions": [
+    "対象範囲外の判断や変更が必要になった場合。",
+    "テストの期待値または要件が曖昧で、推測せずに続行できない場合。",
+    "mainからのcleanな一時クローン、GitHub認証、push権限、PR作成またはコメント照合に問題がある場合。",
+    "PR必須経路や証跡保存が利用できず、結果を成功として確認できない場合。",
+    "教材main、既存の利用者ブランチまたは既存PRを変更しなければ進められない場合。",
+    "公開操作後に実行が失敗または中断した場合は、証跡と残存ブランチ・PRをそのまま保持して報告し、削除・クローズ・マージを行わない。"
+  ],
+  "reporting": {
+    "pullRequestExpected": true,
+    "finalReportFormat": "markdown"
+  }
+}

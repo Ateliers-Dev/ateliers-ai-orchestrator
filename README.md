@@ -1,5 +1,7 @@
 # Ateliers AI オーケストレーター
 
+v7 Testbed 実Codex E2Eの準備は [v7-testbed-codex-e2e.md](docs/v7-testbed-codex-e2e.md) を参照してください。これはPR必須経路を使う独立したシナリオであり、Issue #17のv6 one-shot検証手順とは別です。
+
 .NET 10 のローカルCLIです。バージョン付きJSON契約の検証、状態遷移モデル、JSONL実行記録に加え、Fake AgentまたはCodex CLI子プロセスによるワークフローを実行できます。契約がPRを要求するCodex実行では、専用ブランチへのpushとGitHub PR作成を必須ゲートとして扱います。mergeは行いません。
 
 
