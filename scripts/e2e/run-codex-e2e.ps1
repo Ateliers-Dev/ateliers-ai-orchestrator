@@ -75,14 +75,15 @@ function Get-ScenarioRepositoryIdentity {
         if ([string]::IsNullOrWhiteSpace($referenceText) -or
             -not [System.Uri]::TryCreate($referenceText, [System.UriKind]::Absolute, [ref]$referenceUri) -or
             $referenceUri.Scheme -cne 'https' -or $referenceUri.Host -cne 'github.com' -or
-            -not [string]::IsNullOrEmpty($referenceUri.UserInfo)) {
-            throw ("E2Eシナリオの参照URLはすべてhttps://github.comのリポジトリURLである必要があります: {0}" -f $referenceText)
+            -not [string]::IsNullOrEmpty($referenceUri.UserInfo) -or
+            $referenceText.IndexOfAny([char[]]@('?', '#')) -ge 0) {
+            throw 'E2Eシナリオの参照URLはUserInfo・query・fragmentを含まないHTTPS GitHubリポジトリURLで指定してください。'
         }
         $referenceSegments = @($referenceUri.AbsolutePath.Trim('/').Split('/'))
         if ($referenceSegments.Count -lt 2 -or
             $referenceSegments[0] -notmatch '^[A-Za-z0-9][A-Za-z0-9-]*$' -or
             $referenceSegments[1] -notmatch '^[A-Za-z0-9_.-]+$') {
-            throw ("E2Eシナリオの参照URLからGitHubリポジトリを特定できません: {0}" -f $referenceText)
+            throw 'E2Eシナリオの参照URLからGitHubリポジトリを特定できません。URL形式を確認してください。'
         }
         $repositoryIdentity = ('{0}/{1}' -f $referenceSegments[0], $referenceSegments[1]).ToLowerInvariant()
         if ($repositoryIdentity.EndsWith('.git', [System.StringComparison]::OrdinalIgnoreCase)) {
