@@ -373,13 +373,15 @@ try {
         throw 'PRまたはReviewer結果コメントの証跡が不一致です。作業領域と証跡を保持します。'
     }
     $pullRequestState = Get-CheckedNativeOutput -FilePath $ghCommand.Source -Arguments @(
-        'pr', 'view', [string]$pullRequestEvidence.url, '--json', 'state,baseRefName,headRefName',
-        '--template', '{{.state}}|{{.baseRefName}}|{{.headRefName}}'
+        'pr', 'view', [string]$pullRequestEvidence.url, '--json', 'state,baseRefName,headRefName,headRefOid',
+        '--template', '{{.state}}|{{.baseRefName}}|{{.headRefName}}|{{.headRefOid}}'
     ) -Description 'GitHub上のPR状態確認'
     $pullRequestStateParts = $pullRequestState.Split('|')
-    if ($pullRequestStateParts.Count -ne 3 -or $pullRequestStateParts[0] -cne 'OPEN' -or
-        $pullRequestStateParts[1] -cne $defaultBranch -or $pullRequestStateParts[2] -cne [string]$pullRequestEvidence.branch) {
-        throw 'PRが未マージのOPEN状態でbase/mainを指していることを確認できません。証跡と作業領域を保持します。'
+    if ($pullRequestStateParts.Count -ne 4 -or $pullRequestStateParts[0] -cne 'OPEN' -or
+        $pullRequestStateParts[1] -cne $defaultBranch -or $pullRequestStateParts[2] -cne [string]$pullRequestEvidence.branch -or
+        -not [string]::Equals($pullRequestStateParts[3], [string]$pullRequestEvidence.headSha, [System.StringComparison]::OrdinalIgnoreCase) -or
+        -not [string]::Equals($pullRequestStateParts[3], [string]$commentEvidence.headSha, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw 'PRが未マージのOPEN状態でbase/mainを指し、GitHub上の現在のhead SHAがPR・Reviewer証跡と一致していることを確認できません。証跡と作業領域を保持します。'
     }
 
     $deliveryConfirmationText = 'CONFIRM SLACK DELIVERY {0} TO {1}' -f $runDirectories[0].Name, ($productionChannels -join ',')
