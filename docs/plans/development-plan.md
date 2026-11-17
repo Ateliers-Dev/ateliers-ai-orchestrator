@@ -35,7 +35,7 @@ MCPは既存契約スキーマをCLIへ中継する薄いアダプターとす�
 
 MCPは分離可能な専用プロジェクトとし、公式C# MCP SDKを使う。CLIとの内部境界は契約JSON stdin、結果JSON stdout、診断stderrとする。CLI既存のファイル引数経路は維持する。
 
-Phase 2では、CLI能力情報にSchema・ガイド取得対応を追加し、古いCLI・不在・起動失敗・不正出力・timeout・キャンセルを構造化エラーとする。Schemaやガイドの組込みフォールバックは行わない。追加ゲートでは、AIが実際にガイドを参照し、契約生成前にSchemaを取得する順序、生成契約のCLI validator適合、MCP→CLI実行を同一の実機試行で観測する。ガイド/Schema取得可否とAI実際の参照は別評価とし、ログはTool名・順序中心で契約本文を不要に複製しない。実機証跡が揃うまでPhase 2統合ゲートはInconclusiveとする。Phase 3の既定スクリプト起動確認は含めない。
+Phase 2の合格条件は、(1) MCPが3 Toolを認識する、(2) `get_orchestration_guide` と `get_contract_schema` が正常終了して有効な内容を返す、(3) 親AIがSchemaに適合するTaskContractを生成できる、(4) `run_orchestration` がMCPからCLIを起動し、契約を受け渡して実行処理へ到達した証跡があることとする。AIがガイドを自発参照したかは観測・記録するが必須条件にはしない。CLI内部のGit等の既知エラーで `Failed` / `NeedsHumanInput` となっても、起動・契約受領・実行到達を確認できれば疎通Passとし、内部不具合は後続課題へ記録する。CLI起動失敗、契約未受領、MCP→CLI通信失敗はFailとする。Phase 2はオーケストレーション本体の正常終了を要求せず、既知の内部不具合の修正へ範囲を拡大しない。詳細な証跡要件は[Phase 2検証記録](phase2-stdio-mcp-verification.md)を参照する。Phase 3の既定スクリプト起動確認は含めない。
 
 ### Phase 3 — 既定スクリプトでCLIが起動することの確認
 
@@ -80,3 +80,4 @@ Phase 1の実装詳細は[CLIインストーラー技術仕様](../reference/cli
 ## 7. Phase 2 技術仕様と検証記録
 
 Phase 2の実装仕様は[STDIO MCP技術仕様](../reference/stdio-mcp.md)、Phaseゲートの実測結果は[STDIO MCP検証記録](phase2-stdio-mcp-verification.md)に記録する。Release CLIにstdin JSON protocolを追加した場合、対応版Releaseの発行・配置は別の明示的なRelease/installer操作とし、Phase 2コード変更を理由にタグ作成やRelease発行を自動で行わない。
+
