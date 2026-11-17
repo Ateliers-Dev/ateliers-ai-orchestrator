@@ -1,5 +1,7 @@
 # Ateliers AI オーケストレーター
 
+E2E実行基盤とシナリオは [docs/e2e/README.md](docs/e2e/README.md) を参照してください。現在のシナリオは Testbed のレビューサイクルです。
+
 .NET 10 のローカルCLIです。バージョン付きJSON契約の検証、状態遷移モデル、JSONL実行記録に加え、Fake AgentまたはCodex CLI子プロセスによるワークフローを実行できます。契約がPRを要求するCodex実行では、専用ブランチへのpushとGitHub PR作成を必須ゲートとして扱います。mergeは行いません。
 
 

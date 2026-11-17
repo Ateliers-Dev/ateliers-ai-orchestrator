@@ -1,5 +1,7 @@
 # Issue #17 Codex E2E 検証
 
+Testbed のレビューサイクルE2Eは別シナリオです。[E2E基盤](e2e/README.md) と [Testbedシナリオ](e2e/testbed-review-cycle.md) を参照してください。このv6用契約や実行経路は変更しません。
+
 この手順は、Issue #17「Reviewer停止時に停止原因を実行証跡へ記録する」のCodex one-shot検証を行います。Releaseビルドと契約検証は既存checkoutで実行し、実Codex E2Eを明示的に開始する場合は `%TEMP%` に作る一時Gitクローンを使います。既存checkoutのブランチとファイルは切り替えたり書き換えたりしません。
 
 ## 前提
