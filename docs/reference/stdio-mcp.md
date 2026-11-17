@@ -73,16 +73,15 @@ Phase 2対応CLIを含むReleaseが別途発行・配置されるまでは、現
 
 ### MCPサーバーの配置
 
-リポジトリを取得した開発者がRelease publishを一度だけ行う。通常のMCP起動時にソース取得やbuildは不要。
+リポジトリを取得した開発者が、リポジトリ内のPowerShellスクリプトを実行してMCPを配置する。スクリプトは実行場所にかかわらず自身の位置からリポジトリ内のMCPプロジェクトを解決する。通常のMCP起動時にソース取得やbuildは不要。
 
 ```powershell
-$mcpInstall = Join-Path $env:LOCALAPPDATA 'Ateliers-Dev\Ai-Orchestrator\Mcp'
-dotnet publish .\src\Ateliers.Ai.Orchestrator.Mcp\Ateliers.Ai.Orchestrator.Mcp.csproj `
-  --configuration Release --runtime win-x64 --self-contained true `
-  -p:PublishSingleFile=true -o $mcpInstall
+& .\scripts\mcp-installer\Install-AteliersAiOrchestratorMcp.ps1
 ```
 
-CLIはPhase 1 installerで別途明示的に配置し、`Install-AteliersAiOrchestrator.ps1 -Verify`で確認する。MCPはWindows x64専用CLIを起動する。MCP更新は同じpublish手順を再実行して、配置ファイル一式を更新する。
+配置先は`%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\Mcp`です。スクリプトはRelease / `win-x64` / self-contained / single-fileで一時ディレクトリへpublishし、成功とMCP実行ファイルを確認した後、既存のMCP配置先ディレクトリだけを全削除して成果物一式をコピーします。publish失敗時は既存配置を変更しません。MCPなどの実行中プロセスがファイルを使用して削除できない場合は失敗を表示します。その場合は該当プロセスを終了してから再実行してください。
+
+この暫定スクリプトは開発・検証用です。再実行するとMCP配置先のファイル一式を全削除・全置換します。配置先に手動で置いたファイルも削除されます。差分比較、バックアップ、ロールバック、バージョン管理、自動更新、正式Release配布は行いません。CLIはPhase 1 installerで別途明示的に配置し、`Install-AteliersAiOrchestrator.ps1 -Verify`で確認してください。CLIの`bin`、runデータ、その他のフォルダはこのスクリプトの対象ではありません。
 
 ### Codexへの登録
 
@@ -102,5 +101,13 @@ Codex CLI実行パスは`codex.exe`またはnpm配置の`codex.ps1`/`codex.cmd`�
 ### 起動と動作確認
 
 Codexを再起動するとMCPサーバーが子プロセスとして起動する。stdio protocolの疎通確認用PoCは再試験しない。ツール一覧に`run_orchestration`があること、CLIをインストールして`--capabilities`がprotocol v1を返すことを確認する。テストは`agent="fake"`で隔離した一時workingDirectoryを指定し、結果JSONの`ok`, `state`, `runDirectory`と出力先の記録を照合する。Codexの通常実行は本番契約とCodex CLI設定が必要。
+
+PowerShellの実行ポリシーでスクリプト起動が制限される環境では、リポジトリルートで次のように現在のプロセスに限りBypassを指定できます。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\mcp-installer\Install-AteliersAiOrchestratorMcp.ps1
+```
+
+PowerShell 7を使用する場合は`powershell`を`pwsh`に置き換えてください。
 
 未配置CLIでは`cli_not_installed`、起動失敗や能力照会timeoutでは`cli_start_failed`または`cli_capabilities_timeout`、旧CLIまたは非対応protocolでは`unsupported_cli_protocol`、Codex path未設定では`codex_cli_not_configured`を返す。MCP/CLI更新により別のコンポーネントを自動更新しない。
