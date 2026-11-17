@@ -16,7 +16,11 @@ internal static class FixtureHost
         if (args.Length >= 1 && args[0] == "--lifecycle-writer-fixture") return UnitTestCatalog.RunLifecycleWriterFixture(args);
         if (args.Length == 1 && args[0] == "--mcp-cli-adapter-fixture")
         {
-            new Ateliers.Ai.Orchestrator.UnitTests.McpCliAdapterTests().Adapter_passes_contract_to_cli_stdin_and_returns_cli_json().GetAwaiter().GetResult();
+            var tests = new Ateliers.Ai.Orchestrator.UnitTests.McpCliAdapterTests();
+            tests.Adapter_passes_contract_to_cli_stdin_and_returns_cli_json().GetAwaiter().GetResult();
+            tests.Adapter_rejects_multibyte_cli_output_over_64_KiB().GetAwaiter().GetResult();
+            tests.Adapter_starts_npm_cmd_codex_shim_and_returns_structured_result_on_windows().GetAwaiter().GetResult();
+            UnitTestCatalog.RunUnitTest("npm codex.cmdとcodex.ps1 shimで日本語プロンプトを渡す");
             Console.WriteLine("MCP-to-CLI fixture passed.");
             return 0;
         }

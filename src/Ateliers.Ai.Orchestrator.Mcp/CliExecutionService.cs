@@ -6,7 +6,7 @@ using System.Text.Json;
 internal sealed class CliExecutionService
 {
     private const int CliProtocolVersion = 1;
-    private const int MaxCapturedCharacters = 64 * 1024;
+    private const int MaxCapturedResponseBytes = 64 * 1024;
 
     public async Task<string> RunAsync(JsonElement contract, string agent, string? codexExecutablePath,
         string? runsDirectory, CancellationToken cancellationToken)
@@ -62,8 +62,8 @@ internal sealed class CliExecutionService
             if (!process.Start()) return Error("cli_start_failed", "Release CLIプロセスを開始できませんでした。");
             try
             {
-                var stdoutTask = ReadBoundedAsync(process.StandardOutput, MaxCapturedCharacters);
-                var stderrTask = ReadBoundedAsync(process.StandardError, MaxCapturedCharacters);
+                var stdoutTask = ReadBoundedAsync(process.StandardOutput.BaseStream, MaxCapturedResponseBytes);
+                var stderrTask = ReadBoundedAsync(process.StandardError.BaseStream, MaxCapturedResponseBytes);
                 var contractBytes = Encoding.UTF8.GetBytes(contract.GetRawText());
                 await process.StandardInput.BaseStream.WriteAsync(contractBytes, cancellationToken);
                 await process.StandardInput.BaseStream.FlushAsync(cancellationToken);
@@ -72,14 +72,7 @@ internal sealed class CliExecutionService
 
                 var stdout = await stdoutTask;
                 _ = await stderrTask; // Drain child diagnostics without returning potentially sensitive log text to the MCP caller.
-                if (stdout.Truncated) return Error("cli_response_too_large", "CLI応答が上限を超えたため破棄しました。");
-                using var result = JsonDocument.Parse(stdout.Text);
-                var root = result.RootElement;
-                if (!root.TryGetProperty("protocolVersion", out var version) || version.ValueKind != JsonValueKind.Number || version.GetInt32() != CliProtocolVersion ||
-                    !root.TryGetProperty("exitCode", out var exitCode) || exitCode.ValueKind != JsonValueKind.Number || exitCode.GetInt32() != process.ExitCode ||
-                    !root.TryGetProperty("ok", out var ok) || ok.ValueKind is not (JsonValueKind.True or JsonValueKind.False) || ok.GetBoolean() != (process.ExitCode == 0))
-                    return Error("invalid_cli_response", "CLI応答のprotocolVersionまたは終了コードが一致しません。");
-                return root.GetRawText();
+                return CreateCliResponse(stdout, process.ExitCode);
             }
             finally
             {
@@ -160,8 +153,8 @@ internal sealed class CliExecutionService
             if (!process.Start()) return (false, "cli_start_failed");
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(5));
-            var outputTask = ReadBoundedAsync(process.StandardOutput, 4096);
-            var stderrTask = ReadBoundedAsync(process.StandardError, 4096);
+            var outputTask = ReadBoundedAsync(process.StandardOutput.BaseStream, 4096);
+            var stderrTask = ReadBoundedAsync(process.StandardError.BaseStream, 4096);
             try { await process.WaitForExitAsync(timeout.Token); }
             catch (OperationCanceledException)
             {
@@ -174,7 +167,7 @@ internal sealed class CliExecutionService
             if (process.ExitCode != 0) return (false, null);
             var captured = await outputTask;
             if (captured.Truncated) return (false, null);
-            using var json = JsonDocument.Parse(captured.Text);
+            using var json = JsonDocument.Parse(captured.Bytes);
             return (json.RootElement.TryGetProperty("cliVersion", out var cliVersion) && cliVersion.ValueKind == JsonValueKind.String &&
                 string.Equals(NormalizeVersion(cliVersion.GetString()!), NormalizeVersion(installedVersion), StringComparison.OrdinalIgnoreCase) &&
                 json.RootElement.TryGetProperty("protocolVersion", out var protocol) && protocol.ValueKind == JsonValueKind.Number && protocol.GetInt32() == CliProtocolVersion &&
@@ -199,21 +192,33 @@ internal sealed class CliExecutionService
         }
     }
 
-    private static async Task<CapturedText> ReadBoundedAsync(StreamReader reader, int maxCharacters)
+    internal static async Task<CapturedBytes> ReadBoundedAsync(Stream stream, int maxBytes)
     {
-        var buffer = new char[4096];
-        var captured = new StringBuilder(Math.Min(maxCharacters, 4096));
+        var buffer = new byte[4096];
+        using var captured = new MemoryStream(Math.Min(maxBytes, 4096));
         var truncated = false;
         int read;
-        while ((read = await reader.ReadAsync(buffer)) > 0)
+        while ((read = await stream.ReadAsync(buffer)) > 0)
         {
-            var remaining = maxCharacters - captured.Length;
-            if (remaining > 0) captured.Append(buffer, 0, Math.Min(read, remaining));
+            var remaining = maxBytes - (int)captured.Length;
+            if (remaining > 0) captured.Write(buffer, 0, Math.Min(read, remaining));
             if (read > remaining) truncated = true;
         }
-        return new(captured.ToString(), truncated);
+        return new(captured.ToArray(), truncated);
+    }
+
+    internal static string CreateCliResponse(CapturedBytes stdout, int processExitCode)
+    {
+        if (stdout.Truncated) return Error("cli_response_too_large", "CLI応答が上限を超えたため破棄しました。");
+        using var result = JsonDocument.Parse(stdout.Bytes);
+        var root = result.RootElement;
+        if (!root.TryGetProperty("protocolVersion", out var version) || version.ValueKind != JsonValueKind.Number || version.GetInt32() != CliProtocolVersion ||
+            !root.TryGetProperty("exitCode", out var exitCode) || exitCode.ValueKind != JsonValueKind.Number || exitCode.GetInt32() != processExitCode ||
+            !root.TryGetProperty("ok", out var ok) || ok.ValueKind is not (JsonValueKind.True or JsonValueKind.False) || ok.GetBoolean() != (processExitCode == 0))
+            return Error("invalid_cli_response", "CLI応答のprotocolVersionまたは終了コードが一致しません。");
+        return root.GetRawText();
     }
 
     private static string Error(string code, string message) => JsonSerializer.Serialize(new { protocolVersion = 1, ok = false, error = new { code, message } });
-    private sealed record CapturedText(string Text, bool Truncated);
+    internal sealed record CapturedBytes(byte[] Bytes, bool Truncated);
 }

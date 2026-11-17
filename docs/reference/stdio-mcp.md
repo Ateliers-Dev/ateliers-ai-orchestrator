@@ -94,10 +94,10 @@ command = 'C:\Users\<user>\AppData\Local\Ateliers-Dev\Ai-Orchestrator\Mcp\Atelie
 args = []
 
 [mcp_servers.ateliers_ai_orchestrator.env]
-ATELIERS_CODEX_CLI_PATH = 'C:\Users\<user>\AppData\Roaming\npm\codex.cmd'
+ATELIERS_CODEX_CLI_PATH = 'C:\Users\<user>\AppData\Roaming\npm\codex.ps1'
 ```
 
-Codex CLI実行パスは`codex.exe`またはnpm配置の`codex.ps1`等、現在のCLI実装が起動できる絶対パスを指定する。ログイン状態はCodex CLI自身の認証設定を使う。MCP設定にAPIキーやTokenを書かない。
+Codex CLI実行パスは`codex.exe`またはnpm配置の`codex.ps1`/`codex.cmd`など、現在のCLI実装が起動できる絶対パスを指定する。Windowsの`.ps1` shimはPowerShell経由で起動する。`.cmd` shimもWindows x64の`run_orchestration(agent="codex")` fixtureで起動と構造化結果の返却を確認した。設定例では明示的なshim起動経路がある`.ps1`を使う。ログイン状態はCodex CLI自身の認証設定を使う。MCP設定にAPIキーやTokenを書かない。
 
 ### 起動と動作確認
 
