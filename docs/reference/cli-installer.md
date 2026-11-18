@@ -33,14 +33,14 @@
 
 ## 3. Release生成と配布物
 
-`.github/workflows/release-cli.yml` は `v*.*.*` タグのpushで起動する。workflowは.NET 10でソリューションをrestore/buildし、Fake-only Unitテスト（`Category=Unit`）を実行した後、CLIプロジェクトを `win-x64`、self-contained、Releaseでpublishする。プロジェクトの `Version` と `InformationalVersion` に `v` を除いたタグ値を埋め込み、ReleaseソースSHAを記録する。
+`.github/workflows/release-cli.yml` は `v*.*.*` タグのpushで起動する。ハイフンを含むベータ等のプレリリースタグでは公開ジョブを実行せず、GitHub Releaseを作成しない。安定版タグでは.NET 10でソリューションをrestore/buildし、Fake-only Unitテスト（`Category=Unit`）を実行した後、CLIプロジェクトを `win-x64`、self-contained、Releaseでpublishする。プロジェクトの `Version` と `InformationalVersion` に `v` を除いたタグ値を埋め込み、ReleaseソースSHAを記録する。
 
 GitHub Releaseに次の2つの資産を作る。
 
 - `Ateliers.Ai.Orchestrator-win-x64-v<version>.zip`: publishファイルと `release-manifest.json`
 - `Ateliers.Ai.Orchestrator-win-x64-v<version>.zip.sha256`: ZIP全体のSHA-256とファイル名
 
-`release-manifest.json` は `version`、`runtimeIdentifier` (`win-x64`)、`commit` を持つ。通常のPRビルドはReleaseを作成しない。タグ作成・Release公開は当該タグのpushにより明示的に行う。
+`release-manifest.json` は `version`、`runtimeIdentifier` (`win-x64`)、`commit` を持つ。通常のPRビルドとベータタグはReleaseを作成しない。安定版タグのpushでGitHub Releaseを作成する。
 
 ## 4. インストールと更新
 
