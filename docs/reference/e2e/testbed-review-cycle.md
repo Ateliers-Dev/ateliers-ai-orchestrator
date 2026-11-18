@@ -1,5 +1,9 @@
 # Testbedレビューサイクル
 
+> 作成日: 2026-11-17
+> 更新日: 2026-11-18
+> 作成者: yuu503
+
 このシナリオは Ateliers-Dev/ateliers-ai-orchestrator-testbed の単語数課題を使い、現行schemaVersion 1の契約とPR必須Codex経路を検証します。実行基盤の共通手順は [E2E実行基盤](README.md) を参照してください。
 
 ## 目的と公開操作
