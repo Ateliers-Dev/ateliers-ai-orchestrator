@@ -205,6 +205,95 @@ public sealed class McpCliAdapterTests
         }
     }
 
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task Runtime_diagnostics_report_fixed_paths_and_manifest_values_without_starting_the_cli()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ateliers-mcp-diagnostics-test-" + Guid.NewGuid().ToString("N"));
+        var bin = Path.Combine(root, "Ateliers-Dev", "Ai-Orchestrator", "bin");
+        Directory.CreateDirectory(bin);
+        var cliPath = Path.Combine(bin, "Ateliers.Ai.Orchestrator.Cli.exe");
+        var manifestPath = Path.Combine(bin, "install.json");
+        try
+        {
+            await File.WriteAllTextAsync(cliPath, "fixture executable placeholder");
+            await File.WriteAllTextAsync(manifestPath, "{\"version\":\"0.0.2\",\"runtimeIdentifier\":\"win-x64\"}");
+
+            var response = CliExecutionService.CreateRuntimeDiagnostics(root, "C:\\fixture\\mcp.exe", "1.2.3.4", "1.2.3.0", "1.2.3+fixture");
+            using var diagnostics = JsonDocument.Parse(response);
+            var mcp = diagnostics.RootElement.GetProperty("mcp");
+            var installation = diagnostics.RootElement.GetProperty("installation");
+
+            Assert.Equal("C:\\fixture\\mcp.exe", mcp.GetProperty("processPath").GetString());
+            Assert.Equal("1.2.3.4", mcp.GetProperty("processFileVersion").GetString());
+            Assert.Equal(cliPath, installation.GetProperty("cliPath").GetString());
+            Assert.True(installation.GetProperty("cliExists").GetBoolean());
+            Assert.Equal(manifestPath, installation.GetProperty("manifestPath").GetString());
+            Assert.Equal("valid", installation.GetProperty("manifestStatus").GetString());
+            Assert.Equal("0.0.2", installation.GetProperty("manifestVersion").GetString());
+            Assert.Equal("win-x64", installation.GetProperty("runtimeIdentifier").GetString());
+        }
+        finally
+        {
+            DeleteTemporaryDirectory(root);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task Runtime_diagnostics_report_json_parse_location_without_manifest_contents()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ateliers-mcp-diagnostics-json-test-" + Guid.NewGuid().ToString("N"));
+        var bin = Path.Combine(root, "Ateliers-Dev", "Ai-Orchestrator", "bin");
+        Directory.CreateDirectory(bin);
+        var manifestPath = Path.Combine(bin, "install.json");
+        try
+        {
+            await File.WriteAllTextAsync(manifestPath, "{\"private\":\"SECRET_MARKER\",\nBROKEN}");
+
+            var response = CliExecutionService.CreateRuntimeDiagnostics(root, null, null, "1.2.3.0", "1.2.3+fixture");
+            using var diagnostics = JsonDocument.Parse(response);
+            var installation = diagnostics.RootElement.GetProperty("installation");
+            var parseError = installation.GetProperty("parseError");
+
+            Assert.Equal("invalid_json", installation.GetProperty("manifestStatus").GetString());
+            Assert.Equal("JsonReaderException", parseError.GetProperty("type").GetString());
+            Assert.True(parseError.GetProperty("lineNumber").GetInt64() >= 0);
+            Assert.False(response.Contains("SECRET_MARKER", StringComparison.Ordinal));
+            Assert.False(parseError.ToString().Contains(manifestPath, StringComparison.Ordinal));
+        }
+        finally
+        {
+            DeleteTemporaryDirectory(root);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task Runtime_diagnostics_does_not_parse_an_oversized_manifest()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ateliers-mcp-diagnostics-large-test-" + Guid.NewGuid().ToString("N"));
+        var bin = Path.Combine(root, "Ateliers-Dev", "Ai-Orchestrator", "bin");
+        Directory.CreateDirectory(bin);
+        var manifestPath = Path.Combine(bin, "install.json");
+        try
+        {
+            await File.WriteAllTextAsync(manifestPath, new string('x', 16 * 1024 + 1));
+
+            var response = CliExecutionService.CreateRuntimeDiagnostics(root, null, null, "1.2.3.0", "1.2.3+fixture");
+            using var diagnostics = JsonDocument.Parse(response);
+            var installation = diagnostics.RootElement.GetProperty("installation");
+
+            Assert.Equal("too_large", installation.GetProperty("manifestStatus").GetString());
+            Assert.Equal(16 * 1024 + 1, installation.GetProperty("manifestBytes").GetInt64());
+            Assert.Equal(JsonValueKind.Null, installation.GetProperty("parseError").ValueKind);
+        }
+        finally
+        {
+            DeleteTemporaryDirectory(root);
+        }
+    }
+
     private static string CreateContract(string workingDirectory) => JsonSerializer.Serialize(new
     {
         schemaVersion = 1,
