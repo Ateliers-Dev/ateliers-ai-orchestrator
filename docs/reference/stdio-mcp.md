@@ -1,5 +1,9 @@
 # STDIO MCP 技術仕様・導入手順
 
+> 作成日: 2026-11-18
+> 更新日: 2026-11-18
+> 作成者: yuu503
+
 > 対象: `src/Ateliers.Ai.Orchestrator.Mcp`、CLI Schema/guide公開、`--capabilities` と `run --stdin-json`。Phase 2の実装仕様。
 
 ## 1. 責務と構成
