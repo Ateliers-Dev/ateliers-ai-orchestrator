@@ -1,12 +1,16 @@
 # Ateliers AI Orchestrator 開発計画書
 
+> 作成日: 2026-11-17
+> 更新日: 2026-11-18
+> 作成者: yuu503
+
 > 状態: 承認済み。Phase 1・Phase 2完了。Phase 3の進行基準。
 
 ## 1. 目的と進め方
 
 本書は、Ateliers AI Orchestrator の立て直しにおける作業順序、各Phaseの完了条件、進行・変更管理を固定する。Phaseごとの完了判定は、そのPhaseに記載した条件だけに基づく。レビュー合格、Phase完了、最終リリース受入はそれぞれ別に記録する。
 
-本計画書とPhase 1対象の[CLIインストーラー要求仕様](../requirements/cli-installer-requirements.md)はユーザー確認済みである。Phase 2では[承認済みMCP要求仕様](../requirements/mcp-requirements.md)を着手・実装基準とする。長期的な拡張性・保守性を優先し、現行CLIに不足する構造化プロセス境界は後方互換を保って拡張する。仕様や完了条件は、ユーザーが変更を承認し記録するまで変更しない。
+本計画書とPhase 1対象の[CLIインストーラー要求仕様](../../requirements/milestone-0/cli-installer-requirements.md)はユーザー確認済みである。Phase 2では[承認済みMCP要求仕様](../../requirements/milestone-0/mcp-requirements.md)を着手・実装基準とする。長期的な拡張性・保守性を優先し、現行CLIに不足する構造化プロセス境界は後方互換を保って拡張する。仕様や完了条件は、ユーザーが変更を承認し記録するまで変更しない。
 
 ## 2. 固定フェーズ
 
@@ -27,7 +31,7 @@ Phase 0の完了記録には、変更された対象、`dotnet test` の結果�
 
 固定バージョンRelease CLIをユーザー単位でインストールする。確定パスは `%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\bin\Ateliers.Ai.Orchestrator.Cli.exe`。対象は Windows x64 自己完結型ZIPで、指定バージョンのGitHub Releaseから取得する。タグ起動のRelease workflowでZIP、マニフェスト、SHA-256ファイルを作成・添付する。インストーラーはSHA-256、対象RID、マニフェスト、CLI自身の `--version` を検証してから `bin` を切り替え、`-Verify` で実体とバージョンを再確認する。
 
-Phase 1の完了条件は、UnitTests成功、Release publish/package定義の確認、指定バージョンを使う配置手順と更新/再実行の確認、配置・バージョン確認と失敗ケースの検証、およびこの実装を根拠とした技術仕様書の作成とする。Phase 1の検証記録（[CLIインストーラー検証記録](phase1-cli-installer-verification.md)）では、実行したコマンド、件数、失敗・Skip、未確認事項を区別する。MCP実装、Phase 3 E2E、オーケストレーション機能追加は含めない。
+Phase 1の完了条件は、UnitTests成功、Release publish/package定義の確認、指定バージョンを使う配置手順と更新/再実行の確認、配置・バージョン確認と失敗ケースの検証、およびこの実装を根拠とした技術仕様書の作成とする。Phase 1の検証記録（[CLIインストーラー検証記録](../../reports/phase1-cli-installer-verification.md)）では、実行したコマンド、件数、失敗・Skip、未確認事項を区別する。MCP実装、Phase 3 E2E、オーケストレーション機能追加は含めない。
 
 ### Phase 2 — STDIO MCP
 
@@ -79,9 +83,9 @@ PhaseのPassを記録した後、後続Phaseや最終リリースの条件を遡
 
 ## 6. Phase 1 技術仕様
 
-Phase 1の実装詳細は[CLIインストーラー技術仕様](../reference/cli-installer.md)に記録する。技術仕様は実装された動作・制約を記述し、後続Phaseの計画機能を実装済みと扱わない。
+Phase 1の実装詳細は[CLIインストーラー技術仕様](../../reference/cli-installer.md)に記録する。技術仕様は実装された動作・制約を記述し、後続Phaseの計画機能を実装済みと扱わない。
 
 ## 7. Phase 2 技術仕様と検証記録
 
-Phase 2の実装仕様は[STDIO MCP技術仕様](../reference/stdio-mcp.md)、Phaseゲートの実測結果は[STDIO MCP検証記録](phase2-stdio-mcp-verification.md)に記録する。Release CLIにstdin JSON protocolを追加した場合、対応版Releaseの発行・配置は別の明示的なRelease/installer操作とし、Phase 2コード変更を理由にタグ作成やRelease発行を自動で行わない。
+Phase 2の実装仕様は[STDIO MCP技術仕様](../../reference/stdio-mcp.md)、Phaseゲートの実測結果は[STDIO MCP検証記録](phase2-stdio-mcp-verification.md)に記録する。Release CLIにstdin JSON protocolを追加した場合、対応版Releaseの発行・配置は別の明示的なRelease/installer操作とし、Phase 2コード変更を理由にタグ作成やRelease発行を自動で行わない。
 

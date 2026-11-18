@@ -1,5 +1,9 @@
 # オーケストレーション契約ガイド
 
+> 作成日: 2026-11-18
+> 更新日: 2026-11-18
+> 作成者: yuu503
+
 このガイドは `get_orchestration_guide` とCLI `--orchestration-guide` から取得できます。契約を作る前に `get_contract_schema` またはCLI `--contract-schema` でTaskContract v1のJSON Schemaも取得してください。
 
 ## 契約を作成する

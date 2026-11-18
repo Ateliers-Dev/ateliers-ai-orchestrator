@@ -1,5 +1,9 @@
 # CLIインストーラー技術仕様
 
+> 作成日: 2026-11-17
+> 更新日: 2026-11-18
+> 作成者: yuu503
+
 > 対象実装: `scripts/cli-installer/Install-AteliersAiOrchestrator.ps1`、`.github/workflows/release-cli.yml`、CLI `--version` コマンド。Phase 1 の実装状態を記録する。
 
 ## 1. 対象と境界

@@ -1,7 +1,11 @@
 # Ateliers AI Orchestrator 開発計画
 
+> 作成日: 2026-11-18
+> 更新日: 2026-11-18
+> 作成者: yuu503
+
 > 状態: Milestone 0完了記録・Milestone 1計画案（必須範囲・受け入れ条件は次チャットで最終決定）  
-> 作成日: 2026-11-18  
+
 > 対象: Ateliers-Dev/ateliers-ai-orchestrator
 
 ## 1. この文書の目的
