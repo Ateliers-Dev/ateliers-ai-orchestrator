@@ -22,6 +22,9 @@ internal static class FixtureHost
             tests.Adapter_returns_structured_error_when_cli_is_missing().GetAwaiter().GetResult();
             tests.Adapter_rejects_multibyte_cli_output_over_64_KiB().GetAwaiter().GetResult();
             tests.Adapter_starts_npm_cmd_codex_shim_and_returns_structured_result_on_windows().GetAwaiter().GetResult();
+            tests.Runtime_diagnostics_report_fixed_paths_and_manifest_values_without_starting_the_cli().GetAwaiter().GetResult();
+            tests.Runtime_diagnostics_report_json_parse_location_without_manifest_contents().GetAwaiter().GetResult();
+            tests.Runtime_diagnostics_does_not_parse_an_oversized_manifest().GetAwaiter().GetResult();
             UnitTestCatalog.RunUnitTest("npm codex.cmdとcodex.ps1 shimで日本語プロンプトを渡す");
             Console.WriteLine("MCP-to-CLI fixture passed.");
             return 0;

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.ComponentModel;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 
@@ -7,6 +8,7 @@ internal sealed class CliExecutionService
 {
     private const int CliProtocolVersion = 1;
     private const int MaxCapturedResponseBytes = 64 * 1024;
+    private const int MaxInstallManifestBytes = 16 * 1024;
 
     public async Task<string> RunAsync(JsonElement contract, string agent, string? codexExecutablePath,
         string? runsDirectory, CancellationToken cancellationToken)
@@ -178,6 +180,137 @@ internal sealed class CliExecutionService
         {
             return Error("cli_start_failed", $"Release CLIを起動できませんでした ({exception.GetType().Name})。");
         }
+    }
+
+    public string GetRuntimeDiagnostics()
+    {
+        var processPath = Environment.ProcessPath;
+        string? processFileVersion = null;
+        if (!string.IsNullOrWhiteSpace(processPath))
+        {
+            try { processFileVersion = FileVersionInfo.GetVersionInfo(processPath).FileVersion; }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or Win32Exception) { }
+        }
+
+        var assembly = typeof(CliExecutionService).Assembly;
+        var assemblyVersion = assembly.GetName().Version?.ToString();
+        var informationalVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        return CreateRuntimeDiagnostics(Environment.GetEnvironmentVariable("LOCALAPPDATA"), processPath,
+            processFileVersion, assemblyVersion, informationalVersion);
+    }
+
+    internal static string CreateRuntimeDiagnostics(string? localAppData, string? processPath,
+        string? processFileVersion, string? assemblyVersion, string? informationalVersion)
+    {
+        string? cliPath = null;
+        string? manifestPath = null;
+        var localAppDataValid = !string.IsNullOrWhiteSpace(localAppData) && Path.IsPathFullyQualified(localAppData);
+        if (localAppDataValid)
+        {
+            var bin = Path.Combine(localAppData!, "Ateliers-Dev", "Ai-Orchestrator", "bin");
+            cliPath = Path.Combine(bin, "Ateliers.Ai.Orchestrator.Cli.exe");
+            manifestPath = Path.Combine(bin, "install.json");
+        }
+
+        var cliExists = cliPath is not null && File.Exists(cliPath);
+        var manifestExists = manifestPath is not null && File.Exists(manifestPath);
+        string manifestStatus;
+        string? manifestVersion = null;
+        string? runtimeIdentifier = null;
+        long? manifestBytes = null;
+        object? parseError = null;
+
+        if (!localAppDataValid)
+        {
+            manifestStatus = "localappdata_unavailable";
+        }
+        else if (!manifestExists)
+        {
+            manifestStatus = "missing";
+        }
+        else
+        {
+            try
+            {
+                var buffer = new byte[MaxInstallManifestBytes + 1];
+                using var stream = new FileStream(manifestPath!, FileMode.Open, FileAccess.Read, FileShare.Read);
+                var length = 0;
+                while (length < buffer.Length)
+                {
+                    var read = stream.Read(buffer, length, buffer.Length - length);
+                    if (read == 0) break;
+                    length += read;
+                }
+                manifestBytes = stream.Length;
+                if (length > MaxInstallManifestBytes)
+                {
+                    manifestStatus = "too_large";
+                }
+                else
+                {
+                    var bytes = buffer.AsSpan(0, length).ToArray();
+                    using var manifest = JsonDocument.Parse(bytes);
+                    var root = manifest.RootElement;
+                    if (root.ValueKind != JsonValueKind.Object)
+                    {
+                        manifestStatus = "invalid_structure";
+                    }
+                    else
+                    {
+                        if (root.TryGetProperty("version", out var version) && version.ValueKind == JsonValueKind.String)
+                            manifestVersion = version.GetString();
+                        if (root.TryGetProperty("runtimeIdentifier", out var rid) && rid.ValueKind == JsonValueKind.String)
+                            runtimeIdentifier = rid.GetString();
+                        manifestStatus = !string.IsNullOrWhiteSpace(manifestVersion) && runtimeIdentifier == "win-x64"
+                            ? "valid"
+                            : "invalid_fields";
+                    }
+                }
+            }
+            catch (JsonException exception)
+            {
+                manifestStatus = "invalid_json";
+                parseError = new
+                {
+                    type = exception.GetType().Name,
+                    lineNumber = exception.LineNumber,
+                    bytePositionInLine = exception.BytePositionInLine
+                };
+                try { manifestBytes = new FileInfo(manifestPath!).Length; }
+                catch (Exception fileException) when (fileException is IOException or UnauthorizedAccessException) { }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                manifestStatus = "unreadable";
+                parseError = new { type = exception.GetType().Name };
+            }
+        }
+
+        return JsonSerializer.Serialize(new
+        {
+            protocolVersion = 1,
+            mcp = new
+            {
+                processPath,
+                processFileVersion,
+                assemblyVersion,
+                informationalVersion
+            },
+            installation = new
+            {
+                localAppData,
+                localAppDataValid,
+                cliPath,
+                cliExists,
+                manifestPath,
+                manifestExists,
+                manifestBytes,
+                manifestStatus,
+                manifestVersion,
+                runtimeIdentifier,
+                parseError
+            }
+        });
     }
 
     private static bool TryResolveInstallation(out string cliPath, out string version, out string? error)

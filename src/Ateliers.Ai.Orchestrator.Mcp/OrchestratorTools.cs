@@ -28,5 +28,9 @@ internal sealed class OrchestratorTools(CliExecutionService cli)
     [Description("初回利用時に呼び出し、TaskContractの作成、CLI validator、実行方法、エラー対処のガイドを取得してください。ガイドはCoreのCLIから取得し、MCPにコピーを持ちません。CLI未対応時は構造化エラーを返します。")]
     public Task<string> GetOrchestrationGuideAsync(CancellationToken cancellationToken = default) =>
         cli.GetCliResourceAsync("--orchestration-guide", "orchestrationGuide", cancellationToken);
+
+    [McpServerTool(Name = "get_runtime_diagnostics")]
+    [Description("MCPプロセス自身の起動元・版、LOCALAPPDATAから導出した固定CLI/manifestパス、存在状態、manifestの構文/必須値確認を読み取り専用で返します。ユーザー名を含む絶対パスを含むため、接続障害の診断時だけ呼び出してください。CLIやオーケストレーションは起動しません。")]
+    public string GetRuntimeDiagnostics() => cli.GetRuntimeDiagnostics();
 }
 

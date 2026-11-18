@@ -13,7 +13,7 @@ flowchart LR
   C --> E[既存Orchestrator Core]
 ```
 
-MCP専用プロジェクトは公式C# MCP SDKを使い、`get_contract_schema`、`get_orchestration_guide`、`run_orchestration`を登録する。SchemaとガイドはCore管理のCLI出力をMCPが薄く中継し、MCPに固定コピーを持たない。親AIへ初回ガイド確認・契約生成前Schema取得を勧めるが、実際の参照保証はない。
+MCP専用プロジェクトは公式C# MCP SDKを使い、`get_contract_schema`、`get_orchestration_guide`、`run_orchestration`を登録する。SchemaとガイドはCore管理のCLI出力をMCPが薄く中継し、MCPに固定コピーを持たない。親AIへ初回ガイド確認・契約生成前Schema取得を勧めるが、実際の参照保証はない。接続障害の診断用として、MCPプロセス内の情報だけを返す読み取り専用 `get_runtime_diagnostics` Toolも提供する。
 
 CLIは `LOCALAPPDATA` 下の固定実行ファイルと `install.json` を検査し、毎回`--capabilities`でprotocol v1の対応を確認する。非対応CLIは実行しない。契約を一時ファイルへ書かず、CLIの標準入力へUTF-8で渡す。既存の`run <contract.json>`、`start`、`validate`等は維持する。
 
@@ -106,7 +106,11 @@ Codex CLI実行パスは`codex.exe`またはnpm配置の`codex.ps1`/`codex.cmd`�
 
 ### 起動と動作確認
 
-Codexを再起動するとMCPサーバーが子プロセスとして起動する。ツール一覧の3 Tool、Schema/ガイド取得、CLIの能力情報を確認する。追加の実機統合ゲートでは、AIが実際にガイドを読みSchemaを取得する順序、生成契約のCLI validator適合、`agent="fake"`でのMCP→CLI実行結果を観測する。ログはTool名と順序を中心に残し、契約本文を不要に重複保存しない。Codexの通常実行は本番契約とCodex CLI設定が必要。
+Codexを再起動するとMCPサーバーが子プロセスとして起動する。Schema・ガイド・実行の3 Tool、Schema/ガイド取得、CLIの能力情報を確認する。接続障害時は必要に応じて `get_runtime_diagnostics` を呼び出し、MCPの起動元と固定CLI配置の読取状態を確認する。追加の実機統合ゲートでは、AIが実際にガイドを読みSchemaを取得する順序、生成契約のCLI validator適合、`agent="fake"`でのMCP→CLI実行結果を観測する。ログはTool名と順序を中心に残し、契約本文を不要に重複保存しない。Codexの通常実行は本番契約とCodex CLI設定が必要。
+
+### 接続障害の読み取り専用診断
+
+`get_runtime_diagnostics` はMCPサーバープロセス自身について、起動実行ファイルのpathとfile/assembly version metadataを返す。また、そのプロセスの `LOCALAPPDATA`、固定CLIと `install.json` の導出path・存在有無、manifest byte数、JSON parse状態、読み取れたversion/RID、JSON構文エラーの型・行・byte位置を返す。manifestは16 KiBまで読み取り、それを超える場合は `too_large` として内容を解析しない。CLIやオーケストレーションは起動せず、manifest本文、例外メッセージ、CLIの標準出力/標準エラーは返さない。絶対pathにはユーザー名等が含まれうるため、接続障害の調査時だけ明示的に呼び出す。
 
 PowerShellの実行ポリシーでスクリプト起動が制限される環境では、リポジトリルートで次のように現在のプロセスに限りBypassを指定できます。
 
