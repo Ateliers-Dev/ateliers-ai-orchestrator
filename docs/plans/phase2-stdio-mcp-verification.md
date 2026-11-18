@@ -44,19 +44,20 @@
 | `dotnet restore Ateliers.Ai.Orchestrator.sln`（今回） | Inconclusive | SDK初期化中にService Control Managerへのアクセスが拒否され、restoreは終了コード1。ビルドは既存restore assetsを使用した。 |
 | Fake-only標準VSTest Unit（今回） | Inconclusive | testhost接続が90秒で失敗し実行中止。 |
 | CLI stdin・MCP adapter apphost fixture（今回） | Pass | `--stdio-json-cli-fixture`と`--mcp-cli-adapter-fixture`が両方終了コード0。schema/guide中継、契約stdin、Fake実行、Codex shim等を確認。 |
-| ユーザー固定配置先の実CLI | 未実施 | 現在の配置版はユーザー報告のv0.0.1で、新protocol未対応。Release/tag発行とCLIインストールは承認対象のため、この作業では行っていない。実配置先での確認は別途明示承認後に実施する。 |
+| ユーザー固定配置先の実CLI（最終再試験前） | 未実施（当時） | 当時はユーザー報告の配置版v0.0.1が新protocol未対応とされ、実配置先の証跡は未取得だった。2026-11-18最終再試験ではCLI v0.0.2 / manifest validの既定LOCALAPPDATA配置から接続中MCPの疎通に成功した（下記参照）。 |
 | Windows x64 MCP→CLI→Codex `.cmd` shim | Pass（shim限定） | `run_orchestration(agent="codex")`経由で一時Release CLIと`.cmd` shimを起動。shimの起動markerとMCPアダプターから返る構造化結果を確認。shimはテスト用に終了コード2で停止し、Codexの実処理・正常完了は実行していない。導入例は明示的なPowerShell shim対応がある`.ps1`へ変更。 |
 | 実npm `codex.cmd` 起動 | Pass（version probe） | Windows x64上で`ProcessStartInfo.UseShellExecute=false`から実際のnpm `codex.cmd --version`を起動し、exit 0と`codex-cli 0.167.1`を確認。sandbox権限によるstderr警告があった。認証済み`exec`実行ではない。 |
-| インストール済みv0.0.1のcapability確認 | Inconclusive | 実行環境の`LOCALAPPDATA`はCodexサンドボックス内の一時パスで、ユーザー配置先が見えず実物を照合できなかった。ユーザー報告のv0.0.1は新protocol未対応。新CLI Releaseの公開・配置はPhase 2対象外。 |
+| インストール済みv0.0.1のcapability確認（最終再試験前） | Inconclusive（当時） | 当時は実行環境からユーザー配置先を照合できなかった。これは最終再試験より前の履歴であり、2026-11-18に接続中MCPからCLI v0.0.2と有効manifestを確認した結果は下記に記録する。 |
 
-## 未解決事項
+## 最終実機再試験後も残る事項
 
-- 現行ユーザー配置CLI v0.0.1は`--capabilities`と`run --stdin-json`に未対応のため、本PRだけを配置してもMCPは契約実行を拒否する。CLI protocol v1を含む新しいCLI Releaseを別途発行・明示インストールしてから、インストール済み固定版との連携ゲートを再確認する。
-- 通常のVSTest testhostはこの実行環境で接続できず、今回の標準`dotnet test`は90秒で中止された。CLI stdin / MCP adapter fixturesと、MCP STDIO transportから実CLIへ接続する隔離Windows fixtureは個別に成功した。CIで標準VSTest結果を再確認する。
-- Codexアカウントを使う実処理、外部GitHub操作、ユーザーのCodex hostでのMCP登録後の実機起動はこのFake-only検証に含まれない。
-- `.cmd` shim smoke testは起動経路と機械可読結果の返却だけを検証し、認証済み実Codex CLIによる正常完了の確認ではない。Phase 2ではこの正常完了を合格条件にしない。
-- 実npm `codex.cmd` の確認は`--version`起動まで。認証済みCodexによるオーケストレーション結果は後続確認事項であり、Phase 2の疎通Passには要求しない。
-- ユーザーの固定インストール先 `%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\bin` はこの実行環境から更新・検証していない。実機確認は、Phase 2対応CLIをビルドしたPRのレビュー後、Release/tag発行とインストーラー実行に対する別途承認を得てから行う。
+以下は、2026-11-18最終実機再試験後にも未検証またはPhase 2対象外である事項に限る。最終実機再試験より前の観測は、該当箇所にその時点の記録として残す。
+
+- 標準VSTest testhostはこの実行環境で接続できず、Phase 2検証時の標準 `dotnet test` は90秒で中止された。個別fixtureは成功し、PR #78のCIと本PRのCI結果は各PRの検証状態として確認する。
+- Phase 2のFake実行は、認証済みCodexによるタスク完了や外部GitHub操作を検証しない。実Agentの追加スモークは別節に記録し、Reviewer証跡の不足とPR必須Runのpush前停止はIssue #79/#80へ引き継いだ。
+- Windows x64の `.cmd` shim smoke testは起動経路と機械可読結果の返却までで、認証済みCodex CLIによる正常完了を確認していない。実npm `codex.cmd` の確認も `--version` 起動までである。
+- Phase 3の既定スクリプトE2Eとオーケストレーション全体の正常終了は、本Phaseの合格条件に含めない。次の段階は[開発計画書](development-plan.md)に定める範囲に従う。
+
 
 ## 2026-11-18 manifest診断と明示CLIパス対応
 
@@ -76,7 +77,7 @@
 | Fake-only標準VSTest | Inconclusive | testhostが90秒で接続できず中止。 |
 | MCP CLI adapter fixture | Pass | BOM付きmanifestを持つ明示パスCLIでSchema・guide・Fake runを実行。相対pathの拒否と既定pathへのfallbackなしも確認。 |
 | Release MCP STDIO → CLI → Core Fake smoke test | Pass | `ATELIERS_AI_ORCHESTRATOR_CLI_PATH`にユーザー配置CLIを指定したMCP processで、4 Toolを認識し、Schemaとguideを取得、TaskContractを`agent="fake"`で渡してrun ID・run directoryを受け取った。Workflow stateは`NeedsHumanInput`。ユーザーのMCP登録や配置は変更していない。 |
-| 接続中Codex MCPの更新後疎通 | 未実施 | PRコードの配置・クライアント再起動は行っていない。新MCPを配置して再起動後、Schema/guide取得とFake実行を確認する必要がある。CLI再インストールは不要。 |
+| 接続中Codex MCPの更新後疎通（PR #78マージ前） | 未実施（当時） | PR #78マージ前の記録。2026-11-18最終実機再試験では、PR #78のマージコミットを含む接続中MCPでGuide/Schema取得とFake実行を確認した（下記参照）。CLIの明示パス設定自体は未検証。 |
 
 ## 2026-11-18 最終実機再試験 — Phase 2 Pass
 
