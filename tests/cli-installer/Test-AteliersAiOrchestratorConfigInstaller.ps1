@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('ateliers-config-installer-test-' + [Guid]::NewGuid().ToString('N'))
@@ -16,6 +16,60 @@ $global:partialBackupPath = $null
 function Assert-Equal {
     param([string]$Expected, [string]$Actual, [string]$Message)
     if ($Expected -cne $Actual) { throw $Message }
+}
+
+function Assert-PowerShellSourcesHaveCompatibleEncoding {
+    $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+    $sourceDirectories = @(
+        (Join-Path $repositoryRoot 'scripts'),
+        (Join-Path $repositoryRoot 'tests')
+    )
+    $utf8 = New-Object System.Text.UTF8Encoding($false, $true)
+    $sourceFiles = @($sourceDirectories | ForEach-Object {
+        Get-ChildItem -LiteralPath $_ -Recurse -File | Where-Object {
+            $_.Extension -in @('.ps1', '.psm1', '.psd1')
+        }
+    })
+
+    foreach ($sourceFile in $sourceFiles) {
+        $bytes = [System.IO.File]::ReadAllBytes($sourceFile.FullName)
+        $hasUtf8Bom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+        $offset = if ($hasUtf8Bom) { 3 } else { 0 }
+        try {
+            $sourceText = $utf8.GetString($bytes, $offset, $bytes.Length - $offset)
+        }
+        catch {
+            throw ("PowerShellソースをUTF-8として読み取れません: {0}" -f $sourceFile.FullName)
+        }
+
+        if (-not $hasUtf8Bom -and $sourceText -match '[^\x00-\x7F]') {
+            throw ("Windows PowerShell 5.1向けにUTF-8 BOMが必要です: {0}" -f $sourceFile.FullName)
+        }
+
+        if ($sourceFile.Name -eq 'Install-AteliersAiOrchestratorConfig.ps1' -and
+            ($sourceText -notmatch 'Slack設定ファイルの更新に失敗しました' -or
+                $sourceText -notmatch '配置元にSlack設定ファイルがないため')) {
+            throw '設定インストーラーの日本語メッセージが正しくありません。'
+        }
+
+        $tokens = $null
+        $parseErrors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile(
+            $sourceFile.FullName,
+            [ref]$tokens,
+            [ref]$parseErrors) | Out-Null
+        if ($parseErrors.Count -gt 0) {
+            throw ("PowerShellソースの構文解析に失敗しました: {0} ({1} errors)" -f $sourceFile.FullName, $parseErrors.Count)
+        }
+    }
+}
+
+Assert-PowerShellSourcesHaveCompatibleEncoding
+
+$cliInstallerPath = Join-Path $PSScriptRoot '..\..\scripts\cli-installer\Install-AteliersAiOrchestrator.ps1'
+$cliInstallerSource = [System.IO.File]::ReadAllText($cliInstallerPath, [System.Text.Encoding]::UTF8)
+if ($cliInstallerSource -notmatch '(?m)^\s*& \$configInstaller -PreserveExisting\s*$') {
+    throw 'CLIインストーラーが既存設定を維持して設定インストーラーを呼び出していません。'
 }
 
 function Copy-Item {
