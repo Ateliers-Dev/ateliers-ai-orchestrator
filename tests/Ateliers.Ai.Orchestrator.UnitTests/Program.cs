@@ -1124,6 +1124,10 @@ static int FakeCodexFixture(string[] args)
         ["APPDATA"] = Environment.GetEnvironmentVariable("APPDATA"),
         ["LOCALAPPDATA"] = Environment.GetEnvironmentVariable("LOCALAPPDATA"),
         ["DOTNET_CLI_HOME"] = Environment.GetEnvironmentVariable("DOTNET_CLI_HOME"),
+        ["NUGET_PACKAGES"] = Environment.GetEnvironmentVariable("NUGET_PACKAGES"),
+        ["NUGET_HTTP_CACHE_PATH"] = Environment.GetEnvironmentVariable("NUGET_HTTP_CACHE_PATH"),
+        ["NUGET_SCRATCH"] = Environment.GetEnvironmentVariable("NUGET_SCRATCH"),
+        ["NUGET_PLUGINS_CACHE_PATH"] = Environment.GetEnvironmentVariable("NUGET_PLUGINS_CACHE_PATH"),
         ["TEMP"] = Environment.GetEnvironmentVariable("TEMP"),
         ["TMP"] = Environment.GetEnvironmentVariable("TMP"),
         ["TMPDIR"] = Environment.GetEnvironmentVariable("TMPDIR"),
@@ -1830,6 +1834,10 @@ static void CodexFakeProcessesCompleteIndependentReviewSlice()
             Assert.Equal(paths["TEMP"], paths["TMP"]);
             Assert.Equal(paths["TEMP"], paths["TMPDIR"]);
             Assert.Equal(Path.Combine(runtime, "dotnet-home"), paths["DOTNET_CLI_HOME"]);
+            foreach (var name in new[] { "NUGET_PACKAGES", "NUGET_HTTP_CACHE_PATH", "NUGET_SCRATCH", "NUGET_PLUGINS_CACHE_PATH" })
+                Assert.True(Path.GetFullPath(paths[name]).StartsWith(
+                    Path.GetFullPath(paths["DOTNET_CLI_HOME"]) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase),
+                    $"{role}の{name}がRun専用DOTNET_CLI_HOME外です。");
             var argumentsLine = File.ReadAllLines(Path.Combine(request.RunDirectory!, "exchanges",
                 role == "Implementer" ? "implementer-1" : "reviewer-1", "codex.stdout.jsonl"))
                 .First(line => line.Contains("fixture.arguments", StringComparison.Ordinal));
@@ -1840,7 +1848,7 @@ static void CodexFakeProcessesCompleteIndependentReviewSlice()
             Assert.True(rootsConfigIndex >= 0 && rootsConfigIndex + 1 < arguments.Length,
                 $"{role}のsandbox書込ルート設定がありません。");
             var expectedRootsConfig = role == "Implementer"
-                ? $"sandbox_workspace_write.writable_roots=[\"{Path.GetFullPath(paths["DOTNET_CLI_HOME"]).Replace('\\', '/') }\"]"
+                ? $"sandbox_workspace_write.writable_roots=[\"{Path.GetFullPath(paths["DOTNET_CLI_HOME"]).Replace('\\', '/')}\",\"{Path.GetFullPath(paths["LOCALAPPDATA"]).Replace('\\', '/')}\",\"{Path.GetFullPath(paths["TEMP"]).Replace('\\', '/')}\"]"
                 : "sandbox_workspace_write.writable_roots=[]";
             Assert.Equal(expectedRootsConfig, arguments[rootsConfigIndex + 1],
                 $"{role}のCodex sandbox書込範囲が期待値と異なります。");
