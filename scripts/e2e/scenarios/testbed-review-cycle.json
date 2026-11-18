@@ -17,7 +17,7 @@
   "inputs": [
     {
       "description": "Ateliers AI Orchestrator Testbed review-cycle scenario",
-      "reference": "https://github.com/Ateliers-Dev/ateliers-ai-orchestrator-testbed/blob/main/docs/v7-e2e-scenario.md",
+      "reference": "https://github.com/Ateliers-Dev/ateliers-ai-orchestrator-testbed/blob/main/docs/e2e-scenario.md",
       "revision": "実行時に確認したTestbed mainのSHAをスクリプトが設定する"
     },
     {
