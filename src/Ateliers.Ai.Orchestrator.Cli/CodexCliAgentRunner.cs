@@ -410,7 +410,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
         start.Environment["NUGET_PLUGINS_CACHE_PATH"] = nugetPluginsCache;
         Directory.CreateDirectory(profileRoot);
         start.Environment["CODEX_HOME"] = profileRoot;
-        return [dotnetHome, localAppData, temp];
+        return [dotnetHome, localAppData, appData, temp];
     }
 
     private static string BuildWritableRootConfig(IReadOnlyList<string> paths)

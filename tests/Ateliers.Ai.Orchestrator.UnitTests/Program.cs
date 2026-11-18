@@ -1848,7 +1848,7 @@ static void CodexFakeProcessesCompleteIndependentReviewSlice()
             Assert.True(rootsConfigIndex >= 0 && rootsConfigIndex + 1 < arguments.Length,
                 $"{role}のsandbox書込ルート設定がありません。");
             var expectedRootsConfig = role == "Implementer"
-                ? $"sandbox_workspace_write.writable_roots=[\"{Path.GetFullPath(paths["DOTNET_CLI_HOME"]).Replace('\\', '/')}\",\"{Path.GetFullPath(paths["LOCALAPPDATA"]).Replace('\\', '/')}\",\"{Path.GetFullPath(paths["TEMP"]).Replace('\\', '/')}\"]"
+                ? $"sandbox_workspace_write.writable_roots=[\"{Path.GetFullPath(paths["DOTNET_CLI_HOME"]).Replace('\\', '/')}\",\"{Path.GetFullPath(paths["LOCALAPPDATA"]).Replace('\\', '/')}\",\"{Path.GetFullPath(paths["APPDATA"]).Replace('\\', '/')}\",\"{Path.GetFullPath(paths["TEMP"]).Replace('\\', '/')}\"]"
                 : "sandbox_workspace_write.writable_roots=[]";
             Assert.Equal(expectedRootsConfig, arguments[rootsConfigIndex + 1],
                 $"{role}のCodex sandbox書込範囲が期待値と異なります。");
