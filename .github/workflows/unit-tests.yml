@@ -19,6 +19,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Run PowerShell 5.1 encoding and installer tests
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\tests\cli-installer\Test-AteliersAiOrchestratorConfigInstaller.ps1
+
       - name: Set up .NET 10
         uses: actions/setup-dotnet@v4
         with:
@@ -35,3 +40,4 @@ jobs:
 
       - name: Run Slack unit tests
         run: dotnet test tests/Ateliers.Slack.UnitTests/Ateliers.Slack.UnitTests.csproj --configuration Release --no-build --no-restore
+
