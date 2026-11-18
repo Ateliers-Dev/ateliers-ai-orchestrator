@@ -40,4 +40,3 @@ jobs:
 
       - name: Run Slack unit tests
         run: dotnet test tests/Ateliers.Slack.UnitTests/Ateliers.Slack.UnitTests.csproj --configuration Release --no-build --no-restore
-
