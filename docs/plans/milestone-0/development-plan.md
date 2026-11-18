@@ -1,5 +1,9 @@
 # Ateliers AI Orchestrator 開発計画書
 
+> 作成日: 2026-11-17
+> 更新日: 2026-11-18
+> 作成者: yuu503
+
 > 状態: 承認済み。Phase 1・Phase 2完了。Phase 3の進行基準。
 
 ## 1. 目的と進め方
