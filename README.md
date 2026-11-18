@@ -1,6 +1,6 @@
 # Ateliers AI オーケストレーター
 
-E2E実行基盤とシナリオは [docs/e2e/README.md](docs/e2e/README.md) を参照してください。現在のシナリオは Testbed のレビューサイクルです。
+E2E実行基盤とシナリオは [docs/reference/e2e/README.md](docs/reference/e2e/README.md) を参照してください。現在のシナリオは Testbed のレビューサイクルです。
 
 .NET 10 のローカルCLIです。バージョン付きJSON契約の検証、状態遷移モデル、JSONL実行記録に加え、Fake AgentまたはCodex CLI子プロセスによるワークフローを実行できます。契約がPRを要求するCodex実行では、専用ブランチへのpushとGitHub PR作成を必須ゲートとして扱います。mergeは行いません。
 
@@ -60,7 +60,7 @@ Slack設定を初めて配置するときは、ローカルの `config/slack.jso
 
 ## STDIO MCP
 
-Phase 2のMCPは既存TaskContractを設定されたCLI絶対パスへ渡す薄いアダプターです。未指定時は既定のユーザー配置を使います。Schema・ガイド・実行の3 Toolに加え、接続障害用の読み取り専用診断Toolを提供します。CLI stdin/stdoutプロトコル、Codexへの登録手順、機密情報・キャンセルの扱いは[STDIO MCP技術仕様](docs/reference/stdio-mcp.md)、要求は[MCP要求仕様](docs/requirements/mcp-requirements.md)、実測結果は[Phase 2検証記録](docs/plans/phase2-stdio-mcp-verification.md)を参照してください。Phase 2対応CLI v0.0.2以降が必要です。
+Phase 2のMCPは既存TaskContractを設定されたCLI絶対パスへ渡す薄いアダプターです。未指定時は既定のユーザー配置を使います。Schema・ガイド・実行の3 Toolに加え、接続障害用の読み取り専用診断Toolを提供します。CLI stdin/stdoutプロトコル、Codexへの登録手順、機密情報・キャンセルの扱いは[STDIO MCP技術仕様](docs/reference/stdio-mcp.md)、要求は[MCP要求仕様](docs/requirements/milestone-0/mcp-requirements.md)、実測結果は[Phase 2検証記録](docs/plans/milestone-0/phase2-stdio-mcp-verification.md)を参照してください。Phase 2対応CLI v0.0.2以降が必要です。
 
 ## 使い方
 
