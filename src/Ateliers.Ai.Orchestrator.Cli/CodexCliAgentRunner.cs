@@ -74,8 +74,8 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
         }
         else
         {
-            // The parent creates private SDK/NuGet directories outside the checkout.
-            // Allow only those directories plus the isolated local-app-data and temp paths.
+            // The parent creates a private profile and SDK/NuGet directories outside the checkout.
+            // Allow only those isolated paths and the run-specific temp directory.
             codexArguments.Add("--config");
             codexArguments.Add(BuildWritableRootConfig(sandboxWritableRoots));
         }
@@ -410,7 +410,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
         start.Environment["NUGET_PLUGINS_CACHE_PATH"] = nugetPluginsCache;
         Directory.CreateDirectory(profileRoot);
         start.Environment["CODEX_HOME"] = profileRoot;
-        return [dotnetHome, localAppData, appData, temp];
+        return [dotnetHome, userProfile, temp];
     }
 
     private static string BuildWritableRootConfig(IReadOnlyList<string> paths)
