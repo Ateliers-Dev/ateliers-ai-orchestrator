@@ -6,6 +6,24 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+function Assert-FileContentMatches {
+    param(
+        [Parameter(Mandatory = $true)][string]$ReferencePath,
+        [Parameter(Mandatory = $true)][string]$CandidatePath
+    )
+
+    $reference = Get-Item -LiteralPath $ReferencePath
+    $candidate = Get-Item -LiteralPath $CandidatePath
+    if ($reference.Length -ne $candidate.Length) {
+        throw 'ファイルコピーのサイズ確認に失敗しました。'
+    }
+    $referenceHash = (Get-FileHash -LiteralPath $ReferencePath -Algorithm SHA256).Hash
+    $candidateHash = (Get-FileHash -LiteralPath $CandidatePath -Algorithm SHA256).Hash
+    if ($referenceHash -cne $candidateHash) {
+        throw 'ファイルコピーの内容確認に失敗しました。'
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA) -or -not [System.IO.Path]::IsPathRooted($env:LOCALAPPDATA)) {
     throw 'LOCALAPPDATA が設定されていないか、絶対パスではありません。Windowsのユーザー環境で実行してください。'
 }
@@ -30,6 +48,10 @@ $existingFiles = @($availableFiles | Where-Object {
 })
 $backupDirectory = $null
 $backupBase = $null
+$completedBackupFiles = @{}
+$temporaryFiles = @()
+$replacementStarted = $false
+$rollbackFailed = $false
 
 if (-not $PreserveExisting -and $existingFiles.Count -gt 0) {
     $timestamp = [DateTime]::Now.ToString('yyyyMMdd-HHmmss')
@@ -60,10 +82,18 @@ try {
             }
         }
         foreach ($fileName in $existingFiles) {
-            Copy-Item -LiteralPath (Join-Path $destinationDirectory $fileName) -Destination (Join-Path $backupDirectory $fileName)
+            $sourcePath = Join-Path $destinationDirectory $fileName
+            $backupPath = Join-Path $backupDirectory $fileName
+            $pendingBackupPath = Join-Path $backupDirectory ('.{0}.{1}.pending' -f $fileName, $operationId)
+            $temporaryFiles += $pendingBackupPath
+            Copy-Item -LiteralPath $sourcePath -Destination $pendingBackupPath
+            Assert-FileContentMatches -ReferencePath $sourcePath -CandidatePath $pendingBackupPath
+            Move-Item -LiteralPath $pendingBackupPath -Destination $backupPath
+            $completedBackupFiles[$fileName] = $true
         }
     }
 
+    $replacementStarted = $true
     foreach ($fileName in $availableFiles) {
         $destinationPath = Join-Path $destinationDirectory $fileName
         if ($PreserveExisting -and (Test-Path -LiteralPath $destinationPath -PathType Leaf)) {
@@ -75,20 +105,37 @@ try {
     }
 }
 catch {
-    foreach ($fileName in $availableFiles) {
-        $destinationPath = Join-Path $destinationDirectory $fileName
-        $backupPath = if ($backupDirectory) { Join-Path $backupDirectory $fileName } else { $null }
-        if ($backupPath -and (Test-Path -LiteralPath $backupPath -PathType Leaf)) {
-            Copy-Item -LiteralPath $backupPath -Destination $destinationPath -Force -ErrorAction SilentlyContinue
-        }
-        elseif ($fileName -notin $existingFiles -and (Test-Path -LiteralPath $destinationPath -PathType Leaf)) {
-            Remove-Item -LiteralPath $destinationPath -Force -ErrorAction SilentlyContinue
+    if ($replacementStarted) {
+        foreach ($fileName in $availableFiles) {
+            $destinationPath = Join-Path $destinationDirectory $fileName
+            if ($completedBackupFiles.ContainsKey($fileName)) {
+                $backupPath = Join-Path $backupDirectory $fileName
+                $restorePath = Join-Path $destinationDirectory ('.{0}.{1}.restore' -f $fileName, $operationId)
+                $temporaryFiles += $restorePath
+                try {
+                    Copy-Item -LiteralPath $backupPath -Destination $restorePath
+                    Assert-FileContentMatches -ReferencePath $backupPath -CandidatePath $restorePath
+                    Move-Item -LiteralPath $restorePath -Destination $destinationPath -Force
+                }
+                catch {
+                    $rollbackFailed = $true
+                }
+            }
+            elseif ($fileName -notin $existingFiles -and (Test-Path -LiteralPath $destinationPath -PathType Leaf)) {
+                Remove-Item -LiteralPath $destinationPath -Force -ErrorAction SilentlyContinue
+            }
         }
     }
-    $backupNote = if ($backupDirectory) { " バックアップを保持しました: $backupDirectory" } else { '' }
-    throw ("Slack設定ファイルの更新に失敗しました。設定値は表示していません。{0}" -f $backupNote)
+    $backupNote = if ($backupDirectory) { " バックアップフォルダーを保持しました: $backupDirectory" } else { '' }
+    $rollbackNote = if ($rollbackFailed) { ' 元設定の復旧に失敗しました。検証済みバックアップを確認してください。' } else { '' }
+    throw ("Slack設定ファイルの更新に失敗しました。設定値は表示していません。{0}{1}" -f $backupNote, $rollbackNote)
 }
 finally {
+    foreach ($temporaryPath in $temporaryFiles) {
+        if (Test-Path -LiteralPath $temporaryPath -PathType Leaf) {
+            Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+        }
+    }
     if (Test-Path -LiteralPath $stagingDirectory) {
         Remove-Item -LiteralPath $stagingDirectory -Recurse -Force -ErrorAction SilentlyContinue
     }
