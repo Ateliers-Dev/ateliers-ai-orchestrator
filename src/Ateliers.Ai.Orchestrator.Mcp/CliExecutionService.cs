@@ -9,6 +9,7 @@ internal sealed class CliExecutionService
     private const int CliProtocolVersion = 1;
     private const int MaxCapturedResponseBytes = 64 * 1024;
     private const int MaxInstallManifestBytes = 16 * 1024;
+    private const string CliPathEnvironmentVariable = "ATELIERS_AI_ORCHESTRATOR_CLI_PATH";
 
     public async Task<string> RunAsync(JsonElement contract, string agent, string? codexExecutablePath,
         string? runsDirectory, CancellationToken cancellationToken)
@@ -195,17 +196,31 @@ internal sealed class CliExecutionService
         var assembly = typeof(CliExecutionService).Assembly;
         var assemblyVersion = assembly.GetName().Version?.ToString();
         var informationalVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-        return CreateRuntimeDiagnostics(Environment.GetEnvironmentVariable("LOCALAPPDATA"), processPath,
+        return CreateRuntimeDiagnostics(Environment.GetEnvironmentVariable("LOCALAPPDATA"),
+            Environment.GetEnvironmentVariable(CliPathEnvironmentVariable), processPath,
             processFileVersion, assemblyVersion, informationalVersion);
     }
 
-    internal static string CreateRuntimeDiagnostics(string? localAppData, string? processPath,
+    internal static string CreateRuntimeDiagnostics(string? localAppData, string? configuredCliPath, string? processPath,
         string? processFileVersion, string? assemblyVersion, string? informationalVersion)
     {
+        var localAppDataValid = !string.IsNullOrWhiteSpace(localAppData) && Path.IsPathFullyQualified(localAppData);
+        var cliPathSource = configuredCliPath is null ? "localappdata" : "environment";
+        var cliPathError = configuredCliPath is not null &&
+            (string.IsNullOrWhiteSpace(configuredCliPath) || !Path.IsPathFullyQualified(configuredCliPath))
+                ? "configured_path_must_be_absolute"
+                : null;
         string? cliPath = null;
         string? manifestPath = null;
-        var localAppDataValid = !string.IsNullOrWhiteSpace(localAppData) && Path.IsPathFullyQualified(localAppData);
-        if (localAppDataValid)
+        if (configuredCliPath is not null)
+        {
+            if (Path.IsPathFullyQualified(configuredCliPath))
+            {
+                cliPath = configuredCliPath;
+                manifestPath = Path.Combine(Path.GetDirectoryName(cliPath)!, "install.json");
+            }
+        }
+        else if (localAppDataValid)
         {
             var bin = Path.Combine(localAppData!, "Ateliers-Dev", "Ai-Orchestrator", "bin");
             cliPath = Path.Combine(bin, "Ateliers.Ai.Orchestrator.Cli.exe");
@@ -248,7 +263,7 @@ internal sealed class CliExecutionService
                 }
                 else
                 {
-                    var bytes = buffer.AsSpan(0, length).ToArray();
+                    var bytes = StripUtf8Bom(buffer.AsSpan(0, length).ToArray());
                     using var manifest = JsonDocument.Parse(bytes);
                     var root = manifest.RootElement;
                     if (root.ValueKind != JsonValueKind.Object)
@@ -300,6 +315,9 @@ internal sealed class CliExecutionService
             {
                 localAppData,
                 localAppDataValid,
+                cliPathSource,
+                cliPathError,
+                configuredCliPath,
                 cliPath,
                 cliExists,
                 manifestPath,
@@ -318,26 +336,40 @@ internal sealed class CliExecutionService
         cliPath = string.Empty;
         version = "unknown";
         error = null;
-        var localAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
-        if (string.IsNullOrWhiteSpace(localAppData) || !Path.IsPathFullyQualified(localAppData))
+        var configuredCliPath = Environment.GetEnvironmentVariable(CliPathEnvironmentVariable);
+        if (configuredCliPath is not null)
         {
-            error = "LOCALAPPDATAが設定されていません。CLIインストーラーのユーザー単位配置を確認してください.";
-            return false;
+            if (string.IsNullOrWhiteSpace(configuredCliPath) || !Path.IsPathFullyQualified(configuredCliPath))
+            {
+                error = $"{CliPathEnvironmentVariable}にはCLI実行ファイルの絶対パスを指定してください。";
+                return false;
+            }
+            cliPath = configuredCliPath;
         }
-        var bin = Path.Combine(localAppData, "Ateliers-Dev", "Ai-Orchestrator", "bin");
-        cliPath = Path.Combine(bin, "Ateliers.Ai.Orchestrator.Cli.exe");
-        var installManifest = Path.Combine(bin, "install.json");
+        else
+        {
+            var localAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+            if (string.IsNullOrWhiteSpace(localAppData) || !Path.IsPathFullyQualified(localAppData))
+            {
+                error = "LOCALAPPDATAが設定されていません。CLIインストーラーのユーザー単位配置を確認してください。";
+                return false;
+            }
+            var bin = Path.Combine(localAppData, "Ateliers-Dev", "Ai-Orchestrator", "bin");
+            cliPath = Path.Combine(bin, "Ateliers.Ai.Orchestrator.Cli.exe");
+        }
+        var installManifest = Path.Combine(Path.GetDirectoryName(cliPath)!, "install.json");
         if (!File.Exists(cliPath) || !File.Exists(installManifest))
         {
-            error = $"インストール済みRelease CLIまたはinstall.jsonがありません: {cliPath}";
+            error = $"指定されたRelease CLIまたは同じフォルダーのinstall.jsonがありません: {cliPath}";
             return false;
         }
         try
         {
-            using var manifest = JsonDocument.Parse(File.ReadAllBytes(installManifest));
+            using var manifest = JsonDocument.Parse(ReadInstallManifest(installManifest));
             var root = manifest.RootElement;
-            if (!root.TryGetProperty("runtimeIdentifier", out var runtime) || runtime.GetString() != "win-x64" ||
-                !root.TryGetProperty("version", out var versionNode) || string.IsNullOrWhiteSpace(versionNode.GetString()))
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("runtimeIdentifier", out var runtime) || runtime.ValueKind != JsonValueKind.String || runtime.GetString() != "win-x64" ||
+                !root.TryGetProperty("version", out var versionNode) || versionNode.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(versionNode.GetString()))
             {
                 error = "install.jsonのCLIバージョンまたはwin-x64 runtimeIdentifierを確認できません。";
                 return false;
@@ -350,12 +382,31 @@ internal sealed class CliExecutionService
             }
             return true;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
         {
             error = $"install.jsonを読み取れません ({exception.GetType().Name})。";
             return false;
         }
     }
+
+    private static byte[] ReadInstallManifest(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var buffer = new byte[MaxInstallManifestBytes + 1];
+        var length = 0;
+        while (length < buffer.Length)
+        {
+            var read = stream.Read(buffer, length, buffer.Length - length);
+            if (read == 0) break;
+            length += read;
+        }
+        if (length > MaxInstallManifestBytes)
+            throw new InvalidDataException("install.json exceeds the allowed size.");
+        return StripUtf8Bom(buffer.AsSpan(0, length).ToArray());
+    }
+
+    private static byte[] StripUtf8Bom(byte[] bytes) =>
+        bytes.AsSpan().StartsWith(new byte[] { 0xEF, 0xBB, 0xBF }) ? bytes[3..] : bytes;
 
     private static Task<(bool Supported, string? ErrorCode)> SupportsStdinProtocolAsync(string cliPath, string installedVersion, CancellationToken cancellationToken) =>
         SupportsCapabilityAsync(cliPath, installedVersion, "runStdinJson", cancellationToken);

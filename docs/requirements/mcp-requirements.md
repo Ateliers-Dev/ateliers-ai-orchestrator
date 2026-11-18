@@ -15,7 +15,7 @@
 - MCP通信方式はSTDIOとする。
 - Ateliersの他ツールでWork/CodexからSTDIO MCPを起動できることは検証済みとし、本作業でSTDIO基盤の再検証を行わない。
 - 親AIが既存契約スキーマの作成者であり、MCPは独自のタスク契約形式を追加しない。
-- MCPが実行するのは、インストーラーで配置された固定バージョンのRelease CLI（`%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\bin\Ateliers.Ai.Orchestrator.Cli.exe`）である。
+- MCPが実行するのは、ホストの信頼済みMCP設定で指定されたCLI実行ファイル絶対パスである。未指定時は既定のユーザー配置（`%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\bin\Ateliers.Ai.Orchestrator.Cli.exe`）を使う。`install.json`は指定CLIと同じフォルダーから読む。
 - オーケストレーション処理と既存契約の意味解釈はCLI側の責務とする。
 - CLIとMCP間は、契約JSONをstdinで受け取り、構造化JSON結果をstdoutへ返す。
 - CLIは `--capabilities` で機械可読なプロトコル版を返し、MCPは実行前に対応を確認する。
@@ -35,13 +35,13 @@
 3. 契約作成手順、スキーマ外制約、TaskContract v1例、CLI検証・実行方法、エラー対処を含む単一ガイドをCoreで管理し、CLI `--orchestration-guide` とMCP `get_orchestration_guide` から公開する。MCPに固定コピーを持たない。
 4. Tool Descriptionは初回ガイド取得と契約生成前Schema取得を親AIへ勧める。参照を強制できるとの前提は置かない。
 5. MCPは契約JSONをstdinへ渡し、内容を意味的に再設計・書き換えない。一時契約ファイルは作らない。
-6. MCPは固定配置からCLIを解決し、`--capabilities` でプロトコル互換性を確認する。能力応答にSchema・ガイド取得対応を含める。
+6. MCPは`ATELIERS_AI_ORCHESTRATOR_CLI_PATH`に設定された絶対パスがあればそのCLIだけを使い、相対・不存在・manifest不備を明瞭な診断で拒否する。未設定時は既定のユーザー配置を使う。実行前に`--capabilities`でプロトコル互換性を確認し、能力応答にSchema・ガイド取得対応を含める。実行パスは信頼済みMCP起動設定でのみ指定し、TaskContractから変更できない。
 7. CLI不在、旧CLI、起動失敗、timeout、キャンセル、不正出力は構造化エラーとし、組込みSchema/ガイドへフォールバックしない。
 8. CLI machine modeはstdoutに1 JSON応答、診断はstderrへ分離する。応答はprotocol、成否、終了コード、run ID、状態、記録先、機械可読エラーを識別できる。
 9. MCPの障害やCLIの異常終了を正常完了として報告しない。呼出し時にclone/buildを要求しない。
 10. CLIとMCPは明示的に更新し、互換性を保つ範囲では独立更新する。既存のプロトコル版、終了コード、環境変数allowlist、出力量上限、子プロセスツリー終了を含むキャンセル仕様を維持する。
 11. MCPは契約本文、CLI stdout/stderr、引数値をログへ重複記録しない。stderrは排水するが応答へ転載しない。
-12. `get_runtime_diagnostics` はMCPプロセス自身の実行ファイルpath/version metadata、`LOCALAPPDATA`とそこから導出した固定CLI/manifest path、存在状態、manifestのbyte数・parse状態・version/RIDまたはJSON構文位置だけを返す。manifest読込は16 KiBを上限とし、それを超える場合はparseせず`too_large`を返す。生のmanifest内容、例外メッセージ、CLI stdout/stderrは返さず、CLIを起動しない。このToolはユーザー名を含みうる絶対pathを返すため、診断時に限り呼び出す。固定配置動作、実行ファイル許可範囲、Phase 2合格基準は変更しない。
+12. `get_runtime_diagnostics` はMCPプロセス自身の実行ファイルpath/version metadata、設定CLI pathまたは既定`LOCALAPPDATA`から導出したCLI/manifest path、path source、存在状態、manifestのbyte数・parse状態・version/RIDまたはJSON構文位置だけを返す。manifest読込は16 KiBを上限とし、それを超える場合はparseせず`too_large`を返す。UTF-8 BOMはJSON解析前に除去する。生のmanifest内容、例外メッセージ、CLI stdout/stderrは返さず、CLIを起動しない。このToolはユーザー名を含みうる絶対pathを返すため、診断時に限り呼び出す。
 
 ## 5. 責務境界と初期版の対象外
 

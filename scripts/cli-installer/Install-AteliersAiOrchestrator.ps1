@@ -115,7 +115,12 @@ try {
             releaseUrl = $releaseUrl
             installedAtUtc = [DateTime]::UtcNow.ToString('o')
         }
-        $installManifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $stageDirectory 'install.json') -Encoding UTF8
+        $installManifestJson = $installManifest | ConvertTo-Json
+        $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText(
+            (Join-Path $stageDirectory 'install.json'),
+            $installManifestJson + [Environment]::NewLine,
+            $utf8WithoutBom)
         $packageVersion = Get-InstalledVersion -BinaryDirectory $stageDirectory
         if ($packageVersion -ne $normalizedVersion) {
             throw "Release ZIPのCLIバージョンが指定と一致しません (requested=$normalizedVersion, actual=$packageVersion)。"

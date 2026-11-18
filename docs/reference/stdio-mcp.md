@@ -15,7 +15,7 @@ flowchart LR
 
 MCP専用プロジェクトは公式C# MCP SDKを使い、`get_contract_schema`、`get_orchestration_guide`、`run_orchestration`を登録する。SchemaとガイドはCore管理のCLI出力をMCPが薄く中継し、MCPに固定コピーを持たない。親AIへ初回ガイド確認・契約生成前Schema取得を勧めるが、実際の参照保証はない。接続障害の診断用として、MCPプロセス内の情報だけを返す読み取り専用 `get_runtime_diagnostics` Toolも提供する。
 
-CLIは `LOCALAPPDATA` 下の固定実行ファイルと `install.json` を検査し、毎回`--capabilities`でprotocol v1の対応を確認する。非対応CLIは実行しない。契約を一時ファイルへ書かず、CLIの標準入力へUTF-8で渡す。既存の`run <contract.json>`、`start`、`validate`等は維持する。
+MCPはMCPサーバー起動設定の `ATELIERS_AI_ORCHESTRATOR_CLI_PATH` にCLI実行ファイルの絶対パスが設定されていれば、その実行ファイルを使い、同じフォルダーの `install.json` を検査する。未設定時は `LOCALAPPDATA` 下の既定配置を使う。明示パスが相対・不存在・不正manifestの場合は診断可能なエラーで停止し、既定パスへフォールバックしない。毎回`--capabilities`でprotocol v1の対応を確認する。非対応CLIは実行しない。契約を一時ファイルへ書かず、CLIの標準入力へUTF-8で渡す。実行パスは信頼済みホスト設定で管理し、TaskContractやTool引数から変更できない。既存の`run <contract.json>`、`start`、`validate`等は維持する。
 
 ## 2. CLIプロセス契約
 
@@ -57,9 +57,9 @@ MCPのキャンセルトークンをCLIのstdin/stdout/stderr待機に伝え、�
 
 ## 3. バージョン互換性
 
-CLIのインストール版は`install.json`から読み、起動実体はPhase 1で定義された固定パスを使う。`--capabilities`の`cliVersion`が`install.json`と一致し、MCPが対応する数値版`protocolVersion`であることを照合する。MCPはCLIの将来のSemVer番号を固定値で比較しない。CLIとMCPの配布・更新は個別に行える。旧CLIやプロトコル不一致は`unsupported_cli_protocol`で停止する。
+CLIのインストール版は、実行に使うCLIと同じフォルダーの`install.json`から読み取る。UTF-8 BOMは解析前に除去する。`--capabilities`の`cliVersion`が`install.json`と一致し、MCPが対応する数値版`protocolVersion`であることを照合する。MCPはCLIの将来のSemVer番号を固定値で比較しない。CLIとMCPの配布・更新は個別に行える。旧CLIやプロトコル不一致は`unsupported_cli_protocol`で停止する。
 
-Phase 2対応CLIを含むReleaseが別途発行・配置されるまでは、現行インストール済みv0.0.1にMCPは接続できない。Phase 2ではRelease tagや公開を行わない。
+Phase 2対応CLI v0.0.2以降を別途配置して使う。MCPは`install.json`と`--capabilities`の双方から実際の版・protocol対応を確認する。MCPコード変更を理由にCLIのRelease tag発行や再配置は行わない。
 
 ## 4. 機密情報と出力上限
 
@@ -99,8 +99,22 @@ command = 'C:\Users\<user>\AppData\Local\Ateliers-Dev\Ai-Orchestrator\Mcp\Atelie
 args = []
 
 [mcp_servers.ateliers_ai_orchestrator.env]
+ATELIERS_AI_ORCHESTRATOR_CLI_PATH = 'C:\Users\<user>\AppData\Local\Ateliers-Dev\Ai-Orchestrator\bin\Ateliers.Ai.Orchestrator.Cli.exe'
 ATELIERS_CODEX_CLI_PATH = 'C:\Users\<user>\AppData\Roaming\npm\codex.ps1'
 ```
+
+`ATELIERS_AI_ORCHESTRATOR_CLI_PATH`にはCLI実行ファイルの絶対パスを1つ指定します。従来のインストール先なら上記の値を使えます。別フォルダーへCLIを置く場合は、CLIと`install.json`を同じフォルダーに置き、この値をCLIの実際のパスに置き換えてください。既定の`LOCALAPPDATA`配置は、環境変数を省略すれば引き続き使えます。
+
+Windows PowerShell 5.1から設定したパスを確認する例です。`<user>`は実際のWindowsユーザー名に置き換えます。
+
+```powershell
+$cliPath = 'C:\Users\<user>\AppData\Local\Ateliers-Dev\Ai-Orchestrator\bin\Ateliers.Ai.Orchestrator.Cli.exe'
+Test-Path -LiteralPath $cliPath
+& $cliPath --version
+& $cliPath --capabilities
+```
+
+`Test-Path`が`True`、版が`0.0.2`以降、能力JSONに`protocolVersion: 1`と`runStdinJson`、`contractSchema`、`orchestrationGuide`の`true`があることを確認します。上のTOML設定をMCP serverの既存設定へ加えた後、Codexを再起動します。PowerShellから`$env:ATELIERS_AI_ORCHESTRATOR_CLI_PATH`を設定する必要はありません。環境変数はMCPの起動設定に記述するためです。
 
 Codex CLI実行パスは`codex.exe`またはnpm配置の`codex.ps1`/`codex.cmd`など、現在のCLI実装が起動できる絶対パスを指定する。Windowsの`.ps1` shimはPowerShell経由で起動する。`.cmd` shimもWindows x64の`run_orchestration(agent="codex")` fixtureで起動と構造化結果の返却を確認した。設定例では明示的なshim起動経路がある`.ps1`を使う。ログイン状態はCodex CLI自身の認証設定を使う。MCP設定にAPIキーやTokenを書かない。
 
@@ -110,7 +124,7 @@ Codexを再起動するとMCPサーバーが子プロセスとして起動する
 
 ### 接続障害の読み取り専用診断
 
-`get_runtime_diagnostics` はMCPサーバープロセス自身について、起動実行ファイルのpathとfile/assembly version metadataを返す。また、そのプロセスの `LOCALAPPDATA`、固定CLIと `install.json` の導出path・存在有無、manifest byte数、JSON parse状態、読み取れたversion/RID、JSON構文エラーの型・行・byte位置を返す。manifestは16 KiBまで読み取り、それを超える場合は `too_large` として内容を解析しない。CLIやオーケストレーションは起動せず、manifest本文、例外メッセージ、CLIの標準出力/標準エラーは返さない。絶対pathにはユーザー名等が含まれうるため、接続障害の調査時だけ明示的に呼び出す。
+`get_runtime_diagnostics` はMCPサーバープロセス自身について、起動実行ファイルのpathとfile/assembly version metadataを返す。また、そのプロセスの `LOCALAPPDATA`、選択CLI pathと選択理由、同じフォルダーにある `install.json` の導出path・存在有無、manifest byte数、JSON parse状態、読み取れたversion/RID、JSON構文エラーの型・行・byte位置を返す。設定CLIが相対パスなら`cliPathError`で示す。manifestは16 KiBまで読み取り、それを超える場合は `too_large` として内容を解析しない。UTF-8 BOMは除去して解析する。CLIやオーケストレーションは起動せず、manifest本文、例外メッセージ、CLIの標準出力/標準エラーは返さない。絶対pathにはユーザー名等が含まれうるため、接続障害の調査時だけ明示的に呼び出す。
 
 PowerShellの実行ポリシーでスクリプト起動が制限される環境では、リポジトリルートで次のように現在のプロセスに限りBypassを指定できます。
 
