@@ -78,6 +78,11 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
             // Allow only those isolated paths and the run-specific temp directory.
             codexArguments.Add("--config");
             codexArguments.Add(BuildWritableRootConfig(sandboxWritableRoots));
+            foreach (var environmentConfig in BuildShellEnvironmentConfig(start.Environment))
+            {
+                codexArguments.Add("--config");
+                codexArguments.Add(environmentConfig);
+            }
         }
         codexArguments.Add("-");
         if (OperatingSystem.IsWindows() && string.Equals(Path.GetExtension(options.ExecutablePath), ".ps1", StringComparison.OrdinalIgnoreCase))
@@ -418,6 +423,24 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
         // TOML basic strings accept forward slashes on Windows, avoiding backslash escaping.
         var roots = paths.Select(path => Path.GetFullPath(path).Replace('\\', '/').Replace("\"", "\\\"", StringComparison.Ordinal));
         return $"sandbox_workspace_write.writable_roots=[{string.Join(',', roots.Select(path => $"\"{path}\""))}]";
+    }
+
+    private static IEnumerable<string> BuildShellEnvironmentConfig(IDictionary<string, string?> environment)
+    {
+        // Codex filters shell subprocess environments by default; preserve the run-scoped paths
+        // needed by .NET and NuGet without inheriting unrelated user environment variables.
+        foreach (var name in new[]
+        {
+            "APPDATA", "LOCALAPPDATA", "TEMP", "TMP",
+            "DOTNET_CLI_HOME", "NUGET_PACKAGES", "NUGET_HTTP_CACHE_PATH", "NUGET_SCRATCH", "NUGET_PLUGINS_CACHE_PATH"
+        })
+        {
+            if (environment.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                var escaped = Path.GetFullPath(value).Replace('\\', '/').Replace("\"", "\\\"", StringComparison.Ordinal);
+                yield return $"shell_environment_policy.set.{name}=\"{escaped}\"";
+            }
+        }
     }
 
     private static bool IsOutsideDirectory(string directory, string candidate)

@@ -1852,6 +1852,22 @@ static void CodexFakeProcessesCompleteIndependentReviewSlice()
                 : "sandbox_workspace_write.writable_roots=[]";
             Assert.Equal(expectedRootsConfig, arguments[rootsConfigIndex + 1],
                 $"{role}のCodex sandbox書込範囲が期待値と異なります。");
+            if (role == "Implementer")
+            {
+                foreach (var name in new[] { "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "DOTNET_CLI_HOME",
+                    "NUGET_PACKAGES", "NUGET_HTTP_CACHE_PATH", "NUGET_SCRATCH", "NUGET_PLUGINS_CACHE_PATH" })
+                {
+                    var expectedEnvironmentConfig =
+                        $"shell_environment_policy.set.{name}=\"{Path.GetFullPath(paths[name]).Replace('\\', '/')}\"";
+                    Assert.True(arguments.Contains(expectedEnvironmentConfig, StringComparer.Ordinal),
+                        $"Implementerの{name}がCodexのshell環境へ明示的に渡されていません。");
+                }
+            }
+            else
+            {
+                Assert.False(arguments.Any(argument => argument?.StartsWith("shell_environment_policy.set.", StringComparison.Ordinal) == true),
+                    "Reviewerへrun固有の環境変数設定を渡しません。");
+            }
             var checkout = Path.GetFullPath(request.Contract.WorkingDirectory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
             Assert.False(Path.GetFullPath(paths["HOME"]).StartsWith(checkout, StringComparison.OrdinalIgnoreCase), $"{role}のHOMEがcheckout内です。");
             Assert.False(Path.GetFullPath(paths["TEMP"]).StartsWith(checkout, StringComparison.OrdinalIgnoreCase), $"{role}のTEMPがcheckout内です。");
