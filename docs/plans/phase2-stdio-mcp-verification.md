@@ -1,7 +1,7 @@
 # Phase 2 STDIO MCP 検証記録
 
 > 対象コミット: Phase 2実装PR。Release公開とPhase 3 E2Eは対象外。
-> 判定: Inconclusive（新しいPhase 2合格基準は隔離Windows fixtureでPass。ユーザーの固定配置CLIは未更新で、実配置先での疎通証跡は未取得）。
+> 判定: **Pass（2026-11-18、ユーザー承認済み）**。接続中MCPからCLIを起動し、契約を受領したCoreの実行記録まで確認した。下記の過去記録にあるInconclusiveは、その時点では固定配置環境の証跡が未取得だったことを示す履歴であり、最終実機再試験によりPhase 2判定はPassとなった。
 
 ## 追加要求と失敗記録
 
@@ -77,4 +77,45 @@
 | MCP CLI adapter fixture | Pass | BOM付きmanifestを持つ明示パスCLIでSchema・guide・Fake runを実行。相対pathの拒否と既定pathへのfallbackなしも確認。 |
 | Release MCP STDIO → CLI → Core Fake smoke test | Pass | `ATELIERS_AI_ORCHESTRATOR_CLI_PATH`にユーザー配置CLIを指定したMCP processで、4 Toolを認識し、Schemaとguideを取得、TaskContractを`agent="fake"`で渡してrun ID・run directoryを受け取った。Workflow stateは`NeedsHumanInput`。ユーザーのMCP登録や配置は変更していない。 |
 | 接続中Codex MCPの更新後疎通 | 未実施 | PRコードの配置・クライアント再起動は行っていない。新MCPを配置して再起動後、Schema/guide取得とFake実行を確認する必要がある。CLI再インストールは不要。 |
+
+## 2026-11-18 最終実機再試験 — Phase 2 Pass
+
+接続中のMCPからGuideとSchemaを取得し、TaskContract v1を生成した。Schemaに適合する契約は受理され、MCP → CLI → Coreの実行記録が作成された。計画書のPhase 2ゲートは疎通を判定し、オーケストレーション全体の成功を求めないため、状態 `NeedsHumanInput` でも本ゲートはPassとする。
+
+| 項目 | 観測結果 |
+|---|---|
+| MCP | `1.0.0+74c1ae3`（PR #78のマージコミットを含むビルド） |
+| CLI | `0.0.2`。manifestは `0.0.2` / `win-x64` で `valid` |
+| CLIパス解決 | `configuredCliPath=null`、`cliPathSource=localappdata`。既定のユーザー配置先を使用 |
+| Guide / Schema | 接続中MCPから取得成功。TaskContract v1を作成し、Coreが受理 |
+| 実行到達 | Fake実行がCLIを経由してCoreのrun記録を作成。MCP応答 `ok=true`、終了コード0 |
+| 最終Run | `e0477f0e75e04bccaa4806582769c21c`、状態 `NeedsHumanInput` |
+
+明示CLIパス設定はこの接続で検証していない。診断値がnull / localappdataであるため、明示パスによる起動の証拠として扱わない。PR [#78](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/pull/78) でUTF-8 BOM付きmanifestの読取不具合を修正し、PRのCIと独立レビューはPassとしてマージされた（merge commit `74c1ae31dba7b31a4afd4ff2c1bc21d627fecd38`）。今回の接続は、その修正を含むMCPで既定配置から疎通した結果である。
+
+この合格はMCP→CLI→Coreの境界までを対象とし、実Agentによるタスク完了、PR作成、push、Phase 3 E2Eを含まない。Phase 2の合格条件・対象外範囲は上記ゲートと[開発計画書](development-plan.md)を参照する。
+
+## 2026-11-18 追加実エージェントスモーク — Phase 2判定とは別
+
+ユーザー提供の追加スモーク報告に基づく記録。これはPhase 2の合格条件ではなく、実Agentの起動・レビューとPR必須経路の観測である。
+
+### 主Run
+
+- 対象: `Ateliers-Dev/ateliers-ai-orchestrator-testbed`、main起点 `0ae85f8330b1c696cdf55a1f03880cd02966c488`。課題は `CountWords` が空白文字を適切に扱わない意図的なバグ。
+- Run ID: `a64d43e4e04e4934a4b7b17fbb8ea3dc`。
+- 実Implementerと独立Reviewerが各1回起動し、ともにexit 0。修正は1ファイル。実行後のRelease buildと全5チェックを再確認し、成功。
+- Reviewerは修正を妥当と評価したが、レビュー入力にテストログがなく受入判定は `NeedsHumanInput`。実Agent処理と検証結果のReviewerへの証跡受け渡しは別の事柄として記録する。
+- push / PR作成なし。testbedの `main` は起点SHAのまま。修正は隔離cloneの専用ブランチに未コミットで残った（報告時点）。
+
+### PR必須経路
+
+別Run `7d7e0e60ff494ff4994e2b8f2d4e75f2` はpush前の `push.secret-scan-and-whitespace-check` がexit 2で停止し、Reviewer・push・PR作成に到達しなかった。直接原因は未確定であり、併記されたdotnet復元先やGit lockの問題との因果関係も確定していない。GitHubへの書き込みは発生していない。
+
+### 後続課題と引継ぎ
+
+- [Issue #77](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/77): MCP実行環境ごとのパス可視性・配置方式の将来検討。今回の成功は既定LOCALAPPDATA配置での結果であり、明示CLIパスは未検証。
+- [Issue #79](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/79): Implementerのビルド・テスト証跡を独立Reviewerへ受け渡す。
+- [Issue #80](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/80): PR必須Runのpush前チェック停止を再現し、直接原因を調査する。
+
+Phase 3の次の作業と受入基準は、既存の[開発計画書](development-plan.md)に従う。本記録はPhase 3の要件を追加・変更しない。
 
