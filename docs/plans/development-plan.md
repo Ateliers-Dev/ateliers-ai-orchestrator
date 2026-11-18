@@ -1,6 +1,6 @@
 # Ateliers AI Orchestrator 開発計画書
 
-> 状態: 承認済み。Phase 1の完了とPhase 2の実装・進行基準。
+> 状態: 承認済み。Phase 1・Phase 2完了。Phase 3の進行基準。
 
 ## 1. 目的と進め方
 
@@ -14,7 +14,7 @@
 |---|---|---|
 | 0 | Issue #20: UnitTests の xUnit 移行 | **完了** — Issue #20 を満たし、xUnit移行・Test Explorer確認・CI確認を経てPR #67 と Issue #20 を完了した。 |
 | 1 | Release CLI インストーラー | 承認済み要求仕様に従い、選択した固定バージョンのRelease CLIをユーザー単位のインストール先へ配置し、起動対象バージョンを一意に識別できる。 |
-| 2 | STDIO MCP | 承認済み要求仕様に従い、既存契約スキーマを受け取り、インストール済み固定バージョンCLIに渡して実行し、結果または失敗を呼び出し元へ返せる。 |
+| 2 | STDIO MCP | **完了（2026-11-18、ユーザー承認）** — 承認済み受入条件に基づくMCP→CLI→Core実機疎通がPass。最終実機結果は[Phase 2検証記録](phase2-stdio-mcp-verification.md)を参照。 |
 | 3 | 既定スクリプトによるRelease CLI起動確認 | `run-codex-e2e.ps1` を追加パラメータなしで実行し、Release CLIプロセスが起動したことを証跡で確認する。CLIの正常終了やオーケストレーション完了は要求しない。 |
 
 ### Phase 0 — Issue #20
@@ -36,6 +36,10 @@ MCPは既存契約スキーマをCLIへ中継する薄いアダプターとす�
 MCPは分離可能な専用プロジェクトとし、公式C# MCP SDKを使う。CLIとの内部境界は契約JSON stdin、結果JSON stdout、診断stderrとする。CLI既存のファイル引数経路は維持する。
 
 Phase 2の合格条件は、(1) MCPが3 Toolを認識する、(2) `get_orchestration_guide` と `get_contract_schema` が正常終了して有効な内容を返す、(3) 親AIがSchemaに適合するTaskContractを生成できる、(4) `run_orchestration` がMCPからCLIを起動し、契約を受け渡して実行処理へ到達した証跡があることとする。AIがガイドを自発参照したかは観測・記録するが必須条件にはしない。CLI内部のGit等の既知エラーで `Failed` / `NeedsHumanInput` となっても、起動・契約受領・実行到達を確認できれば疎通Passとし、内部不具合は後続課題へ記録する。CLI起動失敗、契約未受領、MCP→CLI通信失敗はFailとする。Phase 2はオーケストレーション本体の正常終了を要求せず、既知の内部不具合の修正へ範囲を拡大しない。詳細な証跡要件は[Phase 2検証記録](phase2-stdio-mcp-verification.md)を参照する。Phase 3の既定スクリプト起動確認は含めない。
+
+### Phase 2 完了判定（2026-11-18）
+
+**Pass — ユーザー承認済み。** 接続中MCPからGuide / Schemaを取得し、TaskContract v1を生成して受理させ、Fake実行がCLIを経由してCoreのrun記録まで到達したことを確認した。最終Runは `e0477f0e75e04bccaa4806582769c21c`、状態は `NeedsHumanInput`、終了コードは0。これは計画で定めた疎通条件の合格であり、オーケストレーション全体の正常完了やPhase 3の完了を意味しない。判定根拠と追加スモークテストは[Phase 2検証記録](phase2-stdio-mcp-verification.md)に記載する。
 
 ### Phase 3 — 既定スクリプトでCLIが起動することの確認
 
