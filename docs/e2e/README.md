@@ -36,17 +36,15 @@ Codex CLIをPATHから解決できない環境では、絶対パスを指定で�
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\e2e\run-codex-e2e.ps1 -RunCodex -CodexExecutable 'C:\Tools\Codex\codex.exe'
 ~~~
 
-実行前に本番Slack設定を読み、通知先チャンネルIDを表示します。`config/slack.json` と `config/slack.secrets.json` が既定の場所にない場合は、両パスを `-SlackConfigurationPath` と `-SlackSecretsPath` で明示します。秘密ファイルの値は出力しません。設定がなければ通知を無効化せず停止します。確認文にはTestbedと本番通知先のチャンネルIDが含まれます。
+E2EのSlack通知モードは `-SlackNotifications disabled|test|auto` で明示できます。省略時は `disabled` で、Slack設定を読み込まず、認証通信も送信もしません。通知を検証するときだけ `test` または `auto` を選びます。
 
-準備中に `verify-slack` を使って3つの本番Botの `auth.test` と設定済みBot IDを照合します。この確認は通知を投稿しません。さらにTestbed `main` のclean cloneで課題プロジェクトをRelease buildし、既知の `tabs and newlines` と `whitespace only` だけが失敗することをCodex起動前に確認します。基準状態が異なる場合は停止し、cloneと診断ログを保持します。
+`test` は `%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\config\slack.json` の `testChannelId` へ `[Ateliers AI TEST]` と明示した通知を送り、`auto` は各Botの通常 `channelId` へ送ります。必要なら `-SlackConfigurationPath` と `-SlackSecretsPath` の両方でローカル設定の場所を指定できます。Bot認証と送信先を実Codex起動前に確認し、送信先IDを表示します。Token値は表示・記録しません。通常チャンネルとテストチャンネルは異なる値でなければなりません。
 
-現在のTestbedシナリオでは次の形です。
+通知モードを明示したE2Eでは、Slack送信成功件数とrun IDの到達確認が必要です。成功を確認できない場合は、PR等の証跡があっても不合格です。確認文には選択したモードと送信先チャンネルIDが含まれます。
 
-    RUN CODEX E2E FOR ATELIERS-DEV/ATELIERS-AI-ORCHESTRATOR-TESTBED WITH PUSH AND PR AND SLACK TO <本番チャンネルID>
+例: テスト用チャンネルに送る場合は `-SlackNotifications test`、通常通知先へ送る場合は `-SlackNotifications auto` を実Codex起動前の準備確認後に指定します。実行スクリプトの既定モードは `disabled` です。
 
-実行時は `auto` で設定済みの本番通知先に送ります。Slack送信成功件数がない場合や送信失敗がある場合は、PR等の証跡があっても不合格です。E2E後にSlackでrun IDを含む通知を確認し、表示された確認文を入力します。到達確認を行えない場合は不合格として証跡を保持します。
-
-実行は一意な一時cloneと専用作業ブランチを使います。PR作成、Reviewer結果コメント、head/base SHA、GitHub上のPRがOPENでbaseがmainであること、Slack送信と人間による到達確認をすべて確認しない限り、合格を表示しません。自動マージはしません。PRは人間の確認後も開いたままにし、Testbed `main` へマージしません。
+実行は一意な一時cloneと専用作業ブランチを使います。PR作成、Reviewer結果コメント、head/base SHA、GitHub上のPRがOPENでbaseがmainであることを確認しない限り、合格を表示しません。`test` または `auto` のときはSlack送信と人間による到達確認も追加の合格条件です。自動マージはしません。PRは人間の確認後も開いたままにし、Testbed `main` へマージしません。
 
 Codex開始後の失敗、中断、証跡不一致では一時cloneと実行記録を保持します。GitHub上にpush済みブランチやPRが残った可能性がある場合、人間が状態を確認してください。正常終了した場合も記録は自動削除しません。
 

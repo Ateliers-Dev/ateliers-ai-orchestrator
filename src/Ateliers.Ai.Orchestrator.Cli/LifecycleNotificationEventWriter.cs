@@ -38,6 +38,12 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
     }
 
     internal LifecycleNotificationEventWriter(string lifecycleLogPath, bool notificationsDisabled,
+        string configurationPath, string? secretsPath, bool useTestChannel)
+        : this(lifecycleLogPath, notificationsDisabled, useTestChannel, configurationPath, secretsPath, discoverSettings: false)
+    {
+    }
+
+    internal LifecycleNotificationEventWriter(string lifecycleLogPath, bool notificationsDisabled,
         Func<LifecycleEvent, CancellationToken, Task<SlackNotificationSendResult>> notificationSender)
     {
         ArgumentNullException.ThrowIfNull(notificationSender);
@@ -197,22 +203,46 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
     {
         configurationPath = string.Empty;
         secretsPath = string.Empty;
-        var roots = new[] { Environment.CurrentDirectory, AppContext.BaseDirectory };
-        var seen = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
-        foreach (var root in roots)
+        if (SlackConfigurationLocator.TryFind(out configurationPath, out secretsPath)) return true;
+        configurationPath = string.Empty;
+        secretsPath = string.Empty;
+        return false;
+    }
+}
+
+internal static class SlackConfigurationLocator
+{
+    internal static bool TryFind(out string configurationPath, out string secretsPath,
+        string? localAppData = null, string? applicationBaseDirectory = null)
+    {
+        configurationPath = string.Empty;
+        secretsPath = string.Empty;
+        localAppData ??= Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        if (!string.IsNullOrWhiteSpace(localAppData))
         {
-            for (var current = new DirectoryInfo(root); current is not null; current = current.Parent)
-            {
-                if (!seen.Add(current.FullName)) continue;
-                var configDirectory = Path.Combine(current.FullName, "config");
-                var candidateConfiguration = Path.Combine(configDirectory, "slack.json");
-                var candidateSecrets = Path.Combine(configDirectory, "slack.secrets.json");
-                if (!File.Exists(candidateConfiguration)) continue;
-                configurationPath = candidateConfiguration;
-                secretsPath = candidateSecrets;
-                return true;
-            }
+            var userConfigurationDirectory = Path.Combine(localAppData, "Ateliers-Dev", "Ai-Orchestrator", "config");
+            if (TryFindInDirectory(userConfigurationDirectory, out configurationPath, out secretsPath)) return true;
         }
+
+        // Development checkouts keep their local config beside the CLI project. Resolve it
+        // from the executable location so installed runs never depend on the caller's CWD.
+        applicationBaseDirectory ??= AppContext.BaseDirectory;
+        var seen = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        for (var current = new DirectoryInfo(applicationBaseDirectory); current is not null; current = current.Parent)
+        {
+            if (!seen.Add(current.FullName)) continue;
+            if (TryFindInDirectory(Path.Combine(current.FullName, "config"), out configurationPath, out secretsPath)) return true;
+        }
+        return false;
+    }
+
+    private static bool TryFindInDirectory(string directory, out string configurationPath, out string secretsPath)
+    {
+        configurationPath = Path.Combine(directory, "slack.json");
+        secretsPath = Path.Combine(directory, "slack.secrets.json");
+        if (File.Exists(configurationPath)) return true;
+        configurationPath = string.Empty;
+        secretsPath = string.Empty;
         return false;
     }
 }

@@ -13,23 +13,27 @@ TestbedはPublicリポジトリです。実Codexを開始するとCodex利用枠
 - `scripts/e2e/scenarios/testbed-review-cycle.json` は現行CLIと同じ契約フィールドを使い、`reporting.pullRequestExpected` を `true` にします。対象範囲、5つのチェック、独立レビュー、必要な場合のみのbounded修正、停止条件を定義します。
 - 実行対象はGitHubから取得するTestbed `main` のcleanな一時cloneです。実行直前にGitHubの既定ブランチSHAとcloneのHEADを照合します。本体リポジトリや利用者の既存checkoutを対象にしません。
 - PR必須経路はrun IDを使う一意な作業ブランチを作成し、push、PR作成、Reviewer結果コメント投稿・照合へ進みます。
-- Slack通知は `auto` で設定済みの本番チャンネルへ送ります。`config/slack.json` と `config/slack.secrets.json` が実行checkoutにない場合は、スクリプト引数で元の設定ファイルを明示できます。通知先は確認前にチャンネルIDで表示され、test channelや無効化へ切り替えません。
+- Slack通知は実行スクリプトの `-SlackNotifications` で `disabled`、`test`、`auto` を選びます。既定値は `disabled` です。`test` は `[Ateliers AI TEST]` と明示した通知を設定済みテストチャンネルへ、`auto` は通常の通知先へ送信します。通知を指定したときだけ、実Codex起動前に設定とBot認証を確認し、確認文へモードとチャンネルIDを表示します。
 
 [E2E実行基盤の準備確認](README.md#準備確認) を実行します。共通の準備確認は本体Release build、GitHub認証とTestbed `main` のSHA、cleanな一時clone、生成した契約の現行Release CLI検証を行います。単体テストは実行せず、E2Eの前提ゲートにも使いません。準備確認だけの実行では一時cloneを削除します。
 
 実行準備ではTestbed `main` のclean cloneをRelease buildし、チェックを実行します。`tabs and newlines` と `whitespace only` の2件だけが失敗し、`ordinary spaces`、`repeated spaces`、`empty input` が通ることを確認できない場合はCodexを起動せずNGとします。基準状態のログは一時ディレクトリに記録されます。
 
-Fake経路はこの実試験の合格判定に使いません。実CodexによるImplementer、独立Reviewer、必要時のみの修正・再レビュー、GitHub公開、Slack実通知を実行します。Reviewerの修正指摘を強制する偽指摘や追加変更はありません。
+Fake経路はこの実試験の合格判定に使いません。実CodexによるImplementer、独立Reviewer、必要時のみの修正・再レビュー、GitHub公開を実行します。Slack実通知は `test` または `auto` を明示した場合だけ追加されます。Reviewerの修正指摘を強制する偽指摘や追加変更はありません。
 
 ## 実Codex E2E
 
 準備確認を成功させた後、 [E2E実行基盤の実行手順](README.md#実codex実行) に従って実行します。確認文は次のとおりです。
 
-    RUN CODEX E2E FOR ATELIERS-DEV/ATELIERS-AI-ORCHESTRATOR-TESTBED WITH PUSH AND PR AND SLACK TO <表示された本番チャンネルID>
+Slack送信なしの場合の確認文:
+
+    RUN CODEX E2E FOR ATELIERS-DEV/ATELIERS-AI-ORCHESTRATOR-TESTBED WITH PUSH AND PR WITHOUT SLACK
+
+テストチャンネル送信は `-SlackNotifications test`、通常通知先への送信は `-SlackNotifications auto` を追加します。各モードの確認文には実際の送信先が含まれます。
 
 実行ではCodex CLIとモデルを使い、cleanな一時cloneに対して契約を実行します。契約のPR必須経路は、専用ブランチへのcommit/push、固定差分の独立Reviewer確認、必要な場合のみの上限内修正と再レビュー、PR作成、head/base SHA検証、Reviewer結果コメントの投稿と再読込照合、NeedsHumanInputでの停止を行います。スクリプトはpush後にもTestbedでRelease buildと全5チェックを独立実行し、期待値ファイルがmainから変更されていないことを確認します。またPRがOPENかつbaseがmainであることを再取得して確認します。push、PR作成、独立実行確認のいずれかに失敗した場合、成功扱いにはしません。
 
-Slackは `auto` で本番設定の通知先へ送ります。チャンネル設定またはBot tokenが不足する場合は実Codexを起動せず停止します。Slack送信失敗や成功件数なしもE2E不合格です。実行後、Slack上で表示されたrun IDの到達を目視確認し、確認文を入力してください。確認できない場合は不合格です。実行開始前の確認文には対象リポジトリと通知先チャンネルIDが含まれます。
+`test` または `auto` ではチャンネル設定かBot Tokenが不足すると実Codexを起動せず停止します。Slack送信失敗や成功件数なしもE2E不合格です。実行後、選択したSlack送信先でrun IDの到達を目視確認し、表示された確認文を入力してください。確認できない場合は不合格です。`disabled` では設定を読み込まずSlack送信のゲートを適用しません。
 
 ## 証跡と失敗時
 
@@ -39,4 +43,4 @@ Codex開始後の失敗・中断・証跡不一致では一時cloneと実行記�
 
 ## リリース判定
 
-このE2Eが途中停止、未到達、証跡欠落・不一致、通知失敗、Slack到達未確認のいずれかならリリース判定はNGです。Fake実行や単体テストの成功で代替できません。合格してもPRは開いたままにし、人間の最終承認前にTestbed `main` へマージしません。
+このE2Eが途中停止、証跡欠落・不一致、または明示的に選択したSlack通知の送信失敗・未到達のいずれかならリリース判定はNGです。Fake実行や単体テストの成功で代替できません。合格してもPRは開いたままにし、人間の最終承認前にTestbed `main` へマージしません。

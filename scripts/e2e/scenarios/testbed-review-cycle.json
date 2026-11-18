@@ -17,7 +17,7 @@
   "inputs": [
     {
       "description": "Ateliers AI Orchestrator Testbed review-cycle scenario",
-      "reference": "https://github.com/Ateliers-Dev/ateliers-ai-orchestrator-testbed/blob/main/docs/v7-e2e-scenario.md",
+      "reference": "https://github.com/Ateliers-Dev/ateliers-ai-orchestrator-testbed/blob/main/docs/e2e-scenario.md",
       "revision": "実行時に確認したTestbed mainのSHAをスクリプトが設定する"
     },
     {
@@ -41,7 +41,7 @@
     "実行記録に一意なブランチ、PR URL、レビュー対象のhead/base SHAがある。",
     "PR上のReviewer結果コメントと投稿照合証跡が実行記録に保存されている。",
     "自動マージを行わず、人間確認待ちで停止し、PRはOPENのままTestbed mainを変更しない。",
-    "Slack通知を設定済みの本番通知先へ実送信し、送信成功とrun IDの到達を確認する。設定不足・送信失敗・未到達は不合格とする。"
+    "E2EランナーでSlack通知を明示指定した場合は、選択モードの送信先への送信成功とrun ID到達を確認する。"
   ],
   "delegatedOperations": [
     "Testbedのシナリオ、AGENTS.md、対象コードとチェックを確認する。",
@@ -61,7 +61,7 @@
     "テストの期待値または要件が曖昧で、推測せずに続行できない場合。",
     "mainからのcleanな一時クローン、GitHub認証、push権限、PR作成またはコメント照合に問題がある場合。",
     "PR必須経路や証跡保存が利用できず、結果を成功として確認できない場合。",
-    "本番Slack設定が不足・不正、または通知送信・到達確認を完了できない場合。",
+    "Slack通知を明示指定した場合に、設定が不足・不正、または通知送信・到達確認を完了できない場合。",
     "教材main、既存の利用者ブランチまたは既存PRを変更しなければ進められない場合。",
     "公開操作後に実行が失敗または中断した場合は、証跡と残存ブランチ・PRをそのまま保持して報告し、削除・クローズ・マージを行わない。"
   ],

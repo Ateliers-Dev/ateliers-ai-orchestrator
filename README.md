@@ -48,7 +48,15 @@ PowerShellでバージョンを明示してRelease CLIをユーザー単位で�
 & .\scripts\cli-installer\Install-AteliersAiOrchestrator.ps1 -Verify
 ```
 
-配置先は `%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\bin\Ateliers.Ai.Orchestrator.Cli.exe` です。初回インストール・更新のたびに対象バージョンを明示します。インストーラーはGitHub Release ZIPのSHA-256とCLIのバージョン表示を確認します。インストール、更新、配置確認の挙動と制約は[CLIインストーラー技術仕様](docs/reference/cli-installer.md)を参照してください。
+CLIの配置先は `%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\bin\`、ユーザー設定先は `%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\config\` です。初回インストール・更新のたびに対象バージョンを明示します。インストーラーはGitHub Release ZIPのSHA-256とCLIのバージョン表示を確認し、配置後に設定インストーラーを既存設定維持モードで呼び出します。インストール、更新、配置確認の挙動と制約は[CLIインストーラー技術仕様](docs/reference/cli-installer.md)を参照してください。
+
+Slack設定を初めて配置するときは、ローカルの `config/slack.json` と `config/slack.secrets.json` を用意してからCLIインストーラーを実行します。JSONだけを更新する場合は次を単独実行します。既存設定はタイムスタンプ付きバックアップへ保存してから置き換えます。
+
+```powershell
+& .\scripts\cli-installer\Install-AteliersAiOrchestratorConfig.ps1
+```
+
+設定ファイルはGit管理対象外です。設定値とTokenはチャット、PR、ログへ出さないでください。
 
 ## STDIO MCP
 
@@ -156,7 +164,7 @@ dotnet build Ateliers.Ai.Orchestrator.sln
 
 ### 実行ライフサイクルのSlack通知
 
-通常の `run` は、`config/slack.json` と `config/slack.secrets.json` がリポジトリ内にあり、3役すべてのBot定義とTokenが有効な場合に限り、ライフサイクルイベントを各Bot定義の `channelId` へ送信します。雛形の通常送信先は `#ateliers-ai-notifications` です。`slack.json` がない環境は通知無効として正常に実行します。設定ファイルがあるのにsecretsまたはBot設定が不足・不正な場合は、秘密やパスを含めない警告を出して全通知をスキップします。設定探索は実行ディレクトリとCLI出力ディレクトリの親をたどるため、Visual Studioからも環境変数なしで利用できます。明示的に止める場合は `--slack-notifications disabled` を指定します。
+通常の `run` は、ユーザー設定先 `%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\config\` の `slack.json` と `slack.secrets.json` を優先します。インストール先や現在の作業ディレクトリには依存しません。ユーザー設定がない開発環境では、CLI実行ファイルの配置先から親ディレクトリをたどり、リポジトリの `config` を探します。明示的な `--slack-config` と `--slack-secrets` は引き続き利用できます。3役すべてのBot定義とTokenが有効な場合に通知します。設定がない場合は通知せず、設定が不完全な場合は秘密やパスを含めない警告を出します。明示的に止める場合は `--slack-notifications disabled` を指定します。
 
 送信者をSlackの `from:<@U...>` で検索できるよう、Orchestrator、Implementer、Reviewerに1体ずつ独立したSlackアプリとBotを使います。3体とも `chat:write` のみを付与し、通常は `#ateliers-ai-notifications` に招待してください。各BotのUser IDと通常チャンネルIDは `config/slack.json`、各Bot TokenはGit除外対象の `config/slack.secrets.json` に記録します。雛形は `config/slack.json.example` と `config/slack.secrets.example.json` にあります。
 
@@ -167,7 +175,7 @@ dotnet build Ateliers.Ai.Orchestrator.sln
 
 投稿者ごとの確認には、Slack検索欄で `from:<@U...> in:#ateliers-ai-notifications` を使います。`U...` を `slack.json` に登録した各Bot User IDへ置き換えると、Orchestrator、Implementer、Reviewerの投稿を個別に検索できます。
 
-ワークフローの開始・完了・失敗・人間判断待ちと、Implementer/Reviewerの開始・完了・失敗を対応するBotから通知します。本文はrun ID、役割、イベント、状態、UTC時刻だけです。prompt、応答、任意のsummary、Token、設定値は含めません。イベント記録時は通知をメモリキューへ積むだけで、Slackの送信待ちは実行時間上限やキャンセル応答に含めません。ワークフロー終了後に最大2秒だけ通知を排出し、キャンセル時は待たずに終了します。Slack送信はイベントごとに1回で、再試行しません。失敗・タイムアウトは安全な警告だけを出し、実行結果とJSONL記録を変えません。JSONL追記もSlack送信もそれぞれ独立して失敗を処理します。
+ワークフローの開始・完了・失敗・人間判断待ちと、Implementer/Reviewerの開始・完了・失敗を対応するBotから通知します。本文はrun ID、役割、イベント、状態、UTC時刻だけです。テストモードは先頭に `[Ateliers AI TEST]` を付けます。prompt、応答、任意のsummary、Token、設定値は含めません。イベント記録時は通知をメモリキューへ積むだけで、Slackの送信待ちは実行時間上限やキャンセル応答に含めません。ワークフロー終了後に最大2秒だけ通知を排出し、キャンセル時は待たずに終了します。Slack送信はイベントごとに1回で、再試行しません。失敗・タイムアウトは安全な警告だけを出し、実行結果とJSONL記録を変えません。JSONL追記もSlack送信もそれぞれ独立して失敗を処理します。
 
 この連携は既存の `Ateliers.Slack` Incoming Webhook APIと `ATELIERS_SLACK_WEBHOOK_URL` 設定を変更しません。Bot Tokenはソース・PR・ビルド成果物へ含めません。
 

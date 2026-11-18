@@ -157,6 +157,12 @@ try {
         }
         Write-Output "配置先: $executable"
         Write-Output "バージョン: $installedVersion"
+
+    $configInstaller = Join-Path $PSScriptRoot 'Install-AteliersAiOrchestratorConfig.ps1'
+    if (-not (Test-Path -LiteralPath $configInstaller -PathType Leaf)) {
+        throw 'Slack設定インストーラーが見つかりません。CLIは配置されましたが設定配置を確認できません。'
+    }
+    & $configInstaller -PreserveExisting
     }
     finally {
         if (Test-Path -LiteralPath $stageDirectory) {

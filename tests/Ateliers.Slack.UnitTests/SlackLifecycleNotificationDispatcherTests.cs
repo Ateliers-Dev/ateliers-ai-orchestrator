@@ -64,6 +64,7 @@ public sealed class SlackLifecycleNotificationDispatcherTests
             using var payload = JsonDocument.Parse(handlers[botId].RequestBodies.Single()!);
             Assert.Equal("C_TEST", payload.RootElement.GetProperty("channel").GetString());
             Assert.Equal($"Bearer {TokenPrefix}{botId}", handlers[botId].Requests.Single().Headers.Authorization!.ToString());
+            Assert.StartsWith("[Ateliers AI TEST] ", payload.RootElement.GetProperty("text").GetString(), StringComparison.Ordinal);
         }
     }
 
