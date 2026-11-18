@@ -20,9 +20,12 @@ internal static class FixtureHost
             tests.Adapter_passes_contract_to_cli_stdin_and_returns_cli_json().GetAwaiter().GetResult();
             tests.Adapter_forwards_contract_schema_and_guide_from_installed_cli().GetAwaiter().GetResult();
             tests.Adapter_returns_structured_error_when_cli_is_missing().GetAwaiter().GetResult();
+            tests.Adapter_reports_an_invalid_explicit_cli_path_without_falling_back_to_localappdata().GetAwaiter().GetResult();
             tests.Adapter_rejects_multibyte_cli_output_over_64_KiB().GetAwaiter().GetResult();
             tests.Adapter_starts_npm_cmd_codex_shim_and_returns_structured_result_on_windows().GetAwaiter().GetResult();
             tests.Runtime_diagnostics_report_fixed_paths_and_manifest_values_without_starting_the_cli().GetAwaiter().GetResult();
+            tests.Runtime_diagnostics_report_the_explicit_cli_path_and_accept_a_utf8_bom_manifest().GetAwaiter().GetResult();
+            tests.Runtime_diagnostics_identify_a_non_absolute_explicit_cli_path();
             tests.Runtime_diagnostics_report_json_parse_location_without_manifest_contents().GetAwaiter().GetResult();
             tests.Runtime_diagnostics_does_not_parse_an_oversized_manifest().GetAwaiter().GetResult();
             UnitTestCatalog.RunUnitTest("npm codex.cmdとcodex.ps1 shimで日本語プロンプトを渡す");

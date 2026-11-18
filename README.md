@@ -52,7 +52,7 @@ PowerShellでバージョンを明示してRelease CLIをユーザー単位で�
 
 ## STDIO MCP
 
-Phase 2のMCPは既存TaskContractを固定インストールCLIへ渡す薄いアダプターです。Schema・ガイド・実行の3 Toolに加え、接続障害用の読み取り専用診断Toolを提供します。CLI stdin/stdoutプロトコル、Codexへの登録手順、機密情報・キャンセルの扱いは[STDIO MCP技術仕様](docs/reference/stdio-mcp.md)、要求は[MCP要求仕様](docs/requirements/mcp-requirements.md)、実測結果は[Phase 2検証記録](docs/plans/phase2-stdio-mcp-verification.md)を参照してください。Phase 2対応CLI v0.0.2以降が必要です。
+Phase 2のMCPは既存TaskContractを設定されたCLI絶対パスへ渡す薄いアダプターです。未指定時は既定のユーザー配置を使います。Schema・ガイド・実行の3 Toolに加え、接続障害用の読み取り専用診断Toolを提供します。CLI stdin/stdoutプロトコル、Codexへの登録手順、機密情報・キャンセルの扱いは[STDIO MCP技術仕様](docs/reference/stdio-mcp.md)、要求は[MCP要求仕様](docs/requirements/mcp-requirements.md)、実測結果は[Phase 2検証記録](docs/plans/phase2-stdio-mcp-verification.md)を参照してください。Phase 2対応CLI v0.0.2以降が必要です。
 
 ## 使い方
 

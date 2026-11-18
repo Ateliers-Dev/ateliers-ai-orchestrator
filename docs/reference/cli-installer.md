@@ -48,7 +48,7 @@ PowerShell 5.1以降で、バージョンを明示して実行する。
 
 同一バージョンの再実行も許可する。インストーラーはstageとダウンロード用一時フォルダーを通常終了時・失敗時に削除する。既存バックアップの削除に失敗した場合は操作を失敗として報告し得るため、`bin` と `.backup-*` の状態を確認する。
 
-`install.json` は `version`、`runtimeIdentifier`、`releaseTag`、`releaseUrl`、`installedAtUtc` を記録する。これはインストール操作の記録であり署名ではない。
+`install.json` は `version`、`runtimeIdentifier`、`releaseTag`、`releaseUrl`、`installedAtUtc` をUTF-8（BOMなし）で記録する。これはインストール操作の記録であり署名ではない。既存ファイルの読込側はPowerShell 5.1が生成したUTF-8 BOMも受け付ける。
 
 ## 5. 配置・バージョン確認
 

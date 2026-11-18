@@ -58,3 +58,23 @@
 - 実npm `codex.cmd` の確認は`--version`起動まで。認証済みCodexによるオーケストレーション結果は後続確認事項であり、Phase 2の疎通Passには要求しない。
 - ユーザーの固定インストール先 `%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\bin` はこの実行環境から更新・検証していない。実機確認は、Phase 2対応CLIをビルドしたPRのレビュー後、Release/tag発行とインストーラー実行に対する別途承認を得てから行う。
 
+## 2026-11-18 manifest診断と明示CLIパス対応
+
+接続中のMCPから `get_runtime_diagnostics` を呼び出したところ、MCP実行ファイルは存在し、CLI/manifestも通常の `%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\bin` に存在していました。CLIを変更せず読み取り専用で確認した結果、`--version` は `0.0.2`、`--capabilities` は `protocolVersion: 1` と3 capabilityがすべて`true`でした。
+
+接続MCPは263 byteの `install.json` を `invalid_json` / `JsonReaderException` / byte位置0と報告しました。ファイル先頭は `EF BB BF`（UTF-8 BOM）で、後続のmanifest JSON内容は有効でした。PowerShell 5.1のインストーラーは `Set-Content -Encoding UTF8` でこのBOMを生成していました。よって、この接続障害の原因は隔離された`LOCALAPPDATA`ではなく、BOMを処理しないMCP側manifest parserです。
+
+本変更では、MCP起動設定にCLI絶対パス `ATELIERS_AI_ORCHESTRATOR_CLI_PATH` を追加し、設定済みなら指定先と同じフォルダーのmanifestを読むようにします。未設定時は既定配置を維持し、指定パスが不正でも既定先へ切り替えません。TaskContractから実行パスは変更できません。既存BOM付きmanifestは読み取り時にBOMを除去し、新規manifestはインストーラーからBOMなしUTF-8で書きます。
+
+| 検証 | 結果 | 証跡・注記 |
+|---|---|---|
+| 接続中MCPの実配置診断 | Pass（原因特定） | 標準LOCALAPPDATA、CLIとmanifestの存在、263 byte、JSON byte位置0を観測。 |
+| ユーザー配置CLIの読み取り専用照合 | Pass | `--version`=`0.0.2`。`--capabilities`でprotocol v1と`runStdinJson` / `contractSchema` / `orchestrationGuide`を確認。 |
+| manifest先頭byte確認 | Pass（原因確定） | `EF BB BF`。後続JSONのversion=`0.0.2`、RID=`win-x64`。ファイルは変更していない。 |
+| PowerShell 5.1 BOMなしmanifest writer | Pass | Windows PowerShell 5.1.26100.9818で同じ`UTF8Encoding(false)`書込を実行し、先頭`7B 0D 0A`とJSON読込を確認。 |
+| Release solution build | Pass | 0 error。NU1900 vulnerability metadata取得警告が1件。 |
+| Fake-only標準VSTest | Inconclusive | testhostが90秒で接続できず中止。 |
+| MCP CLI adapter fixture | Pass | BOM付きmanifestを持つ明示パスCLIでSchema・guide・Fake runを実行。相対pathの拒否と既定pathへのfallbackなしも確認。 |
+| Release MCP STDIO → CLI → Core Fake smoke test | Pass | `ATELIERS_AI_ORCHESTRATOR_CLI_PATH`にユーザー配置CLIを指定したMCP processで、4 Toolを認識し、Schemaとguideを取得、TaskContractを`agent="fake"`で渡してrun ID・run directoryを受け取った。Workflow stateは`NeedsHumanInput`。ユーザーのMCP登録や配置は変更していない。 |
+| 接続中Codex MCPの更新後疎通 | 未実施 | PRコードの配置・クライアント再起動は行っていない。新MCPを配置して再起動後、Schema/guide取得とFake実行を確認する必要がある。CLI再インストールは不要。 |
+

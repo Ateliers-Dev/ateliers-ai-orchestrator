@@ -107,6 +107,7 @@ public sealed class McpCliAdapterTests
 
         var root = Path.Combine(Path.GetTempPath(), "ateliers-mcp-cli-test-" + Guid.NewGuid().ToString("N"));
         var originalLocalAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        var originalCliPath = Environment.GetEnvironmentVariable("ATELIERS_AI_ORCHESTRATOR_CLI_PATH");
         try
         {
             var bin = Path.Combine(root, "Ateliers-Dev", "Ai-Orchestrator", "bin");
@@ -119,8 +120,9 @@ public sealed class McpCliAdapterTests
             {
                 version = OrchestratorCli.GetVersion().Split('+', 2)[0],
                 runtimeIdentifier = "win-x64"
-            }));
-            Environment.SetEnvironmentVariable("LOCALAPPDATA", root);
+            }), new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+            Environment.SetEnvironmentVariable("LOCALAPPDATA", Path.Combine(root, "decoy-localappdata"));
+            Environment.SetEnvironmentVariable("ATELIERS_AI_ORCHESTRATOR_CLI_PATH", Path.Combine(bin, "Ateliers.Ai.Orchestrator.Cli.exe"));
 
             var workingDirectory = Path.Combine(root, "workspace");
             Directory.CreateDirectory(workingDirectory);
@@ -137,6 +139,7 @@ public sealed class McpCliAdapterTests
         finally
         {
             Environment.SetEnvironmentVariable("LOCALAPPDATA", originalLocalAppData);
+            Environment.SetEnvironmentVariable("ATELIERS_AI_ORCHESTRATOR_CLI_PATH", originalCliPath);
             DeleteTemporaryDirectory(root);
         }
     }
@@ -150,6 +153,7 @@ public sealed class McpCliAdapterTests
 
         var root = Path.Combine(Path.GetTempPath(), "ateliers-mcp-resource-test-" + Guid.NewGuid().ToString("N"));
         var originalLocalAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        var originalCliPath = Environment.GetEnvironmentVariable("ATELIERS_AI_ORCHESTRATOR_CLI_PATH");
         try
         {
             var bin = Path.Combine(root, "Ateliers-Dev", "Ai-Orchestrator", "bin");
@@ -162,8 +166,9 @@ public sealed class McpCliAdapterTests
             {
                 version = OrchestratorCli.GetVersion().Split('+', 2)[0],
                 runtimeIdentifier = "win-x64"
-            }));
-            Environment.SetEnvironmentVariable("LOCALAPPDATA", root);
+            }), new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+            Environment.SetEnvironmentVariable("LOCALAPPDATA", Path.Combine(root, "decoy-localappdata"));
+            Environment.SetEnvironmentVariable("ATELIERS_AI_ORCHESTRATOR_CLI_PATH", Path.Combine(bin, "Ateliers.Ai.Orchestrator.Cli.exe"));
 
             var service = new CliExecutionService();
             var schemaText = await service.GetCliResourceAsync("--contract-schema", "contractSchema", CancellationToken.None);
@@ -179,6 +184,7 @@ public sealed class McpCliAdapterTests
         finally
         {
             Environment.SetEnvironmentVariable("LOCALAPPDATA", originalLocalAppData);
+            Environment.SetEnvironmentVariable("ATELIERS_AI_ORCHESTRATOR_CLI_PATH", originalCliPath);
             DeleteTemporaryDirectory(root);
         }
     }
@@ -207,6 +213,33 @@ public sealed class McpCliAdapterTests
 
     [Fact]
     [Trait("Category", "Unit")]
+    public async Task Adapter_reports_an_invalid_explicit_cli_path_without_falling_back_to_localappdata()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var root = Path.Combine(Path.GetTempPath(), "ateliers-mcp-invalid-cli-path-test-" + Guid.NewGuid().ToString("N"));
+        var originalLocalAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        var originalCliPath = Environment.GetEnvironmentVariable("ATELIERS_AI_ORCHESTRATOR_CLI_PATH");
+        try
+        {
+            Directory.CreateDirectory(root);
+            Environment.SetEnvironmentVariable("LOCALAPPDATA", root);
+            Environment.SetEnvironmentVariable("ATELIERS_AI_ORCHESTRATOR_CLI_PATH", "relative\\Ateliers.Ai.Orchestrator.Cli.exe");
+
+            var response = await new CliExecutionService().GetCliResourceAsync("--contract-schema", "contractSchema", CancellationToken.None);
+            using var error = JsonDocument.Parse(response);
+            Assert.Equal("cli_not_installed", error.RootElement.GetProperty("error").GetProperty("code").GetString());
+            Assert.Contains("ATELIERS_AI_ORCHESTRATOR_CLI_PATH", error.RootElement.GetProperty("error").GetProperty("message").GetString());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LOCALAPPDATA", originalLocalAppData);
+            Environment.SetEnvironmentVariable("ATELIERS_AI_ORCHESTRATOR_CLI_PATH", originalCliPath);
+            DeleteTemporaryDirectory(root);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
     public async Task Runtime_diagnostics_report_fixed_paths_and_manifest_values_without_starting_the_cli()
     {
         var root = Path.Combine(Path.GetTempPath(), "ateliers-mcp-diagnostics-test-" + Guid.NewGuid().ToString("N"));
@@ -219,7 +252,7 @@ public sealed class McpCliAdapterTests
             await File.WriteAllTextAsync(cliPath, "fixture executable placeholder");
             await File.WriteAllTextAsync(manifestPath, "{\"version\":\"0.0.2\",\"runtimeIdentifier\":\"win-x64\"}");
 
-            var response = CliExecutionService.CreateRuntimeDiagnostics(root, "C:\\fixture\\mcp.exe", "1.2.3.4", "1.2.3.0", "1.2.3+fixture");
+            var response = CliExecutionService.CreateRuntimeDiagnostics(root, null, "C:\\fixture\\mcp.exe", "1.2.3.4", "1.2.3.0", "1.2.3+fixture");
             using var diagnostics = JsonDocument.Parse(response);
             var mcp = diagnostics.RootElement.GetProperty("mcp");
             var installation = diagnostics.RootElement.GetProperty("installation");
@@ -241,6 +274,49 @@ public sealed class McpCliAdapterTests
 
     [Fact]
     [Trait("Category", "Unit")]
+    public async Task Runtime_diagnostics_report_the_explicit_cli_path_and_accept_a_utf8_bom_manifest()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ateliers-mcp-explicit-diagnostics-test-" + Guid.NewGuid().ToString("N"));
+        var bin = Path.Combine(root, "custom", "cli");
+        Directory.CreateDirectory(bin);
+        var cliPath = Path.Combine(bin, "Ateliers.Ai.Orchestrator.Cli.exe");
+        try
+        {
+            await File.WriteAllTextAsync(cliPath, "fixture executable placeholder");
+            await File.WriteAllTextAsync(Path.Combine(bin, "install.json"), "{\"version\":\"0.0.2\",\"runtimeIdentifier\":\"win-x64\"}", new System.Text.UTF8Encoding(true));
+
+            var response = CliExecutionService.CreateRuntimeDiagnostics(
+                Path.Combine(root, "decoy-localappdata"), cliPath, "C:\\fixture\\mcp.exe", "1.2.3.4", "1.2.3.0", "1.2.3+fixture");
+            using var diagnostics = JsonDocument.Parse(response);
+            var installation = diagnostics.RootElement.GetProperty("installation");
+
+            Assert.Equal("environment", installation.GetProperty("cliPathSource").GetString());
+            Assert.Equal(cliPath, installation.GetProperty("configuredCliPath").GetString());
+            Assert.Equal(cliPath, installation.GetProperty("cliPath").GetString());
+            Assert.Equal("valid", installation.GetProperty("manifestStatus").GetString());
+            Assert.Equal("0.0.2", installation.GetProperty("manifestVersion").GetString());
+        }
+        finally
+        {
+            DeleteTemporaryDirectory(root);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Runtime_diagnostics_identify_a_non_absolute_explicit_cli_path()
+    {
+        var response = CliExecutionService.CreateRuntimeDiagnostics("C:\\fixture", "relative\\cli.exe", null, null, null, null);
+        using var diagnostics = JsonDocument.Parse(response);
+        var installation = diagnostics.RootElement.GetProperty("installation");
+
+        Assert.Equal("environment", installation.GetProperty("cliPathSource").GetString());
+        Assert.Equal("configured_path_must_be_absolute", installation.GetProperty("cliPathError").GetString());
+        Assert.Equal(JsonValueKind.Null, installation.GetProperty("cliPath").ValueKind);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
     public async Task Runtime_diagnostics_report_json_parse_location_without_manifest_contents()
     {
         var root = Path.Combine(Path.GetTempPath(), "ateliers-mcp-diagnostics-json-test-" + Guid.NewGuid().ToString("N"));
@@ -251,7 +327,7 @@ public sealed class McpCliAdapterTests
         {
             await File.WriteAllTextAsync(manifestPath, "{\"private\":\"SECRET_MARKER\",\nBROKEN}");
 
-            var response = CliExecutionService.CreateRuntimeDiagnostics(root, null, null, "1.2.3.0", "1.2.3+fixture");
+            var response = CliExecutionService.CreateRuntimeDiagnostics(root, null, null, null, "1.2.3.0", "1.2.3+fixture");
             using var diagnostics = JsonDocument.Parse(response);
             var installation = diagnostics.RootElement.GetProperty("installation");
             var parseError = installation.GetProperty("parseError");
@@ -280,7 +356,7 @@ public sealed class McpCliAdapterTests
         {
             await File.WriteAllTextAsync(manifestPath, new string('x', 16 * 1024 + 1));
 
-            var response = CliExecutionService.CreateRuntimeDiagnostics(root, null, null, "1.2.3.0", "1.2.3+fixture");
+            var response = CliExecutionService.CreateRuntimeDiagnostics(root, null, null, null, "1.2.3.0", "1.2.3+fixture");
             using var diagnostics = JsonDocument.Parse(response);
             var installation = diagnostics.RootElement.GetProperty("installation");
 
