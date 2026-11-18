@@ -64,6 +64,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
         start.StandardInputEncoding = StrictUtf8;
         start.StandardOutputEncoding = Encoding.UTF8;
         start.StandardErrorEncoding = Encoding.UTF8;
+        var dotnetHome = PrepareEnvironment(start, profileRoot, runDirectory, request.Contract.WorkingDirectory, role, request.Attempt);
         var codexArguments = new List<string>(options.PrefixArguments ?? []);
         codexArguments.AddRange(["exec", "--json", "--sandbox", sandbox, "--config", "approval_policy=\"never\""]);
         if (role == "reviewer")
@@ -71,12 +72,19 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
             codexArguments.Add("--config");
             codexArguments.Add("sandbox_workspace_write.writable_roots=[]");
         }
+        else
+        {
+            // The parent creates a private DOTNET_CLI_HOME outside the checkout. Codex's
+            // workspace-write sandbox must explicitly allow this one directory so the
+            // SDK can initialize its first-run state without granting access to runtime/.
+            codexArguments.Add("--config");
+            codexArguments.Add(BuildWritableRootConfig(dotnetHome));
+        }
         codexArguments.Add("-");
         if (OperatingSystem.IsWindows() && string.Equals(Path.GetExtension(options.ExecutablePath), ".ps1", StringComparison.OrdinalIgnoreCase))
             AddPowerShellShimCommand(start, options.ExecutablePath, codexArguments);
         else
             foreach (var argument in codexArguments) start.ArgumentList.Add(argument);
-        PrepareEnvironment(start, profileRoot, runDirectory, request.Contract.WorkingDirectory, role, request.Attempt);
         var redactOutput = CreateProxyOutputRedactor(start.Environment);
         if (role == "implementer")
         {
@@ -360,7 +368,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
         return $"ROLE=IMPLEMENTER\nあなたはImplementerです。契約に記された作業領域と許可操作の範囲内でのみ作業し、外部書込・削除・マージを行わず、変更後の unified diff とテスト結果を最終応答に含めてください。{ScopeBoundaryInstruction}\n\n契約:\n{contract}{revision}";
     }
 
-    private void PrepareEnvironment(ProcessStartInfo start, string profileRoot, string runDirectory,
+    private string PrepareEnvironment(ProcessStartInfo start, string profileRoot, string runDirectory,
         string workingDirectory, string role, int attempt)
     {
         profileRoot = Path.GetFullPath(profileRoot);
@@ -394,6 +402,15 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
         start.Environment["DOTNET_CLI_HOME"] = dotnetHome;
         Directory.CreateDirectory(profileRoot);
         start.Environment["CODEX_HOME"] = profileRoot;
+        return dotnetHome;
+    }
+
+    private static string BuildWritableRootConfig(string path)
+    {
+        // TOML basic strings accept forward slashes on Windows, avoiding backslash
+        // escaping while keeping the permission scoped to the exact SDK home.
+        var tomlPath = Path.GetFullPath(path).Replace('\\', '/').Replace("\"", "\\\"", StringComparison.Ordinal);
+        return $"sandbox_workspace_write.writable_roots=[\"{tomlPath}\"]";
     }
 
     private static bool IsOutsideDirectory(string directory, string candidate)
@@ -623,4 +640,5 @@ internal sealed record CodexCliRunnerOptions(string ExecutablePath, string Imple
     }
 
 }
+
 
