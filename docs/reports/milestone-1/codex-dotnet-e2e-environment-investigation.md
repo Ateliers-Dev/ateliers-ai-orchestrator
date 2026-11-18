@@ -4,7 +4,7 @@
 > 更新日: 2026-11-19
 > 作成者: Codex
 
-> 状態: Issue #84対応時に観測した実行環境の問題と、改善候補を記録する。環境事前チェックの新規Issueは登録前。
+> 状態: Issue #84対応時に観測した実行環境の問題と、改善候補を記録する。環境事前チェックは[Issue #90](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/90)で検討する。
 
 ## 目的と範囲
 
@@ -49,7 +49,7 @@ Issue #84の修正では、Runごとの.NET/NuGet書込先をsandboxで許可さ
 3. **原因が分かる事前診断**: 欠落した環境変数や許可外パスを、秘密値や不要な個人パスを出さずに特定できるようにする。前提未達ならLLMプロセス起動前に止める。
 4. **起動契約の回帰テスト**: 複数の `--config` 値、Implementer/Reviewerごとの権限差、Run専用パスとWindows環境値を含む実際の起動引数を検証する。
 
-優先度と具体的な設計は、新規Issueで検討する。#79の証跡伝達はそのIssueに取り込まず、独立して扱う。
+優先度と具体的な設計は、[Issue #90](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/90)で検討する。#79の証跡伝達はそのIssueに取り込まず、独立して扱う。
 
 ## 証跡と制約
 
