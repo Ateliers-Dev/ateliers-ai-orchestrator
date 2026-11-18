@@ -1844,13 +1844,13 @@ static void CodexFakeProcessesCompleteIndependentReviewSlice()
             using var argumentsEvent = JsonDocument.Parse(argumentsLine);
             var arguments = argumentsEvent.RootElement.GetProperty("arguments").EnumerateArray()
                 .Select(value => value.GetString()).ToArray();
-            var rootsConfigIndex = Array.LastIndexOf(arguments, "--config");
-            Assert.True(rootsConfigIndex >= 0 && rootsConfigIndex + 1 < arguments.Length,
-                $"{role}のsandbox書込ルート設定がありません。");
+            var rootsConfig = arguments.FirstOrDefault(argument =>
+                argument?.StartsWith("sandbox_workspace_write.writable_roots=", StringComparison.Ordinal) == true);
+            Assert.True(rootsConfig is not null, $"{role}のsandbox書込ルート設定がありません。");
             var expectedRootsConfig = role == "Implementer"
                 ? $"sandbox_workspace_write.writable_roots=[\"{Path.GetFullPath(paths["DOTNET_CLI_HOME"]).Replace('\\', '/')}\",\"{Path.GetFullPath(paths["USERPROFILE"]).Replace('\\', '/')}\",\"{Path.GetFullPath(paths["TEMP"]).Replace('\\', '/')}\"]"
                 : "sandbox_workspace_write.writable_roots=[]";
-            Assert.Equal(expectedRootsConfig, arguments[rootsConfigIndex + 1],
+            Assert.Equal(expectedRootsConfig, rootsConfig!,
                 $"{role}のCodex sandbox書込範囲が期待値と異なります。");
             if (role == "Implementer")
             {
