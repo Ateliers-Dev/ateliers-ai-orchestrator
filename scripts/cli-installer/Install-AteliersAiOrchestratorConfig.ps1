@@ -150,4 +150,3 @@ finally {
 if ($backupDirectory) {
     Write-Output ("既存設定のバックアップ: {0}" -f $backupDirectory)
 }
-
