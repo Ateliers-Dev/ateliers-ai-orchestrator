@@ -1,5 +1,9 @@
 # plans
 
+> 作成日: 2026-11-18
+> 更新日: 2026-11-18
+> 作成者: yuu503
+
 このフォルダには、マイルストーンごとの計画書を置きます。各計画書は `milestone-N/` 配下にまとめます。
 
 - [Milestone 0 の開発計画](milestone-0/development-plan.md)
