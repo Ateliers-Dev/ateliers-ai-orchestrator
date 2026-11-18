@@ -26,7 +26,7 @@ function Copy-Item {
         [switch]$Force
     )
 
-    if ($global:injectPartialBackupFailure -and $Destination -match '\\.slack(?:\.secrets)?\.json\..+\.pending$') {
+    if ($global:injectPartialBackupFailure -and $Destination -match '\\.slack\.secrets\.json\..+\.pending$') {
         $global:partialBackupPath = $Destination
         [System.IO.File]::WriteAllText($Destination, 'incomplete')
         throw 'Injected partial backup failure.'
@@ -92,8 +92,12 @@ try {
     Assert-Equal $beforeFailureConfig (Get-Content -LiteralPath (Join-Path $destinationDirectory 'slack.json') -Raw) 'バックアップ失敗でslack.jsonが変化しました。'
     Assert-Equal $beforeFailureSecrets (Get-Content -LiteralPath (Join-Path $destinationDirectory 'slack.secrets.json') -Raw) 'バックアップ失敗でsecretsが変化しました。'
     if ([string]::IsNullOrWhiteSpace($failure.ErrorText)) { throw 'バックアップ失敗がエラーとして報告されませんでした。' }
+    if ($failure.ErrorText -notmatch 'バックアップ未完了.*元設定は変更されていません') { throw 'バックアップ未完了時の状態がエラーに明示されていません。' }
     if ([string]::IsNullOrWhiteSpace($failure.PartialPath)) { throw '部分コピー失敗の注入が実行されませんでした。' }
     if ($failure.PartialPath -and (Test-Path -LiteralPath $failure.PartialPath)) { throw '不完全な一時バックアップが残っています。' }
+    $failedBackupDirectory = Split-Path -Parent $failure.PartialPath
+    Assert-Equal $beforeFailureConfig (Get-Content -LiteralPath (Join-Path $failedBackupDirectory 'slack.json') -Raw) '先行して完成したバックアップが保持されていません。'
+    if (Test-Path -LiteralPath (Join-Path $failedBackupDirectory 'slack.secrets.json')) { throw '失敗したsecretsバックアップが確定扱いされています。' }
     if ($failure.ErrorText -match 'source-[1234]') { throw '設定JSONの値がエラーに現れました。' }
 
     Remove-Item -LiteralPath $sourceConfigPath, $sourceSecretsPath -Force

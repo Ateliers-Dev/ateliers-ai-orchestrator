@@ -126,7 +126,13 @@ catch {
             }
         }
     }
-    $backupNote = if ($backupDirectory) { " バックアップフォルダーを保持しました: $backupDirectory" } else { '' }
+    $backupNote = if ($backupDirectory -and -not $replacementStarted) {
+        " バックアップ未完了のため元設定は変更されていません。途中のフォルダーを保持しました: $backupDirectory"
+    }
+    elseif ($backupDirectory) {
+        " 検証済みバックアップフォルダーを保持しました: $backupDirectory"
+    }
+    else { '' }
     $rollbackNote = if ($rollbackFailed) { ' 元設定の復旧に失敗しました。検証済みバックアップを確認してください。' } else { '' }
     throw ("Slack設定ファイルの更新に失敗しました。設定値は表示していません。{0}{1}" -f $backupNote, $rollbackNote)
 }
