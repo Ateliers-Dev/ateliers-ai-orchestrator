@@ -64,6 +64,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
         start.StandardInputEncoding = StrictUtf8;
         start.StandardOutputEncoding = Encoding.UTF8;
         start.StandardErrorEncoding = Encoding.UTF8;
+        var sandboxWritableRoots = PrepareEnvironment(start, profileRoot, runDirectory, request.Contract.WorkingDirectory, role, request.Attempt);
         var codexArguments = new List<string>(options.PrefixArguments ?? []);
         codexArguments.AddRange(["exec", "--json", "--sandbox", sandbox, "--config", "approval_policy=\"never\""]);
         if (role == "reviewer")
@@ -71,12 +72,23 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
             codexArguments.Add("--config");
             codexArguments.Add("sandbox_workspace_write.writable_roots=[]");
         }
+        else
+        {
+            // The parent creates a private profile and SDK/NuGet directories outside the checkout.
+            // Allow only those isolated paths and the run-specific temp directory.
+            codexArguments.Add("--config");
+            codexArguments.Add(BuildWritableRootConfig(sandboxWritableRoots));
+            foreach (var environmentConfig in BuildShellEnvironmentConfig(start.Environment))
+            {
+                codexArguments.Add("--config");
+                codexArguments.Add(environmentConfig);
+            }
+        }
         codexArguments.Add("-");
         if (OperatingSystem.IsWindows() && string.Equals(Path.GetExtension(options.ExecutablePath), ".ps1", StringComparison.OrdinalIgnoreCase))
             AddPowerShellShimCommand(start, options.ExecutablePath, codexArguments);
         else
             foreach (var argument in codexArguments) start.ArgumentList.Add(argument);
-        PrepareEnvironment(start, profileRoot, runDirectory, request.Contract.WorkingDirectory, role, request.Attempt);
         var redactOutput = CreateProxyOutputRedactor(start.Environment);
         if (role == "implementer")
         {
@@ -360,7 +372,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
         return $"ROLE=IMPLEMENTER\nあなたはImplementerです。契約に記された作業領域と許可操作の範囲内でのみ作業し、外部書込・削除・マージを行わず、変更後の unified diff とテスト結果を最終応答に含めてください。{ScopeBoundaryInstruction}\n\n契約:\n{contract}{revision}";
     }
 
-    private void PrepareEnvironment(ProcessStartInfo start, string profileRoot, string runDirectory,
+    private string[] PrepareEnvironment(ProcessStartInfo start, string profileRoot, string runDirectory,
         string workingDirectory, string role, int attempt)
     {
         profileRoot = Path.GetFullPath(profileRoot);
@@ -372,7 +384,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
 
         var inherited = start.Environment.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
         start.Environment.Clear();
-        var allowed = new[] { "PATH", "SystemDrive", "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "PROCESSOR_ARCHITECTURE",
+        var allowed = new[] { "PATH", "SystemDrive", "SystemRoot", "WINDIR", "PROGRAMFILES", "PROGRAMFILES(X86)", "COMSPEC", "PATHEXT", "PROCESSOR_ARCHITECTURE",
             "NUMBER_OF_PROCESSORS", "DOTNET_ROOT", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR",
             "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "TMPDIR",
             "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy" };
@@ -383,7 +395,12 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
         var localAppData = Path.Combine(userProfile, "AppData", "Local");
         var temp = Path.Combine(runtimeRoot, "tmp");
         var dotnetHome = Path.Combine(runtimeRoot, "dotnet-home");
-        foreach (var path in new[] { userProfile, appData, localAppData, temp, dotnetHome }) Directory.CreateDirectory(path);
+        var nugetPackages = Path.Combine(dotnetHome, "nuget-packages");
+        var nugetHttpCache = Path.Combine(dotnetHome, "nuget-http-cache");
+        var nugetScratch = Path.Combine(dotnetHome, "nuget-scratch");
+        var nugetPluginsCache = Path.Combine(dotnetHome, "nuget-plugins-cache");
+        foreach (var path in new[] { userProfile, appData, localAppData, temp, dotnetHome,
+            nugetPackages, nugetHttpCache, nugetScratch, nugetPluginsCache }) Directory.CreateDirectory(path);
         start.Environment["HOME"] = userProfile;
         start.Environment["USERPROFILE"] = userProfile;
         start.Environment["APPDATA"] = appData;
@@ -392,8 +409,39 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
         start.Environment["TMP"] = temp;
         start.Environment["TMPDIR"] = temp;
         start.Environment["DOTNET_CLI_HOME"] = dotnetHome;
+        start.Environment["NUGET_PACKAGES"] = nugetPackages;
+        start.Environment["NUGET_HTTP_CACHE_PATH"] = nugetHttpCache;
+        start.Environment["NUGET_SCRATCH"] = nugetScratch;
+        start.Environment["NUGET_PLUGINS_CACHE_PATH"] = nugetPluginsCache;
         Directory.CreateDirectory(profileRoot);
         start.Environment["CODEX_HOME"] = profileRoot;
+        return [dotnetHome, userProfile, temp];
+    }
+
+    private static string BuildWritableRootConfig(IReadOnlyList<string> paths)
+    {
+        // TOML basic strings accept forward slashes on Windows, avoiding backslash escaping.
+        var roots = paths.Select(path => Path.GetFullPath(path).Replace('\\', '/').Replace("\"", "\\\"", StringComparison.Ordinal));
+        return $"sandbox_workspace_write.writable_roots=[{string.Join(',', roots.Select(path => $"\"{path}\""))}]";
+    }
+
+    private static IEnumerable<string> BuildShellEnvironmentConfig(IDictionary<string, string?> environment)
+    {
+        // Codex filters shell subprocess environments by default; preserve the run-scoped paths
+        // needed by .NET and NuGet without inheriting unrelated user environment variables.
+        foreach (var name in new[]
+        {
+            "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "PROGRAMFILES", "PROGRAMFILES(X86)",
+            "DOTNET_CLI_HOME", "NUGET_PACKAGES", "NUGET_HTTP_CACHE_PATH", "NUGET_SCRATCH", "NUGET_PLUGINS_CACHE_PATH"
+        })
+        {
+            if (environment.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                var escaped = Path.GetFullPath(value).Replace('\\', '/').Replace("\"", "\\\"", StringComparison.Ordinal);
+                var configKey = name == "PROGRAMFILES(X86)" ? "\"PROGRAMFILES(X86)\"" : name;
+                yield return $"shell_environment_policy.set.{configKey}=\"{escaped}\"";
+            }
+        }
     }
 
     private static bool IsOutsideDirectory(string directory, string candidate)
@@ -623,4 +671,5 @@ internal sealed record CodexCliRunnerOptions(string ExecutablePath, string Imple
     }
 
 }
+
 
