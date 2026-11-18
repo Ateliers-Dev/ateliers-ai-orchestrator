@@ -116,6 +116,8 @@
 
 別Run `7d7e0e60ff494ff4994e2b8f2d4e75f2` はpush前の `push.secret-scan-and-whitespace-check` がexit 2で停止し、Reviewer・push・PR作成に到達しなかった。直接原因は未確定であり、併記されたdotnet復元先やGit lockの問題との因果関係も確定していない。GitHubへの書き込みは発生していない。
 
+2026-11-19の追跡調査では直接原因を特定できなかった。事実、仮説、試行結果、切り分け、未確認事項は[Issue #80調査レポート](../../reports/issue-80-investigation.md)に記録する。Issue #80は受入条件未達のためOpenのままとする。
+
 ### 後続課題と引継ぎ
 
 - [Issue #77](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/77): MCP実行環境ごとのパス可視性・配置方式の将来検討。今回の成功は既定LOCALAPPDATA配置での結果であり、明示CLIパスは未検証。

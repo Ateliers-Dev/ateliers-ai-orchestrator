@@ -87,5 +87,5 @@ Phase 1の実装詳細は[CLIインストーラー技術仕様](../../reference/
 
 ## 7. Phase 2 技術仕様と検証記録
 
-Phase 2の実装仕様は[STDIO MCP技術仕様](../../reference/stdio-mcp.md)、Phaseゲートの実測結果は[STDIO MCP検証記録](phase2-stdio-mcp-verification.md)に記録する。Release CLIにstdin JSON protocolを追加した場合、対応版Releaseの発行・配置は別の明示的なRelease/installer操作とし、Phase 2コード変更を理由にタグ作成やRelease発行を自動で行わない。
+Phase 2の実装仕様は[STDIO MCP技術仕様](../../reference/stdio-mcp.md)、Phaseゲートの実測結果は[STDIO MCP検証記録](phase2-stdio-mcp-verification.md)に記録する。Phase 2計画時点では、stdin JSON protocolに対応したReleaseの発行・配置を別の明示的なRelease/installer操作としていた。現在のCLI変更後のベータタグ運用は[リポジトリ作業指示](../../AGENTS.md)に従う。ベータタグはGitHub Releaseを作成しない。
 

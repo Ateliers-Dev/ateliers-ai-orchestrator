@@ -10,6 +10,8 @@ permissions:
 
 jobs:
   publish-windows-cli:
+    # Beta tags identify merged but unverified CLI builds; they must not publish a GitHub Release.
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: windows-latest
     steps:
       - name: Check out source
