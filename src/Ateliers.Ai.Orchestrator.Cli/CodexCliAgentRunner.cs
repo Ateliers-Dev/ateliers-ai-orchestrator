@@ -384,7 +384,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
 
         var inherited = start.Environment.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
         start.Environment.Clear();
-        var allowed = new[] { "PATH", "SystemDrive", "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "PROCESSOR_ARCHITECTURE",
+        var allowed = new[] { "PATH", "SystemDrive", "SystemRoot", "WINDIR", "PROGRAMFILES", "PROGRAMFILES(X86)", "COMSPEC", "PATHEXT", "PROCESSOR_ARCHITECTURE",
             "NUMBER_OF_PROCESSORS", "DOTNET_ROOT", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR",
             "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "TMPDIR",
             "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy" };
@@ -431,14 +431,15 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
         // needed by .NET and NuGet without inheriting unrelated user environment variables.
         foreach (var name in new[]
         {
-            "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP",
+            "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "PROGRAMFILES", "PROGRAMFILES(X86)",
             "DOTNET_CLI_HOME", "NUGET_PACKAGES", "NUGET_HTTP_CACHE_PATH", "NUGET_SCRATCH", "NUGET_PLUGINS_CACHE_PATH"
         })
         {
             if (environment.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value))
             {
                 var escaped = Path.GetFullPath(value).Replace('\\', '/').Replace("\"", "\\\"", StringComparison.Ordinal);
-                yield return $"shell_environment_policy.set.{name}=\"{escaped}\"";
+                var configKey = name == "PROGRAMFILES(X86)" ? "\"PROGRAMFILES(X86)\"" : name;
+                yield return $"shell_environment_policy.set.{configKey}=\"{escaped}\"";
             }
         }
     }

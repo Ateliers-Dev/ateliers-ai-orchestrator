@@ -1131,6 +1131,8 @@ static int FakeCodexFixture(string[] args)
         ["TEMP"] = Environment.GetEnvironmentVariable("TEMP"),
         ["TMP"] = Environment.GetEnvironmentVariable("TMP"),
         ["TMPDIR"] = Environment.GetEnvironmentVariable("TMPDIR"),
+        ["PROGRAMFILES"] = Environment.GetEnvironmentVariable("PROGRAMFILES"),
+        ["PROGRAMFILES(X86)"] = Environment.GetEnvironmentVariable("PROGRAMFILES(X86)"),
         ["SystemDrive"] = Environment.GetEnvironmentVariable("SystemDrive")
     };
     Console.WriteLine($"{{\"type\":\"fixture.environment_paths\",\"paths\":{JsonSerializer.Serialize(environmentPaths)}}}");
@@ -1859,6 +1861,15 @@ static void CodexFakeProcessesCompleteIndependentReviewSlice()
                 {
                     var expectedEnvironmentConfig =
                         $"shell_environment_policy.set.{name}=\"{Path.GetFullPath(paths[name]).Replace('\\', '/')}\"";
+                    Assert.True(arguments.Contains(expectedEnvironmentConfig, StringComparer.Ordinal),
+                        $"Implementerの{name}がCodexのshell環境へ明示的に渡されていません。");
+                }
+                foreach (var name in new[] { "PROGRAMFILES", "PROGRAMFILES(X86)" })
+                {
+                    if (string.IsNullOrWhiteSpace(paths[name])) continue;
+                    var configKey = name == "PROGRAMFILES(X86)" ? "\"PROGRAMFILES(X86)\"" : name;
+                    var expectedEnvironmentConfig =
+                        $"shell_environment_policy.set.{configKey}=\"{Path.GetFullPath(paths[name]).Replace('\\', '/')}\"";
                     Assert.True(arguments.Contains(expectedEnvironmentConfig, StringComparer.Ordinal),
                         $"Implementerの{name}がCodexのshell環境へ明示的に渡されていません。");
                 }
