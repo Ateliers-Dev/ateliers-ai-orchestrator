@@ -1,5 +1,9 @@
 # Issue #80 push前チェックの追跡調査
 
+> 作成日: 2026-11-19
+> 更新日: 2026-11-19
+> 作成者: Codex
+
 > 調査日: 2026-11-19
 > 対象: [Issue #80](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/80) のRun `7d7e0e60ff494ff4994e2b8f2d4e75f2`
 
