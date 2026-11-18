@@ -1830,6 +1830,20 @@ static void CodexFakeProcessesCompleteIndependentReviewSlice()
             Assert.Equal(paths["TEMP"], paths["TMP"]);
             Assert.Equal(paths["TEMP"], paths["TMPDIR"]);
             Assert.Equal(Path.Combine(runtime, "dotnet-home"), paths["DOTNET_CLI_HOME"]);
+            var argumentsLine = File.ReadAllLines(Path.Combine(request.RunDirectory!, "exchanges",
+                role == "Implementer" ? "implementer-1" : "reviewer-1", "codex.stdout.jsonl"))
+                .First(line => line.Contains("fixture.arguments", StringComparison.Ordinal));
+            using var argumentsEvent = JsonDocument.Parse(argumentsLine);
+            var arguments = argumentsEvent.RootElement.GetProperty("arguments").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            var rootsConfigIndex = Array.LastIndexOf(arguments, "--config");
+            Assert.True(rootsConfigIndex >= 0 && rootsConfigIndex + 1 < arguments.Length,
+                $"{role}のsandbox書込ルート設定がありません。");
+            var expectedRootsConfig = role == "Implementer"
+                ? $"sandbox_workspace_write.writable_roots=[\"{Path.GetFullPath(paths["DOTNET_CLI_HOME"]).Replace('\\', '/') }\"]"
+                : "sandbox_workspace_write.writable_roots=[]";
+            Assert.Equal(expectedRootsConfig, arguments[rootsConfigIndex + 1],
+                $"{role}のCodex sandbox書込範囲が期待値と異なります。");
             var checkout = Path.GetFullPath(request.Contract.WorkingDirectory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
             Assert.False(Path.GetFullPath(paths["HOME"]).StartsWith(checkout, StringComparison.OrdinalIgnoreCase), $"{role}のHOMEがcheckout内です。");
             Assert.False(Path.GetFullPath(paths["TEMP"]).StartsWith(checkout, StringComparison.OrdinalIgnoreCase), $"{role}のTEMPがcheckout内です。");
@@ -3516,4 +3530,5 @@ sealed class DiagnosticTestFailure(string details) : Exception(details)
 }
 
 }
+
 
