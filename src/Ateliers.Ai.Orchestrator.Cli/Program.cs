@@ -164,7 +164,7 @@ internal static class OrchestratorCli
                 using var eventStore = JsonlRunEventStore.CreateNew(Path.Combine(fakeRunDirectory, "events.jsonl"), fakeRunId);
                 using var lifecycleWriter = slackConfigurationPath is null
                     ? new LifecycleNotificationEventWriter(lifecycleLogPath, notificationsDisabled, useSlackTestChannel)
-                    : new LifecycleNotificationEventWriter(lifecycleLogPath, notificationsDisabled, slackConfigurationPath, slackSecretsPath!);
+                    : new LifecycleNotificationEventWriter(lifecycleLogPath, notificationsDisabled, slackConfigurationPath, slackSecretsPath!, useSlackTestChannel);
                 IAgentRunner runner = agentKind == "codex" ? new CodexCliAgentRunner(codexOptions!) : new FakeAgentRunner(scenario);
                 using var publisher = agentKind == "codex" && contract.Reporting.PullRequestExpected
                     ? new GitHubWorkflowPublisher() : null;
@@ -419,9 +419,9 @@ internal static class OrchestratorCli
             error = "--slack-config と --slack-secrets は両方指定してください。";
             return false;
         }
-        if ((slackConfigurationPath is not null || slackSecretsPath is not null) && (notificationsDisabled || useSlackTestChannel))
+        if ((slackConfigurationPath is not null || slackSecretsPath is not null) && notificationsDisabled)
         {
-            error = "Slack設定パスを指定する場合、slack-notifications は auto にしてください。";
+            error = "Slack設定パスを指定する場合、slack-notifications は test または auto にしてください。";
             return false;
         }
         if (agentKind == "codex")

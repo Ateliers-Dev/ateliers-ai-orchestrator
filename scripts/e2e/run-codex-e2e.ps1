@@ -4,7 +4,9 @@ param(
     [switch]$RunCodex,
     [string]$CodexExecutable,
     [string]$SlackConfigurationPath,
-    [string]$SlackSecretsPath
+    [string]$SlackSecretsPath,
+    [ValidateSet('disabled', 'test', 'auto')]
+    [string]$SlackNotifications = 'disabled'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -163,37 +165,56 @@ try {
     ) -Description 'Release build'
     if (-not (Test-Path -LiteralPath $cliExecutable -PathType Leaf)) { throw ("Release CLI が見つかりません: {0}" -f $cliExecutable) }
 
-    if ([string]::IsNullOrWhiteSpace($SlackConfigurationPath)) {
-        $SlackConfigurationPath = Join-Path $repositoryRoot 'config\slack.json'
-    }
-    if ([string]::IsNullOrWhiteSpace($SlackSecretsPath)) {
-        $SlackSecretsPath = Join-Path $repositoryRoot 'config\slack.secrets.json'
-    }
-    if (-not (Test-Path -LiteralPath $SlackConfigurationPath -PathType Leaf) -or
-        -not (Test-Path -LiteralPath $SlackSecretsPath -PathType Leaf)) {
-        throw '本番Slack通知設定が不足しています。無効化・test宛てへの切替はせず、SlackConfigurationPath と SlackSecretsPath を明示してください。'
-    }
-    $slackSettings = Get-Content -LiteralPath $SlackConfigurationPath -Raw | ConvertFrom-Json
-    $slackSecrets = Get-Content -LiteralPath $SlackSecretsPath -Raw | ConvertFrom-Json
-    if ([string]::IsNullOrWhiteSpace([string]$slackSettings.testChannelId) -or
-        $null -eq $slackSettings.bots -or $null -eq $slackSecrets.tokens) {
-        throw 'Slack設定の必須項目がありません。秘密値は表示せず、通知先とBot設定を確認してください。'
-    }
-    $productionChannels = @()
-    foreach ($botId in @('orchestrator', 'implementer', 'reviewer')) {
-        $bot = @($slackSettings.bots | Where-Object { $_.id -ceq $botId -and $_.enabled }) | Select-Object -First 1
-        if ($null -eq $bot -or [string]::IsNullOrWhiteSpace([string]$bot.channelId) -or
-            [string]$bot.channelId -match '^C_REPLACE_' -or
-            [string]$bot.channelId -ceq [string]$slackSettings.testChannelId -or
-            [string]::IsNullOrWhiteSpace([string]$slackSecrets.tokens.$botId)) {
-            throw ("本番Slack通知先またはBot認証が設定されていません: {0}。test設定へ切り替えず停止します。" -f $botId)
+    $deliveryChannels = @()
+    if ($SlackNotifications -ne 'disabled') {
+        if ([string]::IsNullOrWhiteSpace($SlackConfigurationPath) -xor [string]::IsNullOrWhiteSpace($SlackSecretsPath)) {
+            throw 'SlackConfigurationPath と SlackSecretsPath は両方指定してください。'
         }
-        if ($productionChannels -cnotcontains [string]$bot.channelId) { $productionChannels += [string]$bot.channelId }
+        if ([string]::IsNullOrWhiteSpace($SlackConfigurationPath)) {
+            $userConfigDirectory = Join-Path $env:LOCALAPPDATA 'Ateliers-Dev\Ai-Orchestrator\config'
+            $SlackConfigurationPath = Join-Path $userConfigDirectory 'slack.json'
+            $SlackSecretsPath = Join-Path $userConfigDirectory 'slack.secrets.json'
+            if (-not (Test-Path -LiteralPath $SlackConfigurationPath -PathType Leaf)) {
+                $SlackConfigurationPath = Join-Path $repositoryRoot 'config\slack.json'
+                $SlackSecretsPath = Join-Path $repositoryRoot 'config\slack.secrets.json'
+            }
+        }
+        if (-not (Test-Path -LiteralPath $SlackConfigurationPath -PathType Leaf) -or
+            -not (Test-Path -LiteralPath $SlackSecretsPath -PathType Leaf)) {
+            throw 'Slack通知設定が不足しています。通知を無効化したり送信先を切り替えたりせず、設定を確認してください。'
+        }
+        $slackSettings = Get-Content -LiteralPath $SlackConfigurationPath -Raw | ConvertFrom-Json
+        $slackSecrets = Get-Content -LiteralPath $SlackSecretsPath -Raw | ConvertFrom-Json
+        if ([string]::IsNullOrWhiteSpace([string]$slackSettings.testChannelId) -or
+            $null -eq $slackSettings.bots -or $null -eq $slackSecrets.tokens) {
+            throw 'Slack設定の必須項目がありません。秘密値は表示せず、通知先とBot設定を確認してください。'
+        }
+        $productionChannels = @()
+        foreach ($botId in @('orchestrator', 'implementer', 'reviewer')) {
+            $bot = @($slackSettings.bots | Where-Object { $_.id -ceq $botId -and $_.enabled }) | Select-Object -First 1
+            if ($null -eq $bot -or [string]::IsNullOrWhiteSpace([string]$bot.channelId) -or
+                [string]$bot.channelId -match '^C_REPLACE_' -or
+                [string]$bot.channelId -ceq [string]$slackSettings.testChannelId -or
+                [string]::IsNullOrWhiteSpace([string]$slackSecrets.tokens.$botId)) {
+                throw ("Slack通知先またはBot認証が設定されていません: {0}。値は表示せず停止します。" -f $botId)
+            }
+            if ($productionChannels -cnotcontains [string]$bot.channelId) { $productionChannels += [string]$bot.channelId }
+        }
+        if ($SlackNotifications -eq 'test') {
+            if ([string]$slackSettings.testChannelId -match '^C_REPLACE_') { throw 'テスト用SlackチャンネルIDが設定されていません。通知は送信しません。' }
+            $deliveryChannels = @([string]$slackSettings.testChannelId)
+        }
+        else {
+            $deliveryChannels = $productionChannels
+        }
+        Write-Host ("Slack通知モード: {0}。送信先チャンネル: {1}。Bot token値は表示しません。" -f $SlackNotifications, ($deliveryChannels -join ', '))
+        Invoke-CheckedNative -FilePath $cliExecutable -Arguments @(
+            'verify-slack', [System.IO.Path]::GetFullPath($SlackConfigurationPath), [System.IO.Path]::GetFullPath($SlackSecretsPath)
+        ) -Description 'Slack Bot認証の事前確認'
     }
-    Write-Host ("本番Slack通知先: {0}。Bot token値は表示しません。" -f ($productionChannels -join ', '))
-    Invoke-CheckedNative -FilePath $cliExecutable -Arguments @(
-        'verify-slack', [System.IO.Path]::GetFullPath($SlackConfigurationPath), [System.IO.Path]::GetFullPath($SlackSecretsPath)
-    ) -Description '本番Slack Bot認証の事前確認'
+    else {
+        Write-Host 'Slack通知モード: disabled。Slack設定の読込、認証確認、送信は行いません。'
+    }
 
     Write-Host ("GitHub認証と{0}の既定ブランチSHAを確認します。" -f $repositoryIdentity)
     $savedErrorActionPreference = $ErrorActionPreference
@@ -283,7 +304,8 @@ try {
     }
     Write-Host ("Codex CLI認証・設定home: {0}（認証ファイルはコピーせず、親CODEX_HOME未設定でも既定homeを使用します）" -f $effectiveCodexHome)
     Write-Host 'この公開リポジトリで実Codexを実行します。Codex利用枠・費用が発生する場合があり、成功時は一意なブランチへのpush、公開PR、Reviewer結果コメントの投稿が行われます。自動マージはしません。失敗後にpush済みブランチやPRが残った場合は保持し、人間が確認して扱います。'
-    $confirmationText = 'RUN CODEX E2E FOR {0} WITH PUSH AND PR AND SLACK TO {1}' -f $repositoryIdentity.ToUpperInvariant(), ($productionChannels -join ',')
+    $confirmationSuffix = if ($SlackNotifications -eq 'disabled') { 'WITHOUT SLACK' } else { "WITH SLACK $SlackNotifications TO $($deliveryChannels -join ',')" }
+    $confirmationText = 'RUN CODEX E2E FOR {0} WITH PUSH AND PR {1}' -f $repositoryIdentity.ToUpperInvariant(), $confirmationSuffix
     $confirmation = Read-Host ("続行するには {0} と入力してください" -f $confirmationText)
     if ($confirmation -cne $confirmationText) { throw '確認文字列が一致しないため、実Codex E2Eを開始しませんでした。' }
 
@@ -291,9 +313,11 @@ try {
     $lifecycleLog = Join-Path $executionRoot 'lifecycle.jsonl'
     New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
     $runArguments = @('run', $tempContractPath, '--agent', 'codex', '--codex-exe', $CodexExecutable,
-        '--runs', $runRoot, '--lifecycle-log', $lifecycleLog, '--slack-notifications', 'auto',
-        '--slack-config', [System.IO.Path]::GetFullPath($SlackConfigurationPath),
-        '--slack-secrets', [System.IO.Path]::GetFullPath($SlackSecretsPath))
+        '--runs', $runRoot, '--lifecycle-log', $lifecycleLog, '--slack-notifications', $SlackNotifications)
+    if ($SlackNotifications -ne 'disabled') {
+        $runArguments += @('--slack-config', [System.IO.Path]::GetFullPath($SlackConfigurationPath),
+            '--slack-secrets', [System.IO.Path]::GetFullPath($SlackSecretsPath))
+    }
     $runStarted = $true
     $keepExecutionRoot = $true
     Write-Host 'Codex E2Eを開始します。cleanな一時cloneを対象にします。'
@@ -313,10 +337,12 @@ try {
     if (($runOutput -join [Environment]::NewLine) -notmatch '状態: NeedsHumanInput') {
         throw 'Codex E2EがNeedsHumanInputで停止したことを確認できません。成功扱いにせず、証跡を保持しました。'
     }
-    $slackSentMatch = [regex]::Match(($runOutput -join [Environment]::NewLine), 'Slack通知送信成功: (\d+)件')
-    if (-not $slackSentMatch.Success -or [int]$slackSentMatch.Groups[1].Value -lt 1 -or
-        ($runOutput -join [Environment]::NewLine) -match 'Slack通知に\d+件失敗') {
-        throw '本番Slackへの通知成功を確認できません。失敗・未設定を成功として扱わず、証跡を保持しました。'
+    if ($SlackNotifications -ne 'disabled') {
+        $slackSentMatch = [regex]::Match(($runOutput -join [Environment]::NewLine), 'Slack通知送信成功: (\d+)件')
+        if (-not $slackSentMatch.Success -or [int]$slackSentMatch.Groups[1].Value -lt 1 -or
+            ($runOutput -join [Environment]::NewLine) -match 'Slack通知に\d+件失敗') {
+            throw 'Slack通知の送信成功を確認できません。失敗・未設定を成功として扱わず、証跡を保持しました。'
+        }
     }
 
     $testbedTestSource = 'tests\WordCounter.Tests\Program.cs'
@@ -384,15 +410,22 @@ try {
         throw 'PRが未マージのOPEN状態でbase/mainを指し、GitHub上の現在のhead SHAがPR・Reviewer証跡と一致していることを確認できません。証跡と作業領域を保持します。'
     }
 
-    $deliveryConfirmationText = 'CONFIRM SLACK DELIVERY {0} TO {1}' -f $runDirectories[0].Name, ($productionChannels -join ',')
-    $deliveryConfirmation = Read-Host ("Slackの本番通知先でこのrun IDの通知到達を確認後、{0} と入力してください" -f $deliveryConfirmationText)
-    if ($deliveryConfirmation -cne $deliveryConfirmationText) {
-        throw 'Slack通知の到達を確認できませんでした。E2Eは不合格とし、実行証跡を保持します。'
+    if ($SlackNotifications -ne 'disabled') {
+        $deliveryConfirmationText = 'CONFIRM SLACK DELIVERY {0} VIA {1} TO {2}' -f $runDirectories[0].Name, $SlackNotifications, ($deliveryChannels -join ',')
+        $deliveryConfirmation = Read-Host ("Slack通知先でこのrun IDの到達を確認後、{0} と入力してください" -f $deliveryConfirmationText)
+        if ($deliveryConfirmation -cne $deliveryConfirmationText) {
+            throw 'Slack通知の到達を確認できませんでした。E2Eは不合格とし、実行証跡を保持します。'
+        }
     }
 
     Write-Host ''
     Write-Host 'PR作成とReviewer結果コメントの照合を確認しました。PRはOPENのままにし、Testbed mainへマージしません。'
-    Write-Host 'Implementer/Reviewer、PR、通知送信の各ゲートは通過しました。Slackの実通知先でrun IDの到達を目視確認しました。'
+    if ($SlackNotifications -eq 'disabled') {
+        Write-Host 'Implementer/ReviewerとPRの各ゲートは通過しました。Slack通知はdisabledでした。'
+    }
+    else {
+        Write-Host ("Implementer/Reviewer、PR、Slack {0} 通知の各ゲートは通過しました。run IDの到達を目視確認しました。" -f $SlackNotifications)
+    }
     Write-Host ("PR: {0}" -f $pullRequestEvidence.url)
     Write-Host ("実行証跡: {0}" -f $runDirectory)
     Write-Host 'リリース判定: E2E合格。ただしPRの人間レビューと明示承認は別途必要です。'

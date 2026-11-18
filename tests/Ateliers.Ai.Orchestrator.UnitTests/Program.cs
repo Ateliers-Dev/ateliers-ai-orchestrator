@@ -143,6 +143,9 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("Reviewer失敗・停止要求・再レビューをライフサイクルへ正しい順序で記録する", LifecycleEventsCoverFailureStopAndRevision);
     suite.Add("ライフサイクル記録失敗は実行結果を隠さない", LifecycleWriteFailureDoesNotHideWorkflowResult);
     suite.Add("Slack設定不備を警告して通知をスキップしFake実行とJSONLを維持する", InvalidSlackSettingsDoNotAffectFakeRunOrJsonl);
+    suite.Add("Slack設定はユーザー配置を優先し開発設定もCLI配置先から解決する", SlackConfigurationUsesUserLocationAndDevelopmentFallback);
+    suite.Add("明示Slack設定はtestとautoで受理しdisabledとの併用を拒否する", SlackNotificationModesAcceptExplicitConfigOnlyWhenEnabled);
+    suite.Add("明示設定のtestモードはテストチャンネル経路を使う", ExplicitSlackTestModeUsesTestChannelRoute);
     suite.Add("NeedsHumanInput終端イベントの重複抑止を失敗件数へ加算しない", IntentionalSlackSkipDoesNotWarn);
     suite.Add("遅いSlack通知は実行時間と停止応答を遅らせない", SlowSlackNotificationsDoNotBlockWorkflowCancellation);
     suite.Add("禁止遷移は状態と記録を変えない", RejectedTransitionDoesNotMutate);
@@ -2163,6 +2166,98 @@ static void InvalidSlackSettingsDoNotAffectFakeRunOrJsonl()
     Assert.False(capturedError.ToString().Contains(slackSecretsPath, StringComparison.Ordinal), "Slack secretsパスが警告へ含まれました。");
 }
 
+static void SlackConfigurationUsesUserLocationAndDevelopmentFallback()
+{
+    using var temp = new TemporaryDirectory();
+    var localAppData = Path.Combine(temp.Path, "local-app-data");
+    var userConfig = Path.Combine(localAppData, "Ateliers-Dev", "Ai-Orchestrator", "config");
+    var appBase = Path.Combine(temp.Path, "checkout", "tests", "bin", "Release", "net10.0");
+    var developmentConfig = Path.Combine(temp.Path, "checkout", "config");
+    Directory.CreateDirectory(userConfig);
+    Directory.CreateDirectory(appBase);
+    Directory.CreateDirectory(developmentConfig);
+    File.WriteAllText(Path.Combine(userConfig, "slack.json"), "{}");
+    File.WriteAllText(Path.Combine(developmentConfig, "slack.json"), "{}");
+
+    Assert.True(SlackConfigurationLocator.TryFind(out var configurationPath, out var secretsPath,
+        localAppData, appBase), "ユーザー設定を解決できませんでした。");
+    Assert.Equal(Path.Combine(userConfig, "slack.json"), configurationPath,
+        "開発用設定よりユーザー設定を優先しませんでした。");
+    Assert.Equal(Path.Combine(userConfig, "slack.secrets.json"), secretsPath,
+        "secretsのユーザー設定パスが正しくありません。");
+
+    Directory.Delete(userConfig, recursive: true);
+    Assert.True(SlackConfigurationLocator.TryFind(out configurationPath, out secretsPath,
+        localAppData, appBase), "開発checkoutの設定を解決できませんでした。");
+    Assert.Equal(Path.Combine(developmentConfig, "slack.json"), configurationPath,
+        "開発設定がCLI配置先から見つかりませんでした。");
+    Assert.Equal(Path.Combine(developmentConfig, "slack.secrets.json"), secretsPath,
+        "開発secretsのパスが正しくありません。");
+}
+
+static void SlackNotificationModesAcceptExplicitConfigOnlyWhenEnabled()
+{
+    using var temp = new TemporaryDirectory();
+    var contractPath = Path.Combine(temp.Path, "contract.json");
+    var configPath = Path.Combine(temp.Path, "slack.json");
+    var secretsPath = Path.Combine(temp.Path, "slack.secrets.json");
+    File.WriteAllText(contractPath, JsonSerializer.Serialize(SampleContract() with { WorkingDirectory = temp.Path },
+        new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+    File.WriteAllText(configPath, "{\"bots\":[]}");
+    File.WriteAllText(secretsPath, "{\"tokens\":{}}");
+
+    foreach (var mode in new[] { "test", "auto" })
+    {
+        var result = RunCli("run", contractPath, "--scenario", "Success", "--runs", Path.Combine(temp.Path, mode + "-runs"),
+            "--lifecycle-log", Path.Combine(temp.Path, mode + ".jsonl"), "--slack-notifications", mode,
+            "--slack-config", configPath, "--slack-secrets", secretsPath);
+        Assert.Equal(0, result.ExitCode, $"明示設定付きのSlack {mode} モードをCLIが受理しませんでした: {result.Error}");
+        Assert.True(result.Error.Contains("Slack", StringComparison.Ordinal), $"不完全な fixture 設定の警告がありません ({mode})。");
+        Assert.False(result.Output.Contains("tokens", StringComparison.OrdinalIgnoreCase) ||
+            result.Error.Contains("tokens", StringComparison.OrdinalIgnoreCase), "Slack設定内容がCLI出力に現れました。");
+    }
+
+    var disabled = RunCli("run", contractPath, "--scenario", "Success", "--runs", Path.Combine(temp.Path, "disabled-runs"),
+        "--slack-notifications", "disabled", "--slack-config", configPath, "--slack-secrets", secretsPath);
+    Assert.Equal(2, disabled.ExitCode, "disabledと明示設定の併用をCLIが拒否しませんでした。");
+}
+
+static void ExplicitSlackTestModeUsesTestChannelRoute()
+{
+    using var temp = new TemporaryDirectory();
+    var configPath = Path.Combine(temp.Path, "slack.json");
+    var secretsPath = Path.Combine(temp.Path, "slack.secrets.json");
+    File.WriteAllText(configPath,
+        """{"testChannelId":"C_NORMAL","bots":[{"id":"orchestrator","name":"Orchestrator","botUserId":"U_ORCH","channelId":"C_NORMAL","enabled":true},{"id":"implementer","name":"Implementer","botUserId":"U_IMPL","channelId":"C_NORMAL","enabled":true},{"id":"reviewer","name":"Reviewer","botUserId":"U_REVIEW","channelId":"C_NORMAL","enabled":true}]}""");
+    File.WriteAllText(secretsPath,
+        """{"tokens":{"orchestrator":"fixture-token","implementer":"fixture-token","reviewer":"fixture-token"}}""");
+    var previousError = Console.Error;
+    using var capturedError = new StringWriter();
+    try
+    {
+        Console.SetError(capturedError);
+        using (var testWriter = new LifecycleNotificationEventWriter(Path.Combine(temp.Path, "test.jsonl"),
+            false, configPath, secretsPath, true))
+        {
+            Assert.True(capturedError.ToString().Contains("警告", StringComparison.Ordinal),
+                "testモードが通常チャンネルと一致するtestChannelIdを拒否しませんでした。");
+        }
+        Assert.False(capturedError.ToString().Contains("fixture-token", StringComparison.Ordinal),
+            "不正なテストチャンネル警告にToken値が含まれています。");
+
+        capturedError.GetStringBuilder().Clear();
+        using (var autoWriter = new LifecycleNotificationEventWriter(Path.Combine(temp.Path, "auto.jsonl"),
+            false, configPath, secretsPath, false))
+        {
+            Assert.Equal(string.Empty, capturedError.ToString(), "autoモードが有効な通常通知先設定を拒否しました。");
+        }
+    }
+    finally
+    {
+        Console.SetError(previousError);
+    }
+}
+
 static void SlowSlackNotificationsDoNotBlockWorkflowCancellation()
 {
     using var temp = new TemporaryDirectory();
@@ -2937,7 +3032,7 @@ static (int ExitCode, string Output, string Error) RunCli(params string[] argume
         UseShellExecute = false
     };
     var cliArguments = new[] { "run", "--project", cliProject, "--configuration", configuration, "--no-build", "--" }.Concat(arguments);
-    if (arguments.Length > 0 && arguments[0] == "run")
+    if (arguments.Length > 0 && arguments[0] == "run" && !arguments.Contains("--slack-notifications", StringComparer.Ordinal))
         cliArguments = cliArguments.Concat(["--slack-notifications", "disabled"]);
     foreach (var argument in cliArguments)
         start.ArgumentList.Add(argument);

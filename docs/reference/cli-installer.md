@@ -12,16 +12,20 @@
 
 ```text
 %LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\
-└── bin\
-    ├── Ateliers.Ai.Orchestrator.Cli.exe
-    ├── その他の.NET自己完結publishファイル
-    ├── release-manifest.json
-    └── install.json
+├── bin\
+│   ├── Ateliers.Ai.Orchestrator.Cli.exe
+│   ├── その他の.NET自己完結publishファイル
+│   ├── release-manifest.json
+│   └── install.json
+└── config\
+    ├── slack.json
+    ├── slack.secrets.json
+    └── backups\
 ```
 
 `bin` がインストール物の単位で、MCP等の後続プロセスは常に `bin\Ateliers.Ai.Orchestrator.Cli.exe` を指定する。起動バージョンは同階層のマニフェストとCLI自身の `--version` で確認できる。インストール先はPATHへ追加しない。
 
-実行時データはこのディレクトリへインストーラーから作成・移動しない。現行CLIの `start` / `run` は `--runs` 指定がない場合、カレントディレクトリの `.ateliers-orchestrator\runs` を使う。`run` のライフサイクルログは `--lifecycle-log` の指定先（既定値は同じくカレントディレクトリの `.ateliers-orchestrator\lifecycle.jsonl`）を使う。Slack設定ファイル、Codexホーム、作業領域などは既存CLI引数・契約で指定される。インストーラーはそれらを生成しない。ユーザー設定を将来アプリ既定値として永続化する場合のみ `%APPDATA%\Ateliers-Dev\Ai-Orchestrator` を検討し、LocalLowは使わない。
+実行記録・ライフサイクルログの既定先は従来どおり実行作業ディレクトリです。Slack設定は独立したユーザー設定として `config` に配置し、CLIの実行場所・カレントディレクトリから切り離します。`--slack-config` と `--slack-secrets` による明示パスは維持します。ユーザー設定がない開発実行は、CLI実行ファイルの配置先からリポジトリの `config` を探します。
 
 ## 3. Release生成と配布物
 
@@ -41,6 +45,8 @@ PowerShell 5.1以降で、バージョンを明示して実行する。
 ```powershell
 & .\scripts\cli-installer\Install-AteliersAiOrchestrator.ps1 -Version 1.2.3
 ```
+
+CLIインストーラーは配置後に `Install-AteliersAiOrchestratorConfig.ps1 -PreserveExisting` を呼び、ソースリポジトリにある既知の `slack.json` と `slack.secrets.json` のみを不足分へコピーする。既存ファイルは維持し、元ファイルがないときは設定を変更しない。JSONだけを手動更新する場合は、設定スクリプトを引数なしで単独実行する。この場合、置き換える既存設定を `config\backups\yyyyMMdd-HHmmss\` へ退避してから更新する。同秒に複数回実行したときは連番を付け、既存バックアップを上書きしない。バックアップは自動削除しない。値はログへ出さない。
 
 `Version` は `1.2.3` または `v1.2.3` 形式（SemVerのmajor.minor.patchと任意のprerelease識別子）を受け付ける。スクリプトは先頭の `v` を除去して `v<version>` タグと固定Release URLを組み立てる。`latest` 検索はしない。該当Release ZIPと`.sha256`を一時フォルダーへダウンロードし、SHA-256を照合する。
 

@@ -35,9 +35,14 @@ public sealed class SlackLifecycleNotificationDispatcher : IDisposable
     };
 
     private readonly Dictionary<string, SlackBotClient> clients;
+    private readonly bool useTestChannel;
     private int failedSends;
 
-    private SlackLifecycleNotificationDispatcher(Dictionary<string, SlackBotClient> clients) => this.clients = clients;
+    private SlackLifecycleNotificationDispatcher(Dictionary<string, SlackBotClient> clients, bool useTestChannel)
+    {
+        this.clients = clients;
+        this.useTestChannel = useTestChannel;
+    }
 
     /// <summary>ローカル設定からDispatcherを作ります。設定が未配置または有効なBotがない場合はnullを返します。</summary>
     public static SlackLifecycleNotificationDispatcher? TryCreate(string configurationPath, string secretsPath) =>
@@ -110,7 +115,7 @@ public sealed class SlackLifecycleNotificationDispatcher : IDisposable
                     ? new SlackBotClient(configuration)
                     : new SlackBotClient(configuration, handlerFactory(botId), requestTimeout));
             }
-            return new SlackLifecycleNotificationDispatcher(clients);
+            return new SlackLifecycleNotificationDispatcher(clients, useTestChannel);
         }
         catch (Exception)
         {
@@ -155,8 +160,9 @@ public sealed class SlackLifecycleNotificationDispatcher : IDisposable
         // NeedsHumanInput専用イベントの直後に同じ状態の終端イベントも出るため、重複を抑止します。
         if (eventType == "completed" && status == "needs_human_input") return SlackNotificationSendResult.Skipped;
 
+        var label = useTestChannel ? "[Ateliers AI TEST]" : "[Ateliers AI]";
         var message = string.Create(CultureInfo.InvariantCulture,
-            $"[Ateliers AI] run={runId} role={role} event={eventType} status={status} state={state} at={timestampUtc.ToUniversalTime():O}");
+            $"{label} run={runId} role={role} event={eventType} status={status} state={state} at={timestampUtc.ToUniversalTime():O}");
         try
         {
             await client.SendMessageAsync(message, cancellationToken).ConfigureAwait(false);
