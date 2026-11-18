@@ -431,7 +431,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
         // needed by .NET and NuGet without inheriting unrelated user environment variables.
         foreach (var name in new[]
         {
-            "APPDATA", "LOCALAPPDATA", "TEMP", "TMP",
+            "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP",
             "DOTNET_CLI_HOME", "NUGET_PACKAGES", "NUGET_HTTP_CACHE_PATH", "NUGET_SCRATCH", "NUGET_PLUGINS_CACHE_PATH"
         })
         {
