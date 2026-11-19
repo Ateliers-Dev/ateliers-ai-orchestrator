@@ -83,23 +83,23 @@ dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- validate examples/task-
 契約を検証して実行準備記録を作成します。`workingDirectory` は既存の絶対パスを指定してください。Agentは起動しません。
 
 ```powershell
-dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- start examples/task-contract.json --runs ./.ateliers-orchestrator/runs
+dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- start examples/task-contract.json
 ```
 
-出力先に実行IDのディレクトリを新規作成し、`events.jsonl` と `report.md` を保存します。既存ディレクトリや既存イベントを上書きしません。契約本文は実行記録にコピーせず、SHA-256だけをレポートに記録します。
+既定ではOSのユーザー用アプリケーションデータ領域に実行IDのディレクトリを新規作成し、`events.jsonl` と `report.md` を保存します。CLIを起動した場所やAgentの作業領域へ管理ファイルを作らないため、Git checkoutを汚しません。保存先は `--runs` で変更できます。既存ディレクトリや既存イベントを上書きしません。契約本文は実行記録にコピーせず、SHA-256だけをレポートに記録します。
 
 Fake Agentの縦断フローを実行します。シナリオは `Success`、`RevisionThenSuccess`、`Stop`、`ImplementerFailure`、`ReviewerFailure`、`EmptyResponse`、`ReviewerEmptyResponse`、`Timeout`、`ReviewerTimeout` から選べます。
 
 ```powershell
-dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- run examples/task-contract.json --scenario RevisionThenSuccess --runs ./.ateliers-orchestrator/runs
+dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- run examples/task-contract.json --scenario RevisionThenSuccess
 ```
 
-ライフサイクルJSONLの保存先は `--lifecycle-log` で指定できます。未指定時は実行時のカレントディレクトリに `.ateliers-orchestrator/lifecycle.jsonl` を使います。実行フォルダや一時fixtureの外に置くパスを指定すると、fixture削除後も履歴を保持できます。
+実行記録とライフサイクルJSONLは、未指定時にOSのユーザー用アプリケーションデータ領域の `Ateliers/Orchestrator` 配下へ保存します。ユーザー領域はOS設定で解決し、Windowsでは通常 `%LOCALAPPDATA%` 配下です。従来の `.ateliers-orchestrator` 内にある記録は自動移動・削除しません。`--runs` と `--lifecycle-log` で別の保存先を明示できます。Git checkout内へ指定するとclean-checkを妨げるため、作業領域の外を指定してください。
 
 ```powershell
 dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- run examples/task-contract.json `
   --scenario RevisionThenSuccess `
-  --runs ./.ateliers-orchestrator/runs `
+  --runs C:/ateliers-data/runs `
   --lifecycle-log C:/ateliers-data/lifecycle.jsonl
 ```
 
@@ -117,7 +117,7 @@ CODEX_HOMEは `CODEX_HOME` 環境変数、または通常のユーザープロ�
 dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- run examples/task-contract.json `
   --agent codex `
   --codex-exe "C:/path/to/codex.exe" `
-  --runs ./.ateliers-orchestrator/runs
+  --runs C:/ateliers-data/runs
 ```
 
 契約の`reporting.pullRequestExpected`が`true`なら、`workingDirectory`はGitHubリポジトリのルートを指定し、開始時点で作業ツリーがcleanで、ローカルHEADがGitHub既定ブランチの最新SHAと一致している必要があります。`gh auth status`でGitHub CLI認証を確認します。Git公開コマンドはGit system設定を無効にし、認証にはGitHub CLI自身のcredential helperを使います。利用者のcredential helperコマンドは一時設定へ複製しません。一時Git設定は実行終了時に削除します。local設定の変更や外部コマンド設定、system/global/local Git filter設定を検出した場合は停止します。隔離設定ファイルのハッシュとhook無効化領域が各Gitコマンド前に変わっていないことも確認します。Git hookは無効化し、commit/pushではhook検証も明示的にスキップします。Implementer終了時に変更ファイルの一覧・内容hash・modeをsnapshotし、そのsnapshot参照とhashを照合して対象パスだけをstageします。新規ファイルもUnix実行属性を含むmodeを記録し、stage blobと生成commit treeをsnapshotから検証するため、その後追加されたファイルや変更はPush対象になりません。実行記録フォルダーはcheckout root外へ指定してください。変更対象に秘密情報らしいファイル名や既知形式のtoken/private keyが見つかった場合はpush前に停止します。この確認は限定的なパターン検出であり、秘密情報スキャナーではありません。停止要求時はGit/gh子プロセスを終了させ、push/PR状態が不確かな場合は証跡へ部分結果を残したうえで`Failed`にします。push後もPR作成に失敗した場合はリモートブランチが残ることがあります。記録された失敗とブランチを確認してから再実行してください。
@@ -140,7 +140,7 @@ Fake Agentは実行ごとに同じ入力へ同じ応答を返します。成果�
 
 JSONLには実行ID、連番、UTC時刻、役割、イベント種別、状態、入出力参照、対象コミット／成果物ハッシュ、経過時間、結果、エラー、未取得情報の欄を持たせます。Fake呼び出しの要求・応答は実行ごとの参照ファイルへ保存します。取得していない値は推測せず未取得として明示します。ローカルJSONLは耐改ざん・完全監査の台帳ではありません。
 
-`events.jsonl` は実行ごとの詳細な実行記録、`--lifecycle-log` のJSONLは複数実行にまたがる開始・終了・人間判断待ちの記録です。後者の保存先は実行ディレクトリとは独立して指定でき、同じファイルに追記されます。どちらもローカルファイルであり、耐改ざん・完全監査の台帳ではありません。
+`events.jsonl` は実行ごとの詳細な実行記録、ライフサイクルJSONLは複数実行にまたがる開始・終了・人間判断待ちの記録です。両方とも既定でGit作業領域の外へ保存し、ライフサイクルJSONLは同じファイルに追記します。どちらもローカルファイルであり、耐改ざん・完全監査の台帳ではありません。
 
 ## テスト
 

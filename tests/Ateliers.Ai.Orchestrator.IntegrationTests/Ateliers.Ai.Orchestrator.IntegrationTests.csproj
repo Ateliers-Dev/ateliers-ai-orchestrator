@@ -8,7 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Ateliers.Ai.Orchestrator.FakeTests\Ateliers.Ai.Orchestrator.FakeTests.csproj" />
+    <Compile Include="..\Shared\IsolatedFixture.cs" Link="TestFixtures\IsolatedFixture.cs" />
     <ProjectReference Include="..\..\src\Ateliers.Ai.Orchestrator.Cli\Ateliers.Ai.Orchestrator.Cli.csproj" />
     <ProjectReference Include="..\..\src\Ateliers.Slack\Ateliers.Slack.csproj" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />

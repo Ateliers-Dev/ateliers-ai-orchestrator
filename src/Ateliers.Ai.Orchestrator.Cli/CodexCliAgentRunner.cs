@@ -61,6 +61,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
         // Version metadata is intentionally recorded as unavailable.
         const string? cliVersion = null;
         string? error = null;
+        string? preflightDiagnostic = null;
         var timedOut = false;
         var stopRequested = false;
         string? stopReason = null;
@@ -103,6 +104,8 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
         if (role == "implementer")
         {
             try { initialCommits[request.RunId] = PrepareCleanGitWorkspace(request.Contract.WorkingDirectory); }
+            catch (GitWorkspacePreflightException exception)
+            { error = preflightDiagnostic = exception.Message; }
             catch (Exception exception) when (exception is IOException or InvalidOperationException)
             { error = exception.Message; }
         }
@@ -217,7 +220,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
                     Path.GetRelativePath(request.RunDirectory!, stderrPath).Replace('\\', '/'))
                 : role == "reviewer" && !hasResponse && !hasArtifacts ? "Reviewerは本文も任意成果物も返しませんでした。" :
                 $"完了条件不一致: terminal={terminalEvent ?? "未取得"}, exit={exitCode?.ToString() ?? "未取得"}, response={(string.IsNullOrWhiteSpace(response.ToString()) ? "空" : "取得済み")}";
-        var content = response.ToString();
+        var content = preflightDiagnostic ?? response.ToString();
         string? selfAssessment = null;
         string? validationEvidenceReference = null;
         if (validationDirectory is not null)
@@ -638,9 +641,51 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
 
     private static string PrepareCleanGitWorkspace(string workingDirectory)
     {
-        var status = RunGit(workingDirectory, "status", "--porcelain", "--untracked-files=all");
-        if (status.Length != 0) throw new InvalidOperationException("実Agent開始前の作業領域に既存差分があります。変更を保持して停止しました。");
+        var status = RunGit(workingDirectory, "status", "--porcelain=v1", "-z", "--untracked-files=all");
+        if (status.Length != 0) throw new GitWorkspacePreflightException(BuildDirtyWorkspaceDiagnostic(status));
         return RunGit(workingDirectory, "rev-parse", "HEAD").Trim();
+    }
+
+    private static string BuildDirtyWorkspaceDiagnostic(string status)
+    {
+        var records = status.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+        var entries = new List<(string State, string Path)>();
+        for (var index = 0; index < records.Length; index++)
+        {
+            var entry = records[index];
+            if (entry.Length < 3 || entry[2] != ' ') continue;
+            var state = entry.Length >= 2 ? entry[..2] : "??";
+            var path = entry[3..];
+            entries.Add((state, path));
+            // In -z output, rename/copy records are followed by a NUL-delimited source path.
+            if ((state.Contains('R') || state.Contains('C')) && index + 1 < records.Length) index++;
+        }
+        var summary = entries.Take(8).Select(entry => $"{entry.State} {SafeGitStatusPath(entry.Path)}").ToArray();
+        return "Git作業領域の事前確認で差分を検出し、Codex起動前に停止しました。" +
+            $" stage=pre-agent-clean-check; command=git status --porcelain=v1 -z --untracked-files=all; exitCode=0; " +
+            $"dirtyCount={entries.Count}; paths=[{string.Join(", ", summary)}]{(entries.Count > summary.Length ? ", ..." : "")}";
+    }
+
+    private static string SafeGitStatusPath(string path)
+    {
+        var segments = path.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var sensitive = segments.Any(segment =>
+        {
+            var name = segment.ToLowerInvariant();
+            var compactName = name.Replace("_", string.Empty, StringComparison.Ordinal).Replace("-", string.Empty, StringComparison.Ordinal);
+            return name is "id_rsa" or "id_ed25519" or "credentials" or "secrets" or "secret" ||
+                name == ".env" || name.StartsWith(".env.", StringComparison.Ordinal) ||
+                compactName.Contains("credential", StringComparison.Ordinal) || compactName.Contains("secret", StringComparison.Ordinal) ||
+                compactName.Contains("password", StringComparison.Ordinal) || compactName.Contains("passphrase", StringComparison.Ordinal) ||
+                compactName.Contains("token", StringComparison.Ordinal) || compactName.Contains("apikey", StringComparison.Ordinal) ||
+                compactName.Contains("privatekey", StringComparison.Ordinal) || Path.GetExtension(name) is ".pem" or ".pfx" or ".key";
+        });
+        if (sensitive || path.Any(char.IsControl) || Path.IsPathRooted(path))
+        {
+            var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(path)))[..12];
+            return $"<redacted-path:{hash}>";
+        }
+        return string.Join('/', segments);
     }
 
     private static CapturedWorkspaceChanges CaptureChanges(string workingDirectory, string baseCommit, string runDirectory, int attempt,
@@ -756,6 +801,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
     private sealed record CapturedWorkspaceChanges(string Content, string? Reference, string? Sha256);
     private sealed record CapturedWorkspaceSnapshot(string BaseSha, IReadOnlyList<CapturedWorkspaceEntry> Entries);
     private sealed record CapturedWorkspaceEntry(string Path, bool Deleted, string Mode, string? Sha256, string? ContentBase64);
+    private sealed class GitWorkspacePreflightException(string message) : InvalidOperationException(message);
 
     private static string RunGit(string workingDirectory, params string[] arguments)
     {

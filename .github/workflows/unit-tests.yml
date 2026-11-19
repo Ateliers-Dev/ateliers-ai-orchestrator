@@ -41,7 +41,7 @@ jobs:
       - name: Run Orchestrator FakeTests
         run: dotnet test tests/Ateliers.Ai.Orchestrator.FakeTests/Ateliers.Ai.Orchestrator.FakeTests.csproj --configuration Release --no-build --no-restore --filter Category=Fake
 
-      - name: Run local IntegrationTests
+      - name: Run opt-in Codex IntegrationTests (skipped by default)
         run: dotnet test tests/Ateliers.Ai.Orchestrator.IntegrationTests/Ateliers.Ai.Orchestrator.IntegrationTests.csproj --configuration Release --no-build --no-restore --filter Category=Integration
 
       - name: Run Slack UnitTests

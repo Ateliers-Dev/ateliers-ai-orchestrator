@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <Compile Include="..\Shared\IsolatedFixture.cs" Link="TestFixtures\IsolatedFixture.cs" />
     <ProjectReference Include="..\..\src\Ateliers.Ai.Orchestrator.Core\Ateliers.Ai.Orchestrator.Core.csproj" />
     <ProjectReference Include="..\..\src\Ateliers.Ai.Orchestrator.Cli\Ateliers.Ai.Orchestrator.Cli.csproj" />
     <ProjectReference Include="..\..\src\Ateliers.Slack\Ateliers.Slack.csproj" />

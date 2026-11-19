@@ -40,8 +40,8 @@ Issue #79は、Implementerが行ったbuild・教材チェックの証跡を独�
 | 現状 | 確認内容 | 分類上の論点 |
 |---|---|---|
 | `Ateliers.Ai.Orchestrator.UnitTests` | CLIの版情報テストなど内部ロジックを確認する。 | UnitTestsとして維持する。 |
-| `Ateliers.Ai.Orchestrator.FakeTests` | OrchestratorのFake駆動テスト、Fake Codex/gh、子プロセスfixture、MCP/CLIのFake接続テスト。 | FakeTestsへ移動し、`Category=Fake` を付ける。ローカルGitを実際に起動するテストケースはIntegrationTests側から共通catalogを呼ぶ構成へ移す。 |
-| `Ateliers.Ai.Orchestrator.IntegrationTests` | `CodexIntegrationTests`のファイルシステムfixture試験、実Codex opt-in試験、実ローカルGit CLI試験を含む。 | Fakeで検証する状態・report・evidenceのassertを除去。実Codexは接続と応答到達・終了を確認し、ローカルGitはIntegrationカテゴリとして実行する。 |
+| `Ateliers.Ai.Orchestrator.FakeTests` | OrchestratorのFake駆動テスト、Fake Codex/gh、子プロセスfixture、MCP/CLIのFake接続テスト。 | FakeTestsへ移動し、`Category=Fake` を付ける。GitHub・実Codex等に接続しない隔離fixture上のGit CLI試験もここへ分類する。 |
+| `Ateliers.Ai.Orchestrator.IntegrationTests` | `CodexIntegrationTests`のファイルシステムfixture試験、実Codex opt-in試験、実ローカルGit CLI試験を含む。 | Fakeで検証する状態・report・evidenceのassertを除去。実Codexは接続と応答到達・終了を確認する。ローカルGit試験を外し、実外部接続の分類に限定する。 |
 | 同上 | Reviewer応答中にbuild、test、教材の定型文があることを検証する。 | モデルの自由記述に依存し、証跡受け渡しの検証の代替になっていない。 |
 | `Ateliers.Slack.IntegrationTests` | 実Slack Web API送信テストと、テスト設定ファイル探索・テストチャンネル選択のローカルテストが同居する。 | 設定探索・値選択テストは外部接続がなく、UnitTestsへ分類する。 |
 | `Ateliers.Slack.UnitTests` | Slack設定探索、Fake HTTP handlerによるAPI client/dispatcherの要求・応答テストが同居する。 | 設定探索をUnitTestsに残し、Fake HTTP handlerによる連携検証をSlack FakeTestsへ移動する。 |
@@ -80,8 +80,8 @@ PR #96のローカル環境では、Fake-onlyテストと実Codex IntegrationTes
 - `Ateliers.Slack.FakeTests` を追加し、Fake `HttpMessageHandler` によるWebhook、Bot client、通知dispatcherの要求・応答・タイムアウト・秘匿動作テストを移動した。
 - `SlackBotSettingsLocatorTests` とその探索helperをSlack UnitTestsへ移動し、IntegrationTestsはhelper sourceを共有参照する。設定探索テスト自体はSlackへの接続を行わない。
 - Orchestrator IntegrationTestsの実Codexシナリオから、`NeedsHumanInput`、呼出し回数、report/events構造、ファイル差分、証跡の意味内容とReviewer応答に対するassertを除去した。成功条件はOrchestratorプロセスのexit code 0と、Implementerの応答ファイルが空でなく保存されたことだけとし、自然言語の内容は評価しない。Slack通知引数は常に`disabled`。
-- ローカルGitを使う2件はIntegrationTestsプロジェクトの `Category=Integration` に移した。既存fixture executableとcatalogをテスト間で共有するため、IntegrationTestsからFakeTestsアセンブリをテストfixtureとして参照する。
-- Windows/UbuntuのCIをUnitTests・FakeTests・ローカルIntegrationTestsに分け、実CodexとSlack APIへの接続は通常ゲートでopt-inなしに起動しない。Release workflowもUnit/Fakeプロジェクトを反映する。
+- 初期整理ではローカルGitを使うテストをIntegrationTests側に残していたが、これは実外部接続をIntegrationTestsに限定する合意と矛盾していた。今回、決定論的なローカルGit CLIテストとfixture cleanupテストを `Category=Fake` のFakeTestsへ移し、共有fixture型だけを `tests/Shared/IsolatedFixture.cs` に切り出した。IntegrationTestsは実Codexの明示opt-inテストのみを保持し、FakeTestsへのプロジェクト参照を持たない。
+- Windows/Ubuntuの必須CIはUnitTestsとFakeTestsを実行する。別stepのCodex IntegrationTestsは明示opt-inがなければSkipされ、通常ゲートで外部接続を起動しない。Release workflowもUnit/Fakeプロジェクトを反映する。
 
 ### 未解決
 
@@ -94,7 +94,7 @@ PR #96のローカル環境では、Fake-onlyテストと実Codex IntegrationTes
 
 - `dotnet restore Ateliers.Ai.Orchestrator.sln` はこの環境で終了コード1となり、MSBuild/NuGetの原因詳細を出しませんでした。NuGet脆弱性フィードも到達不可（NU1900）でした。既存の復元済みプロジェクト資産を使ってRelease solution buildを確認し、**成功・0 errors・7 NU1900警告**でした。これは通常のCI restore成功を代替しません。
 - 標準 `dotnet test` でOrchestrator UnitTestsを実行したところ、VSTestは90秒後にtesthostへ接続できず中止しました。これはPR #96と最小再現で記録されIssue #105へ切り出されたtesthost阻害と一致する現象です。今回の実装やテスト分類の失敗とは断定しません。
-- FakeTestsの既存testhost外直接実行経路では **80 passed、1 skipped、0 failed**。Issue #79用FakeケースのReviewer要求 `validationEvidenceReference` 検査もこの実行に含まれ、成功しました。
+- FakeTestsの既存testhost外直接実行経路では **86 passed、3 skipped、0 failed**。SkipはWindowsで利用できないUnix modeまたはjunction作成ケース。Issue #79用FakeケースのReviewer要求 `validationEvidenceReference` 検査と追加したGit安全性ケースも実行に含まれました。
 - testhostを介するSlack Unit/FakeとIntegrationTestsはこの環境で未実行です。通常CIのWindows/Ubuntuでのrestore/test実行結果は未確認です。
 - 実Codex接続IntegrationTest、ユーザー専用 `scripts/e2e/run-codex-e2e.ps1`、Slack実通知は実行していません。
-- 独立レビューで、当初の応答確認がOrchestrator自身の標準出力のみを見ており、Codex応答の到達を保証しないという指摘があった。応答記録ディレクトリから空でないImplementer応答の存在だけを見るよう修正した。独立レビューの修正後再確認、PR作成、CI確認は続行中。
+- 独立レビューで、当初の応答確認がOrchestrator自身の標準出力のみを見ており、Codex応答の到達を保証しないという指摘があった。応答記録ディレクトリから空でないImplementer応答の存在だけを見るよう修正した。また、分類移動時に実Codex opt-inテスト本体まで削除されたことを検出し、元のテストを復元した。追加レビュー、PR更新、CI確認は続行中。

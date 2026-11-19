@@ -46,3 +46,5 @@
 - CIはUnitTestsとFakeTestsの分類別プロジェクトを実行対象に含めます。ローカルの実行方法はリポジトリの `AGENTS.md` と該当workflowを参照してください。
 
 具体的な現行テストの棚卸しと今回の是正内容は、[Issue #79 テスト分類見直し記録](../issues/issue-79-test-classification-review.md)を参照してください。
+
+ローカルGit CLIを使う決定論的な回帰テストの分類と、変更時に維持する過去障害の対応表は[Git安全性の回帰対策](git-safety-regressions.md)を参照してください。
