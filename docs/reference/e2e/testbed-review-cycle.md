@@ -17,7 +17,7 @@ TestbedはPublicリポジトリです。実Codexを開始するとCodex利用枠
 - `scripts/e2e/scenarios/testbed-review-cycle.json` は現行CLIと同じ契約フィールドを使い、`reporting.pullRequestExpected` を `true` にします。対象範囲、5つのチェック、独立レビュー、必要な場合のみのbounded修正、停止条件を定義します。
 - 実行対象はGitHubから取得するTestbed `main` のcleanな一時cloneです。実行直前にGitHubの既定ブランチSHAとcloneのHEADを照合します。本体リポジトリや利用者の既存checkoutを対象にしません。
 - PR必須経路はrun IDを使う一意な作業ブランチを作成し、push、PR作成、Reviewer結果コメント投稿・照合へ進みます。
-- Slack通知は実行スクリプトの `-SlackNotifications` で `disabled`、`test`、`auto` を選びます。既定値は `disabled` です。`test` は `[Ateliers AI TEST]` と明示した通知を設定済みテストチャンネルへ、`auto` は通常の通知先へ送信します。通知を指定したときだけ、実Codex起動前に設定とBot認証を確認し、確認文へモードとチャンネルIDを表示します。
+- Slack通知は実行スクリプトの `-SlackNotifications` で `disabled`、`test`、`auto` を選びます。スクリプト既定値は `disabled` なので、Slack通知を有効にする実行ではモードを必ず明示してください。TestbedレビューサイクルでSlack ONが指定された場合は `-SlackNotifications test` を使い、`[Ateliers AI TEST]` と明示した通知を設定済みテストチャンネルへ送ります。通常通知先への `auto` はユーザーが明示した場合だけ選びます。通知設定・Bot認証の不足はSlack ONのまま停止して報告し、通知を無効化して続行しません。
 
 [E2E実行基盤の準備確認](README.md#準備確認) を実行します。共通の準備確認は本体Release build、GitHub認証とTestbed `main` のSHA、cleanな一時clone、生成した契約の現行Release CLI検証を行います。単体テストは実行せず、E2Eの前提ゲートにも使いません。準備確認だけの実行では一時cloneを削除します。
 
