@@ -144,7 +144,7 @@ JSONLには実行ID、連番、UTC時刻、役割、イベント種別、状態�
 
 ## テスト
 
-UnitTestsは内部ロジック、FakeTestsはFakeを使った決定論的な受け渡し・状態遷移・異常系・証跡処理を検証します。IntegrationTestsは実外部システムとの接続確認に限定します。通常CIのUnit/FakeTestsでは実CodexやSlackへ接続しません。
+UnitTestsは内部ロジック、FakeTestsはFakeを使った決定論的な受け渡し・状態遷移・異常系・証跡処理を検証します。IntegrationTestsは実外部システムとの接続確認に限定します。通常PRの必須ゲートはUnitTestsとFakeTestsの両方で、片方の成功では代替できません。実外部接続IntegrationTestsは一律必須にせず、Issue・受入条件・変更リスクが求める場合に実行します。通常CIのUnit/FakeTestsでは実CodexやSlackへ接続しません。
 
 ```powershell
 dotnet test tests/Ateliers.Ai.Orchestrator.UnitTests/Ateliers.Ai.Orchestrator.UnitTests.csproj --configuration Release
