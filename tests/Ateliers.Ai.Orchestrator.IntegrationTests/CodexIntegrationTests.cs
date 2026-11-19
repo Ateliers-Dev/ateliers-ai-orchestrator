@@ -2,20 +2,18 @@ using Microsoft.Win32.SafeHandles;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Ateliers.Slack;
 using Xunit;
 using Xunit.Sdk;
 
 namespace Ateliers.Ai.Orchestrator.IntegrationTests;
 
+[Trait("Category", "Integration")]
 public sealed class CodexIntegrationTests
 {
     private const string OptInVariable = "ATELIERS_RUN_CODEX_INTEGRATION_TESTS";
     private const string CodexPathVariable = "ATELIERS_CODEX_CLI_PATH";
-    private const string SlackOptInVariable = "ATELIERS_RUN_SLACK_INTEGRATION_TESTS";
 
     [Fact]
     public async Task IsolatedFixture_DisposeRemovesReadOnlyGitObject()
@@ -117,14 +115,12 @@ public sealed class CodexIntegrationTests
 
     [CodexOptInFact]
     [Trait("Category", "ExternalIntegration")]
-    public async Task RunAsync_ShouldCompleteImplementerReviewerAndPersistNeedsHumanInput()
+    public async Task RunAsync_ShouldConnectToCodexAndReceiveResponse()
     {
         var fixture = new IsolatedFixture();
         var succeeded = false;
         ProcessResult? run = null;
         string? runDirectory = null;
-        var lifecycleLogPath = Path.Combine(Path.GetTempPath(), $"ateliers-lifecycle-{Guid.NewGuid():N}.jsonl");
-        var slackMode = "disabled";
 
         try
         {
@@ -134,185 +130,21 @@ public sealed class CodexIntegrationTests
             Assert.True(Path.IsPathFullyQualified(codexExecutable), $"{CodexPathVariable} は絶対パスで指定してください。");
             Assert.True(File.Exists(codexExecutable), $"Codex CLIが見つかりません: {codexExecutable}");
 
-            if (Environment.GetEnvironmentVariable(SlackOptInVariable) == "1")
-            {
-                if (TryValidateSlackTestSettings(out var settingsError))
-                    slackMode = "test";
-                else
-                    Console.WriteLine($"Slack通知部分をSkip: {settingsError}");
-            }
-            else
-            {
-                Console.WriteLine($"Slack通知部分をSkip: {SlackOptInVariable}=1 が指定されていません。");
-            }
-
-            if (slackMode == "test")
-            {
-                var repositoryRoot = FindRepositoryRoot()!;
-                var configurationPath = Path.Combine(repositoryRoot, "config", "slack.json");
-                var secretsPath = Path.Combine(repositoryRoot, "config", "slack.secrets.json");
-                using var dispatcher = SlackLifecycleNotificationDispatcher.TryCreate(
-                    configurationPath, secretsPath, useTestChannel: true);
-                Assert.NotNull(dispatcher);
-                Assert.True(await dispatcher!.VerifyBotIdentitiesAsync(),
-                    "Slack Tokenと設定した3役のBot User IDが一致しません。通知投稿前に停止しました。");
-            }
-
             fixture.CreateSeedRepository();
             fixture.WriteTaskContract();
             var cliAssembly = FindCliAssembly();
-            run = await InvokeOrchestratorAsync(cliAssembly, Path.GetFullPath(codexExecutable!), fixture, lifecycleLogPath, slackMode);
+            runDirectory = fixture.RunsDirectory;
+            run = await InvokeOrchestratorAsync(cliAssembly, Path.GetFullPath(codexExecutable!), fixture);
             Assert.True(run.ExitCode == 0,
                 $"Orchestrator終了コードが0ではありません: {run.ExitCode}");
-            if (slackMode == "test")
-            {
-                Assert.DoesNotContain("Slack通知に", run.StandardError, StringComparison.Ordinal);
-                Assert.Contains("Slack通知送信成功: 6件", run.StandardOutput, StringComparison.Ordinal);
-            }
-
-            var runDirectories = Directory.GetDirectories(fixture.RunsDirectory);
-            Assert.True(runDirectories.Length == 1, $"実行記録ディレクトリ数が1ではありません: {runDirectories.Length}");
-            runDirectory = runDirectories[0];
-
-            var reportPath = Path.Combine(runDirectory, "report.md");
-            Assert.True(File.Exists(reportPath), "report.mdがありません。");
-            var report = await File.ReadAllTextAsync(reportPath);
-            Assert.Contains("- 状態: `NeedsHumanInput`", report, StringComparison.Ordinal);
-            Assert.Contains("- 実装呼び出し: 1", report, StringComparison.Ordinal);
-            Assert.Contains("- レビュー呼び出し: 1", report, StringComparison.Ordinal);
-
-            var eventsPath = Path.Combine(runDirectory, "events.jsonl");
-            Assert.True(File.Exists(eventsPath), "events.jsonlがありません。");
-            var events = (await File.ReadAllLinesAsync(eventsPath)).Where(line => !string.IsNullOrWhiteSpace(line))
-                .Select(line => JsonDocument.Parse(line)).ToArray();
-            try
-            {
-                Assert.NotEmpty(events);
-                var runId = events[0].RootElement.GetProperty("runId").GetString();
-                for (var index = 0; index < events.Length; index++)
-                {
-                    var item = events[index].RootElement;
-                    Assert.Equal(runId, item.GetProperty("runId").GetString());
-                    Assert.Equal(index + 1, item.GetProperty("sequence").GetInt64());
-                }
-
-                var all = events.Select(item => item.RootElement).ToArray();
-                var calls = all.Where(item => item.GetProperty("eventType").GetString() == "agent_call").ToArray();
-                var implementerCalls = calls.Where(item => item.GetProperty("role").GetString() == "Implementer").ToArray();
-                var reviewerCalls = calls.Where(item => item.GetProperty("role").GetString() == "Reviewer").ToArray();
-                Assert.Single(implementerCalls);
-                Assert.Single(reviewerCalls);
-                Assert.Equal("completed", implementerCalls[0].GetProperty("result").GetString());
-                var reviewerResult = reviewerCalls[0].GetProperty("result").GetString();
-                Assert.True(reviewerResult is "completed" or "empty", "Reviewerのイベント記録が成功ではありません。");
-                var reviewerOutput = reviewerCalls[0].TryGetProperty("outputReference", out var reviewerOutputElement) && reviewerOutputElement.ValueKind == JsonValueKind.String;
-                var reviewerArtifacts = reviewerCalls[0].GetProperty("artifactReferences").GetArrayLength() > 0;
-                Assert.True(reviewerOutput || reviewerArtifacts, "Reviewer応答・成果物のどちらも記録されていません。");
-
-                var stopped = Assert.Single(all, item => item.GetProperty("eventType").GetString() == "codex_one_shot_stopped");
-                Assert.Equal("needs_human_input", stopped.GetProperty("result").GetString());
-                Assert.Contains(all, item => item.GetProperty("eventType").GetString() == "state_transition" &&
-                    item.GetProperty("toState").GetString() == "needsHumanInput");
-                Assert.Contains(all, item => item.GetProperty("eventType").GetString() == "report_written" &&
-                    item.GetProperty("result").GetString() == "accepted" && item.GetProperty("outputReference").GetString() == "report.md");
-
-                var lifecycle = (await File.ReadAllLinesAsync(lifecycleLogPath)).Select(line => JsonDocument.Parse(line)).ToArray();
-                try
-                {
-                    var lifecycleItems = lifecycle.Select(item => item.RootElement).ToArray();
-                    Assert.Contains(lifecycleItems, item => item.GetProperty("role").GetString() == "Orchestrator" && item.GetProperty("eventType").GetString() == "started");
-                    Assert.Contains(lifecycleItems, item => item.GetProperty("role").GetString() == "Implementer" && item.GetProperty("eventType").GetString() == "completed");
-                    Assert.Contains(lifecycleItems, item => item.GetProperty("role").GetString() == "Reviewer" && item.GetProperty("eventType").GetString() == "completed");
-                    Assert.Contains(lifecycleItems, item => item.GetProperty("eventType").GetString() == "needs_human_input");
-                    Assert.Equal(new[] { "Orchestrator:started", "Implementer:started", "Implementer:completed",
-                        "Reviewer:started", "Reviewer:completed", "Orchestrator:needs_human_input", "Orchestrator:completed" },
-                        lifecycleItems.Select(item => $"{item.GetProperty("role").GetString()}:{item.GetProperty("eventType").GetString()}").ToArray());
-                    Assert.Equal("needs_human_input", lifecycleItems[^1].GetProperty("status").GetString());
-                    Assert.Equal("NeedsHumanInput", lifecycleItems[^1].GetProperty("state").GetString());
-                    Assert.DoesNotContain(await File.ReadAllTextAsync(lifecycleLogPath), codexExecutable, StringComparison.OrdinalIgnoreCase);
-                }
-                finally
-                {
-                    foreach (var item in lifecycle) item.Dispose();
-                }
-
-                ValidateAgentEvidence(runDirectory, implementerCalls[0], "implementer", requireResponse: true);
-                ValidateAgentEvidence(runDirectory, reviewerCalls[0], "reviewer", requireResponse: false);
-                var reviewerEvidencePath = Path.Combine(runDirectory, "exchanges", "reviewer-1", "execution-evidence.json");
-                string? reviewerArtifactSha256;
-                using (var reviewerEvidence = JsonDocument.Parse(await File.ReadAllBytesAsync(reviewerEvidencePath)))
-                {
-                    var reviewerWorkingDirectory = reviewerEvidence.RootElement.GetProperty("WorkingDirectory").GetString();
-                    var expectedReviewerWorkspace = Path.Combine(runDirectory, "exchanges", "reviewer-1", "workspace");
-                    Assert.True(StringComparer.OrdinalIgnoreCase.Equals(
-                        Path.GetFullPath(expectedReviewerWorkspace), Path.GetFullPath(reviewerWorkingDirectory!)),
-                        "Reviewerの作業ディレクトリが実行記録内の専用workspaceではありません。");
-                    Assert.False(Path.GetFullPath(reviewerWorkingDirectory!).StartsWith(
-                        Path.GetFullPath(fixture.RepositoryDirectory) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase),
-                        "Reviewerの作業ディレクトリがImplementerのcheckout内です。");
-                    Assert.True(StringComparer.OrdinalIgnoreCase.Equals(Path.GetFullPath(reviewerWorkingDirectory!),
-                        Path.GetFullPath((await RunGitAsync(reviewerWorkingDirectory!, "rev-parse", "--show-toplevel")).Trim())),
-                        "Reviewerの作業ディレクトリが独立したGitルートではありません。");
-                    reviewerArtifactSha256 = reviewerEvidence.RootElement.GetProperty("ArtifactSha256").GetString();
-                }
-                ValidateReferences(runDirectory, implementerCalls[0]);
-                ValidateReferences(runDirectory, reviewerCalls[0]);
-
-                var fixedArtifact = Assert.Single(all, item => item.GetProperty("eventType").GetString() == "artifact_fixed");
-                var artifactReference = fixedArtifact.GetProperty("outputReference").GetString();
-                Assert.False(string.IsNullOrWhiteSpace(artifactReference), "固定成果物の参照がありません。");
-                var artifactPath = ResolveRunReference(runDirectory, artifactReference!);
-                Assert.True(File.Exists(artifactPath), $"固定成果物がありません: {artifactReference}");
-                var artifact = await File.ReadAllTextAsync(artifactPath);
-                var frozenDiff = ExtractUnifiedDiff(artifact);
-                Assert.Equal(fixedArtifact.GetProperty("diffSha256").GetString(), reviewerArtifactSha256);
-                var finalDiff = await RunGitAsync(fixture.RepositoryDirectory, "diff", "--binary", "--no-ext-diff", "HEAD", "--");
-                Assert.Equal(NormalizeNewlines(frozenDiff), NormalizeNewlines(finalDiff));
-                Assert.Equal(fixedArtifact.GetProperty("diffSha256").GetString(), HashSha256(await File.ReadAllBytesAsync(artifactPath)));
-
-                var changedPaths = ParsePorcelainPaths(await RunGitAsync(fixture.RepositoryDirectory, "status", "--porcelain", "-z", "--untracked-files=all"));
-                Assert.Equal([IsolatedFixture.TargetFile], changedPaths);
-                var targetContents = await File.ReadAllTextAsync(Path.Combine(fixture.RepositoryDirectory, IsolatedFixture.TargetFile));
-                Assert.Contains("CountWords", targetContents, StringComparison.Ordinal);
-                Assert.Equal(IsolatedFixture.SeedSentinel,
-                    await File.ReadAllTextAsync(Path.Combine(fixture.RepositoryDirectory, IsolatedFixture.SentinelFile)));
-
-                var validationPath = Path.Combine(runDirectory, "exchanges", "implementer-1", "validation", "validation-evidence.json");
-                using var validationDocument = JsonDocument.Parse(await File.ReadAllBytesAsync(validationPath));
-                var validationCommands = validationDocument.RootElement.GetProperty("commands").EnumerateArray().ToArray();
-                Assert.Equal(2, validationCommands.Length);
-                Assert.Contains(validationCommands, command => command.GetProperty("command").GetString()!.Contains("dotnet build", StringComparison.Ordinal));
-                Assert.Contains(validationCommands, command => command.GetProperty("command").GetString()!.Contains("dotnet run", StringComparison.Ordinal));
-                Assert.All(validationCommands, command => Assert.Equal(0, command.GetProperty("exitCode").GetInt32()));
-
-                var buildCommand = Assert.Single(validationCommands, command =>
-                    command.GetProperty("command").GetString()!.Contains("dotnet build", StringComparison.Ordinal));
-                var checksCommand = Assert.Single(validationCommands, command =>
-                    command.GetProperty("command").GetString()!.Contains("dotnet run", StringComparison.Ordinal));
-                var validationDirectory = Path.GetDirectoryName(validationPath)!;
-                var buildLogPath = ResolveValidationReference(validationDirectory, buildCommand.GetProperty("logReference").GetString()!);
-                var checksLogPath = ResolveValidationReference(validationDirectory, checksCommand.GetProperty("logReference").GetString()!);
-                var buildLog = await File.ReadAllTextAsync(buildLogPath);
-                var checksLog = await File.ReadAllTextAsync(checksLogPath);
-                Assert.True(buildLog.Contains("Build succeeded", StringComparison.OrdinalIgnoreCase) ||
-                    buildLog.Contains("ビルドに成功", StringComparison.Ordinal), "Release buildの成功をログで確認できません。");
-                Assert.Contains("All word-count checks passed.", checksLog, StringComparison.Ordinal);
-
-                var reviewerRequestPath = Path.Combine(runDirectory, "exchanges", "reviewer-1", "request.json");
-                using var reviewerRequestDocument = JsonDocument.Parse(await File.ReadAllBytesAsync(reviewerRequestPath));
-                Assert.Equal("exchanges/implementer-1/validation/validation-evidence.json",
-                    reviewerRequestDocument.RootElement.GetProperty("validationEvidenceReference").GetString());
-                var reviewerOutputPath = ResolveRunReference(runDirectory, reviewerCalls[0].GetProperty("outputReference").GetString()!);
-                var reviewerResponse = await File.ReadAllTextAsync(reviewerOutputPath);
-                Assert.Contains("build", reviewerResponse, StringComparison.OrdinalIgnoreCase);
-                Assert.Contains("test", reviewerResponse, StringComparison.OrdinalIgnoreCase);
-                Assert.Contains("All word-count checks passed.", reviewerResponse, StringComparison.Ordinal);
-            }
-            finally
-            {
-                foreach (var item in events) item.Dispose();
-            }
-
+            var exchangeDirectory = Path.Combine(runDirectory, "exchanges");
+            var implementerResponses = Directory.Exists(exchangeDirectory)
+                ? Directory.EnumerateDirectories(exchangeDirectory, "implementer-*")
+                    .Select(directory => Path.Combine(directory, "response.md"))
+                    .Where(File.Exists)
+                : [];
+            Assert.Contains(implementerResponses,
+                path => !string.IsNullOrWhiteSpace(File.ReadAllText(path)));
             succeeded = true;
         }
         catch (Exception exception) when (exception is not XunitException)
@@ -345,9 +177,6 @@ public sealed class CodexIntegrationTests
             }
         }
 
-        Assert.True(File.Exists(lifecycleLogPath), "fixture cleanup後も設定した永続JSONLが残っていません。");
-        Assert.Contains("\"role\":\"Orchestrator\"", await File.ReadAllTextAsync(lifecycleLogPath));
-        File.Delete(lifecycleLogPath);
     }
 
     private static string FormatFailure(Exception exception, string fixtureDirectory, string? runDirectory, ProcessResult? run)
@@ -375,55 +204,7 @@ public sealed class CodexIntegrationTests
         throw new FileNotFoundException("CLI assemblyが見つかりません。先にソリューションをビルドしてください。");
     }
 
-    private static bool TryValidateSlackTestSettings(out string reason)
-    {
-        reason = "config/slack.jsonまたはconfig/slack.secrets.jsonがありません。";
-        var root = FindRepositoryRoot();
-        if (root is null) return false;
-        var configPath = Path.Combine(root, "config", "slack.json");
-        var secretsPath = Path.Combine(root, "config", "slack.secrets.json");
-        if (!File.Exists(configPath) || !File.Exists(secretsPath)) return false;
-
-        try
-        {
-            var roles = new[] { "orchestrator", "implementer", "reviewer" };
-            var settings = roles.Select(role => SlackBotConfiguration.Load(configPath, secretsPath, role, useTestChannel: true)).ToArray();
-            var testChannel = settings[0].ChannelId;
-            if (settings.Any(item => !string.Equals(item.ChannelId, testChannel, StringComparison.Ordinal)))
-            {
-                reason = "3役のテストチャンネル設定が一致しません。";
-                return false;
-            }
-            if (settings.Any(item => string.Equals(item.Bot.ChannelId, testChannel, StringComparison.Ordinal)))
-            {
-                reason = "テストチャンネルが通常の通知先と同じです。";
-                return false;
-            }
-            if (settings.Select(item => item.Bot.BotUserId).Distinct(StringComparer.Ordinal).Count() != roles.Length)
-            {
-                reason = "3役のBot User IDが重複しています。";
-                return false;
-            }
-            reason = string.Empty;
-            return true;
-        }
-        catch (InvalidOperationException)
-        {
-            reason = "3役のBot設定、testChannelId、またはローカルTokenが不足・不正です。";
-            return false;
-        }
-    }
-
-    private static string? FindRepositoryRoot()
-    {
-        for (var current = new DirectoryInfo(AppContext.BaseDirectory); current is not null; current = current.Parent)
-            if (File.Exists(Path.Combine(current.FullName, "Ateliers.Ai.Orchestrator.sln")) &&
-                File.Exists(Path.Combine(current.FullName, "tests", "Ateliers.Ai.Orchestrator.IntegrationTests", "Ateliers.Ai.Orchestrator.IntegrationTests.csproj")))
-                return current.FullName;
-        return null;
-    }
-
-    private static async Task<ProcessResult> InvokeOrchestratorAsync(string cliAssembly, string codexExecutable, IsolatedFixture fixture, string lifecycleLogPath, string slackMode)
+    private static async Task<ProcessResult> InvokeOrchestratorAsync(string cliAssembly, string codexExecutable, IsolatedFixture fixture)
     {
         var start = new ProcessStartInfo("dotnet")
         {
@@ -436,7 +217,7 @@ public sealed class CodexIntegrationTests
         foreach (var argument in new[]
         {
             cliAssembly, "run", fixture.ContractPath, "--agent", "codex", "--codex-exe", codexExecutable,
-            "--runs", fixture.RunsDirectory, "--lifecycle-log", lifecycleLogPath, "--slack-notifications", slackMode
+            "--runs", fixture.RunsDirectory, "--slack-notifications", "disabled"
         }) start.ArgumentList.Add(argument);
 
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Orchestrator CLIを開始できませんでした。");
@@ -459,85 +240,6 @@ public sealed class CodexIntegrationTests
         return new ProcessResult(process.ExitCode, await stdout, await stderr);
     }
 
-    private static void ValidateAgentEvidence(string runDirectory, JsonElement call, string role, bool requireResponse)
-    {
-        var evidencePath = Path.Combine(runDirectory, "exchanges", $"{role}-1", "execution-evidence.json");
-        Assert.True(File.Exists(evidencePath), $"{role}の終了証跡ファイルがありません。");
-        using var evidenceDocument = JsonDocument.Parse(File.ReadAllBytes(evidencePath));
-        var evidence = evidenceDocument.RootElement;
-        Assert.True(evidence.GetProperty("ProcessExitObserved").GetBoolean(), $"{role}のプロセス終了を確認できませんでした。");
-        Assert.True(evidence.GetProperty("StreamsClosed").GetBoolean(), $"{role}の出力stream終了を確認できませんでした。");
-        Assert.Equal("turn.completed", evidence.GetProperty("TerminalEvent").GetString());
-        Assert.Equal(0, evidence.GetProperty("ExitCode").GetInt32());
-        Assert.True(evidence.GetProperty("ProcessId").GetInt32() > 0, $"{role}のプロセスIDがありません。");
-        Assert.False(evidence.GetProperty("StopRequested").GetBoolean() || evidence.GetProperty("TimedOut").GetBoolean(),
-            $"{role}が停止要求またはtimeoutで終了しました。");
-
-        var stdoutReference = evidence.GetProperty("StandardOutputReference").GetString();
-        var stderrReference = evidence.GetProperty("StandardErrorReference").GetString();
-        Assert.True(stdoutReference is not null && File.Exists(ResolveRunReference(runDirectory, stdoutReference)), $"{role}のJSONL応答ログ参照が不正です。");
-        Assert.True(stderrReference is not null && File.Exists(ResolveRunReference(runDirectory, stderrReference)), $"{role}のstderrログ参照が不正です。");
-        if (requireResponse)
-        {
-            var outputReference = call.GetProperty("outputReference").GetString();
-            Assert.True(outputReference is not null && File.Exists(ResolveRunReference(runDirectory, outputReference)), $"{role}応答参照が不正です。");
-            Assert.True(new FileInfo(ResolveRunReference(runDirectory, outputReference!)).Length > 0, $"{role}応答が空です。");
-        }
-    }
-
-    private static void ValidateReferences(string runDirectory, JsonElement call)
-    {
-        if (call.TryGetProperty("outputReference", out var output) && output.ValueKind == JsonValueKind.String)
-            Assert.True(File.Exists(ResolveRunReference(runDirectory, output.GetString()!)), "Agent応答のoutputReferenceが実在しません。");
-        if (!call.TryGetProperty("artifactReferences", out var references)) return;
-        foreach (var reference in references.EnumerateArray())
-            Assert.True(File.Exists(ResolveRunReference(runDirectory, reference.GetString()!)), $"任意成果物の参照先が不正です: {reference.GetString()}");
-    }
-
-    private static string ResolveRunReference(string runDirectory, string reference)
-    {
-        var path = Path.GetFullPath(Path.Combine(runDirectory, reference.Replace('/', Path.DirectorySeparatorChar)));
-        var root = Path.GetFullPath(runDirectory) + Path.DirectorySeparatorChar;
-        Assert.True(path.StartsWith(root, StringComparison.OrdinalIgnoreCase), $"実行記録の参照がrunディレクトリ外を指しています: {reference}");
-        return path;
-    }
-
-    private static string ResolveValidationReference(string validationDirectory, string reference)
-    {
-        var normalizedReference = reference.Replace('\\', '/');
-        var segments = normalizedReference.Split('/', StringSplitOptions.None);
-        Assert.False(Path.IsPathRooted(reference) || segments.Any(segment => segment is "" or "." or ".."),
-            $"検証証跡のログ参照が相対ファイル名ではありません: {reference}");
-        var path = Path.GetFullPath(Path.Combine(validationDirectory, normalizedReference.Replace('/', Path.DirectorySeparatorChar)));
-        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(validationDirectory)) + Path.DirectorySeparatorChar;
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        Assert.True(path.StartsWith(root, comparison), "検証証跡ログの参照がvalidation directory外です。");
-
-        var current = Path.GetFullPath(validationDirectory);
-        foreach (var segment in segments)
-        {
-            current = Path.Combine(current, segment);
-            Assert.False((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0,
-                "検証証跡ログの参照先にリンクを含められません。");
-        }
-        Assert.True(File.Exists(path), "検証証跡ログの参照先がありません。");
-        return path;
-    }
-
-    private static string ExtractUnifiedDiff(string artifact)
-    {
-        const string start = "```diff\n";
-        var index = artifact.IndexOf(start, StringComparison.Ordinal);
-        Assert.True(index >= 0, "固定成果物にunified diffがありません。");
-        index += start.Length;
-        var end = artifact.IndexOf("\n```", index, StringComparison.Ordinal);
-        Assert.True(end >= 0, "固定成果物のdiff囲みが閉じていません。");
-        return artifact[index..end];
-    }
-
-    private static string[] ParsePorcelainPaths(string status) => status.Split('\0', StringSplitOptions.RemoveEmptyEntries)
-        .Select(line => line.Length >= 4 ? line[3..] : line).Order(StringComparer.Ordinal).ToArray();
-
     private static async Task<string> RunGitAsync(string workingDirectory, params string[] arguments)
     {
         var start = new ProcessStartInfo("git")
@@ -558,8 +260,6 @@ public sealed class CodexIntegrationTests
         return output;
     }
 
-    private static string HashSha256(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
-    private static string NormalizeNewlines(string value) => value.Replace("\r\n", "\n", StringComparison.Ordinal);
 
     private sealed record ProcessResult(int ExitCode, string StandardOutput, string StandardError);
 

@@ -1,11 +1,12 @@
 # guidelines
 
 > 作成日: 2026-11-19
-> 更新日: 2026-11-19
+> 更新日: 2026-11-20
 > 作成者: Codex
 
 ここには、運用や開発において共通して参照するガイドラインを置きます。
 
+- [作業プロセスの妥当性と改善](work-process-validity-and-improvement.md): 問題の指摘、自律修正、適切な停止、根拠と再発防止の記録
 - [エラー時の診断記録ポリシー](error-diagnostic-recording-policy.md): エラー時に共通して守る記録原則と、ケース別手順への索引
 - [診断記録方法](diagnostic-recording-method/README.md): 特定ケースやエラーに限定されない診断手順
 

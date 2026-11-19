@@ -11,12 +11,12 @@ internal static class FixtureHost
     public static int Main(string[] args)
     {
         Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
-        if (args.Length >= 1 && args[0] == "--fake-codex-fixture") return UnitTestCatalog.RunFakeCodexFixture(args);
-        if (args.Length >= 1 && args[0] == "--external-process-fixture") return UnitTestCatalog.RunExternalProcessFixture(args);
-        if (args.Length >= 1 && args[0] == "--lifecycle-writer-fixture") return UnitTestCatalog.RunLifecycleWriterFixture(args);
+        if (args.Length >= 1 && args[0] == "--fake-codex-fixture") return OrchestratorTestCatalog.RunFakeCodexFixture(args);
+        if (args.Length >= 1 && args[0] == "--external-process-fixture") return OrchestratorTestCatalog.RunExternalProcessFixture(args);
+        if (args.Length >= 1 && args[0] == "--lifecycle-writer-fixture") return OrchestratorTestCatalog.RunLifecycleWriterFixture(args);
         if (args.Length == 1 && args[0] == "--mcp-cli-adapter-fixture")
         {
-            var tests = new Ateliers.Ai.Orchestrator.UnitTests.McpCliAdapterTests();
+            var tests = new Ateliers.Ai.Orchestrator.FakeTests.McpCliAdapterTests();
             tests.Adapter_passes_contract_to_cli_stdin_and_returns_cli_json().GetAwaiter().GetResult();
             tests.Adapter_forwards_contract_schema_and_guide_from_installed_cli().GetAwaiter().GetResult();
             tests.Adapter_returns_structured_error_when_cli_is_missing().GetAwaiter().GetResult();
@@ -28,26 +28,26 @@ internal static class FixtureHost
             tests.Runtime_diagnostics_identify_a_non_absolute_explicit_cli_path();
             tests.Runtime_diagnostics_report_json_parse_location_without_manifest_contents().GetAwaiter().GetResult();
             tests.Runtime_diagnostics_does_not_parse_an_oversized_manifest().GetAwaiter().GetResult();
-            UnitTestCatalog.RunUnitTest("npm codex.cmdとcodex.ps1 shimで日本語プロンプトを渡す");
+            OrchestratorTestCatalog.RunFakeTest("npm codex.cmdとcodex.ps1 shimで日本語プロンプトを渡す");
             Console.WriteLine("MCP-to-CLI fixture passed.");
             return 0;
         }
         if (args.Length == 1 && args[0] == "--stdio-json-cli-fixture")
         {
-            var tests = new Ateliers.Ai.Orchestrator.UnitTests.StdioJsonCliTests();
+            var tests = new Ateliers.Ai.Orchestrator.FakeTests.StdioJsonCliTests();
             tests.Cli_publishes_contract_schema_guide_and_capability_flags().GetAwaiter().GetResult();
             tests.Run_stdin_json_writes_a_single_structured_success_response().GetAwaiter().GetResult();
             tests.Run_stdin_json_reports_invalid_contract_as_json_and_exit_two().GetAwaiter().GetResult();
             Console.WriteLine("CLI stdin JSON fixtures passed.");
             return 0;
         }
-        if (args.Length == 1 && args[0] == "--run-unit-cases-direct")
+        if (args.Length == 1 && args[0] == "--run-fake-cases-direct")
         {
-            var names = UnitTestCatalog.UnitTestCases.Select(testCase => (string)testCase[0]).ToArray();
+            var names = OrchestratorTestCatalog.FakeTestCases.Select(testCase => (string)testCase[0]).ToArray();
             var skipped = 0;
             foreach (var name in names)
             {
-                try { UnitTestCatalog.RunUnitTest(name); }
+                try { OrchestratorTestCatalog.RunFakeTest(name); }
                 catch (Xunit.Sdk.SkipException) { skipped++; }
                 catch (Exception exception)
                 {
@@ -55,14 +55,14 @@ internal static class FixtureHost
                     return 1;
                 }
             }
-            Console.WriteLine($"Existing Fake-only unit cases passed: {names.Length - skipped}; skipped: {skipped}.");
+            Console.WriteLine($"Existing FakeTests passed: {names.Length - skipped}; skipped: {skipped}.");
             return 0;
         }
         return 0;
     }
 }
 
-internal static class UnitTestCatalog
+public static class OrchestratorTestCatalog
 {
     private static string FixtureHostPath
     {
@@ -76,7 +76,7 @@ internal static class UnitTestCatalog
                 : throw new FileNotFoundException("UnitTests apphost が見つかりません。", fixtureHostPath);
         }
     }
-    private static string FixtureAssemblyPath => typeof(UnitTestCatalog).Assembly.Location;
+    private static string FixtureAssemblyPath => typeof(OrchestratorTestCatalog).Assembly.Location;
 
     private static string[] FixtureArguments(params string[] arguments) => arguments;
 
@@ -87,10 +87,10 @@ internal static class UnitTestCatalog
         return start;
     }
 
-    public static IEnumerable<object[]> UnitTestCases => GetTestCases(AddUnitTests);
+    public static IEnumerable<object[]> FakeTestCases => GetTestCases(AddFakeTests);
     public static IEnumerable<object[]> GitIntegrationTestCases => GetTestCases(AddGitIntegrationTests);
-    public static void RunUnitTest(string name) => RunTest(AddUnitTests, name);
     public static void RunGitIntegrationTest(string name) => RunTest(AddGitIntegrationTests, name);
+    public static void RunFakeTest(string name) => RunTest(AddFakeTests, name);
     public static void RunUnixOnlyTest(string name) => RunTest(AddUnixOnlyTests, name);
 
     public static int RunFakeCodexFixture(string[] args) => FakeCodexFixture(args);
@@ -120,7 +120,7 @@ static void AddGitIntegrationTests(TestSuite suite)
     suite.Add("linked worktree内の子プロセス生成差分をsnapshotへ固定する", CodexChildChangesAreSnapshottedFromLinkedWorktree);
 }
 
-static void AddUnitTests(TestSuite suite)
+static void AddFakeTests(TestSuite suite)
 {
     // CI invokes this explicit Fake/fixture-only set. External-service and Docker tests do not belong here.
     suite.Add("テスト集の件数・ログ・終了コードがPass/Fail/未検証で一致する", TestSuiteOutcomeContractIsConsistent);
@@ -1991,6 +1991,9 @@ static void CodexFakeProcessesCompleteIndependentReviewSlice()
         var firstReviewRequest = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "request.json"));
         Assert.True(firstReviewRequest.Contains(result.ArtifactSha256!, StringComparison.Ordinal), "レビュー要求に固定成果物ハッシュがありません。");
         Assert.False(firstReviewRequest.Contains("自己評価", StringComparison.Ordinal));
+        using (var requestDocument = JsonDocument.Parse(firstReviewRequest))
+            Assert.Equal("exchanges/implementer-1/validation/validation-evidence.json",
+                requestDocument.RootElement.GetProperty("validationEvidenceReference").GetString());
         var firstReviewEvidence = JsonDocument.Parse(File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "execution-evidence.json")));
         Assert.Equal("thread-fixture-reviewer-1", firstReviewEvidence.RootElement.GetProperty("ThreadId").GetString());
         Assert.Equal(result.ArtifactSha256, firstReviewEvidence.RootElement.GetProperty("ArtifactSha256").GetString());

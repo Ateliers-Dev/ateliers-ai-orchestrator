@@ -144,13 +144,17 @@ JSONLには実行ID、連番、UTC時刻、役割、イベント種別、状態�
 
 ## テスト
 
-Unit/FakeテストはxUnitを使用し、Coreの状態・保存処理とCLI/Codex実行境界をFakeで検証します。通常の実行で実モデルや外部実行基盤は起動しません。
+UnitTestsは内部ロジック、FakeTestsはFakeを使った決定論的な受け渡し・状態遷移・異常系・証跡処理を検証します。IntegrationTestsは実外部システムとの接続確認に限定します。通常CIのUnit/FakeTestsでは実CodexやSlackへ接続しません。
 
 ```powershell
 dotnet test tests/Ateliers.Ai.Orchestrator.UnitTests/Ateliers.Ai.Orchestrator.UnitTests.csproj --configuration Release
+dotnet test tests/Ateliers.Ai.Orchestrator.FakeTests/Ateliers.Ai.Orchestrator.FakeTests.csproj --configuration Release --filter Category=Fake
+dotnet test tests/Ateliers.Ai.Orchestrator.IntegrationTests/Ateliers.Ai.Orchestrator.IntegrationTests.csproj --configuration Release --filter Category=Integration
+dotnet test tests/Ateliers.Slack.UnitTests/Ateliers.Slack.UnitTests.csproj --configuration Release
+dotnet test tests/Ateliers.Slack.FakeTests/Ateliers.Slack.FakeTests.csproj --configuration Release
 ```
 
-実Codex連携を一時Gitリポジトリで確認するIntegrationTestsは、別のxUnitプロジェクトです。通常の `dotnet test`、Visual Studioの全件実行、通常CIでは実Codex連携テストがSkipされ、モデル通信は起動しません。Unit/Fakeテストは通常CIで実行し、ローカル実Gitテストは同じ UnitTests プロジェクト内の `Integration` カテゴリとして分けています。
+実Codex連携とローカルGit CLI連携を確認するIntegrationTestsは、別のxUnitプロジェクトです。通常の `dotnet test`、Visual Studioの全件実行、通常CIでは実Codex連携テストがSkipされ、モデル通信は起動しません。ローカルGit統合テストは外部GitHubへ接続しません。
 
 明示的に実Codexを使う場合は、Windowsのユーザー環境変数に `ATELIERS_RUN_CODEX_INTEGRATION_TESTS=1` と `ATELIERS_CODEX_CLI_PATH=C:\絶対パス\codex.exe` を設定し、認証済みCodex CLIが使える環境でテストを実行してください。Visual Studioを使う場合は、環境変数を設定してからVisual Studioを起動し直し、テストエクスプローラーから個別テストまたは全件を実行します。環境変数が設定されていなければテストはSkipされます。
 
@@ -158,7 +162,7 @@ dotnet test tests/Ateliers.Ai.Orchestrator.UnitTests/Ateliers.Ai.Orchestrator.Un
 dotnet test tests/Ateliers.Ai.Orchestrator.IntegrationTests/Ateliers.Ai.Orchestrator.IntegrationTests.csproj --configuration Release
 ```
 
-opt-in時はImplementerとReviewerを各1回呼び出すため、モデル利用枠や費用が発生する場合があります。Issue #79のfixtureはTestbed WordCounter教材と同じ5チェックを使い、ImplementerのRelease build・チェック結果をReviewerへ渡す証跡を確認します。Testbed本体へ接続・pushせず、Slack通知もこの開発用シナリオでは無効です。テストは一時ディレクトリにGit seed、task contract、実行記録先を作り、成功時に削除します。失敗時はfixtureとrun証跡を保持し、テスト失敗メッセージに保存場所とOrchestratorのstdout/stderrを含めます。`NeedsHumanInput` はCLI標準出力文字列だけに依存せず、永続化された `report.md` と `events.jsonl` の状態遷移・停止イベントで確認します。Implementer/Reviewerの各1回、終了証跡、イベント/report、契約対象ファイルだけの変更、固定差分と最終Git差分、成果物参照先も検証します。原因を確認できていない以前の失敗を成功扱いしません。OSレベルの完全隔離を証明するテストではありません。
+opt-in時はシナリオ内のImplementerとReviewerがCodexを利用するため、モデル利用枠や費用が発生する場合があります。Testbed WordCounter教材と同じ5チェックを一時fixtureで使いますが、IntegrationTestはCodex接続と応答到達だけを合否条件とします。FakeTestsで証跡参照の受け渡しを検証します。Testbed本体へ接続・pushせず、Slack通知も無効です。成功時にfixtureを削除し、失敗時はrun証跡を保持します。ユーザー専用の最終受入E2Eを代替しません。
 
 Testbed、開発用IntegrationTest、ユーザー専用の最終受入E2EとCLI/MCP導入受入の責務は、[開発用IntegrationTestの実行範囲](docs/reference/development-integration-tests.md)を参照してください。
 
@@ -196,25 +200,27 @@ Slack側の準備:
 3. 単体のSlack Bot疎通テスト用には、`Ateliers Test Bot` を作成し、Bot Token Scope `chat:write` を付けてワークスペースへインストールします。Botを同じテストチャンネルへ招待し、`tokens.test-bot` と `bots` 内の `test-bot` 設定もローカルに用意します。
 4. TokenをチャットやPRへ貼り付けたり、Gitへ追加したりしないでください。テスト結果ではToken、設定内容、Slack応答本文を表示しません。
 
-Slack Bot IntegrationTestsは、テストアセンブリの場所からリポジトリルートを特定し、`config/slack.json` と `config/slack.secrets.json` を読み込みます。`ATELIERS_RUN_SLACK_INTEGRATION_TESTS=1` がなければSkipします。Botテストは `test-bot` のTokenで `testChannelId` に1件投稿します。Webhookテストも同じopt-inに加え、`ATELIERS_SLACK_TEST_CHANNEL_NAME=#ateliers-test-notifications` の明示確認がなければSkipします。Webhook URLはこのテストチャンネル専用にしてください。
-
-実Codexと3役のBot通知をまとめて検証する場合は、両方のopt-inを指定します。Codexテストは投稿前に各役割のTokenでSlack `auth.test` を呼び、応答の `user_id` が設定されたBot User IDと一致することを確認します。いずれかが不一致または認証確認に失敗すれば投稿せず、E2Eを失敗として止めます。その後、CodexテストがImplementer→Reviewerを1回ずつ呼び出し、開始・終了・判断待ちイベントを実行記録へ保存し、3役別の通知送信成功数も検証します。通常の `ATELIERS_RUN_CODEX_INTEGRATION_TESTS=1` だけならSlack通知は無効です。
+Slack IntegrationTestsは、テストアセンブリの場所からリポジトリルートを特定し、`config/slack.json` と `config/slack.secrets.json` を読み込みます。`ATELIERS_RUN_SLACK_INTEGRATION_TESTS=1` がなければSkipします。Botテストは `test-bot` のTokenで `testChannelId` に1件投稿します。Webhookテストも同じopt-inに加え、`ATELIERS_SLACK_TEST_CHANNEL_NAME=#ateliers-test-notifications` の明示確認がなければSkipします。Webhook URLはこのテストチャンネル専用にしてください。Slack実接続はSlack IntegrationTestsとして個別に実行し、Codex接続テストとは分けて扱います。
 
 ```text
 dotnet test tests/Ateliers.Slack.IntegrationTests/Ateliers.Slack.IntegrationTests.csproj --configuration Release --filter FullyQualifiedName~SlackBotClientIntegrationTests
 ```
 
-実Codex＋ライフサイクルSlack E2Eは、認証済みCodex CLIを使って一つのImplementer→Reviewerワークフローを実行し、Slackへ最大6件を送ります。PowerShellでは、準備済みの `codex.ps1` の絶対パスを使い、プロセス限定でopt-inして起動できます。
+実Codex IntegrationTestはCodex CLIとの起動・通信・応答到達を確認します。通知引数は `disabled` 固定で、Slackへは送信しません。応答文の内容やReviewerの判断品質は合否条件ではありません。
 
 ```powershell
 $env:ATELIERS_RUN_CODEX_INTEGRATION_TESTS = '1'
 $env:ATELIERS_CODEX_CLI_PATH = 'C:\Users\<user>\AppData\Roaming\npm\codex.ps1'
-$env:ATELIERS_RUN_SLACK_INTEGRATION_TESTS = '1'
-dotnet test tests/Ateliers.Ai.Orchestrator.IntegrationTests/Ateliers.Ai.Orchestrator.IntegrationTests.csproj --configuration Release --filter FullyQualifiedName~RunAsync_ShouldCompleteImplementerReviewerAndPersistNeedsHumanInput
+dotnet test tests/Ateliers.Ai.Orchestrator.IntegrationTests/Ateliers.Ai.Orchestrator.IntegrationTests.csproj --configuration Release --filter FullyQualifiedName~RunAsync_ShouldConnectToCodexAndReceiveResponse
 ```
 
-Codex opt-inだけの場合はSlack送信を無効にします。Slack opt-inがあっても、設定ファイル不足、testChannelId不足、3役のテスト送信先の不一致、通常チャンネルとの一致、Bot User ID重複があればSlack部分をSkipし、通常チャンネルへフォールバックしません。各Tokenの `auth.test` 照合が通らない場合はSlackへ投稿せずE2Eを失敗させます。成功時のCLI出力に送信成功件数が表示され、3役の投稿はSlack検索でも個別に確認できます。
+このコマンドはCodex CLI認証とモデル利用枠を使います。実行前に対象作業と実行条件を確認してください。Slack IntegrationTestsを別途実行する場合は、Slack用のopt-in、テスト専用チャンネル、Bot/Webhook設定を準備し、次のコマンドを使います。
 
-設定ファイルや必須項目が不足している場合は、外部通信せずSkipします。空でないTokenの認証可否とBot User IDとの一致は `auth.test` で確認するため、Slackへの認証確認通信が発生します。Tokenの認証失敗やBot User IDの不一致では、通知投稿をせずテストを失敗させます。Slack Bot疎通テストは投稿前に `auth.test` の `user_id` を `test-bot` の設定IDと照合します。成功時はテストチャンネルにRun ID付きメッセージを投稿し、Slack Web APIの成功応答と投稿先IDを検証します。投稿後、Slackの検索欄で `from:<@U...> in:#ateliers-test-notifications "Slack Web API integration test"`（`U...` は設定したBot User ID）を検索して確認できます。ライフサイクルE2Eも投稿前に3役それぞれのTokenとBot User IDを照合し、投稿は `from:<@U...> in:#ateliers-test-notifications "[Ateliers AI]"` で個別に確認できます。Slackは `from:<@UserID>` 形式をサポートしています。[検索方法](https://api.slack.com/methods/search.messages)
+```powershell
+$env:ATELIERS_RUN_SLACK_INTEGRATION_TESTS = '1'
+dotnet test tests/Ateliers.Slack.IntegrationTests/Ateliers.Slack.IntegrationTests.csproj --configuration Release
+```
+
+Slack IntegrationTestsは投稿前に `auth.test` の `user_id` と設定IDを照合します。設定不足時はSkipし、認証失敗やID不一致では投稿せず失敗します。Botテストの成功時はテストチャンネルにRun ID付きメッセージを投稿し、API成功応答と投稿先IDを検証します。これはSlack API送信の疎通確認であり、Codexとの連携や画面上の到達確認を証明しません。
 
 このBotテストは送信・識別の疎通確認だけを対象とし、AIオーケストレーション連携は行いません。既存のIncoming Webhook、`ATELIERS_SLACK_WEBHOOK_URL` と `ATELIERS_SLACK_TEST_WEBHOOK_URL` も維持します。

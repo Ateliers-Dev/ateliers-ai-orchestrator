@@ -11,5 +11,6 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Ateliers.Ai.Orchestrator.UnitTests" />
+    <InternalsVisibleTo Include="Ateliers.Ai.Orchestrator.FakeTests" />
   </ItemGroup>
 </Project>

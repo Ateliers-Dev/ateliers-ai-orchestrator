@@ -35,8 +35,17 @@ jobs:
       - name: Build solution
         run: dotnet build Ateliers.Ai.Orchestrator.sln --configuration Release --no-restore
 
-      - name: Run Fake-only unit tests
-        run: dotnet test tests/Ateliers.Ai.Orchestrator.UnitTests/Ateliers.Ai.Orchestrator.UnitTests.csproj --configuration Release --no-build --no-restore --filter Category=Unit
+      - name: Run UnitTests
+        run: dotnet test tests/Ateliers.Ai.Orchestrator.UnitTests/Ateliers.Ai.Orchestrator.UnitTests.csproj --configuration Release --no-build --no-restore
 
-      - name: Run Slack unit tests
+      - name: Run Orchestrator FakeTests
+        run: dotnet test tests/Ateliers.Ai.Orchestrator.FakeTests/Ateliers.Ai.Orchestrator.FakeTests.csproj --configuration Release --no-build --no-restore --filter Category=Fake
+
+      - name: Run local IntegrationTests
+        run: dotnet test tests/Ateliers.Ai.Orchestrator.IntegrationTests/Ateliers.Ai.Orchestrator.IntegrationTests.csproj --configuration Release --no-build --no-restore --filter Category=Integration
+
+      - name: Run Slack UnitTests
         run: dotnet test tests/Ateliers.Slack.UnitTests/Ateliers.Slack.UnitTests.csproj --configuration Release --no-build --no-restore
+
+      - name: Run Slack FakeTests
+        run: dotnet test tests/Ateliers.Slack.FakeTests/Ateliers.Slack.FakeTests.csproj --configuration Release --no-build --no-restore

@@ -1,6 +1,7 @@
 using Xunit;
+using Ateliers.Slack.IntegrationTests;
 
-namespace Ateliers.Slack.IntegrationTests;
+namespace Ateliers.Slack.UnitTests;
 
 public sealed class SlackBotSettingsLocatorTests
 {
