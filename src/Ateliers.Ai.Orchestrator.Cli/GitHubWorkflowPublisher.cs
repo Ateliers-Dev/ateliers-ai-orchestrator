@@ -1034,7 +1034,7 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         return path;
     }
 
-    private GitConfigOverlay CreateGitConfigOverlay(string cwd, CancellationToken stopToken)
+    internal GitConfigOverlay CreateGitConfigOverlay(string cwd, CancellationToken stopToken)
     {
         _gitTemporaryDirectory = Path.Combine(Path.GetTempPath(), $"ateliers-orchestrator-git-temp-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_gitTemporaryDirectory);
@@ -1044,7 +1044,11 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         var entries = new List<GitConfigEntry>
         {
             new("credential.https://github.com.helper", string.Empty),
-            new("credential.https://github.com.helper", "!gh auth git-credential")
+            new("credential.https://github.com.helper", "!gh auth git-credential"),
+            // Honor Git for Windows' normal CRLF checkout conversion while keeping other inherited
+            // Git execution settings isolated. Otherwise snapshot blobs retain CRLF and --check
+            // mistakes every carriage return for trailing whitespace.
+            new("core.autocrlf", OperatingSystem.IsWindows() ? "true" : "false")
         };
         foreach (var key in new[] { "user.name", "user.email" })
         {
