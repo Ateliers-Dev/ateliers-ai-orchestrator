@@ -289,8 +289,11 @@ public sealed class CodexIntegrationTests
                     command.GetProperty("command").GetString()!.Contains("dotnet build", StringComparison.Ordinal));
                 var checksCommand = Assert.Single(validationCommands, command =>
                     command.GetProperty("command").GetString()!.Contains("dotnet run", StringComparison.Ordinal));
-                var buildLog = await File.ReadAllTextAsync(Path.Combine(Path.GetDirectoryName(validationPath)!, buildCommand.GetProperty("logReference").GetString()!));
-                var checksLog = await File.ReadAllTextAsync(Path.Combine(Path.GetDirectoryName(validationPath)!, checksCommand.GetProperty("logReference").GetString()!));
+                var validationDirectory = Path.GetDirectoryName(validationPath)!;
+                var buildLogPath = ResolveValidationReference(validationDirectory, buildCommand.GetProperty("logReference").GetString()!);
+                var checksLogPath = ResolveValidationReference(validationDirectory, checksCommand.GetProperty("logReference").GetString()!);
+                var buildLog = await File.ReadAllTextAsync(buildLogPath);
+                var checksLog = await File.ReadAllTextAsync(checksLogPath);
                 Assert.True(buildLog.Contains("Build succeeded", StringComparison.OrdinalIgnoreCase) ||
                     buildLog.Contains("ビルドに成功", StringComparison.Ordinal), "Release buildの成功をログで確認できません。");
                 Assert.Contains("All word-count checks passed.", checksLog, StringComparison.Ordinal);
@@ -496,6 +499,28 @@ public sealed class CodexIntegrationTests
         var path = Path.GetFullPath(Path.Combine(runDirectory, reference.Replace('/', Path.DirectorySeparatorChar)));
         var root = Path.GetFullPath(runDirectory) + Path.DirectorySeparatorChar;
         Assert.True(path.StartsWith(root, StringComparison.OrdinalIgnoreCase), $"実行記録の参照がrunディレクトリ外を指しています: {reference}");
+        return path;
+    }
+
+    private static string ResolveValidationReference(string validationDirectory, string reference)
+    {
+        var normalizedReference = reference.Replace('\\', '/');
+        var segments = normalizedReference.Split('/', StringSplitOptions.None);
+        Assert.False(Path.IsPathRooted(reference) || segments.Any(segment => segment is "" or "." or ".."),
+            $"検証証跡のログ参照が相対ファイル名ではありません: {reference}");
+        var path = Path.GetFullPath(Path.Combine(validationDirectory, normalizedReference.Replace('/', Path.DirectorySeparatorChar)));
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(validationDirectory)) + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        Assert.True(path.StartsWith(root, comparison), "検証証跡ログの参照がvalidation directory外です。");
+
+        var current = Path.GetFullPath(validationDirectory);
+        foreach (var segment in segments)
+        {
+            current = Path.Combine(current, segment);
+            Assert.False((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0,
+                "検証証跡ログの参照先にリンクを含められません。");
+        }
+        Assert.True(File.Exists(path), "検証証跡ログの参照先がありません。");
         return path;
     }
 
