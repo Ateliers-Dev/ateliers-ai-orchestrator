@@ -154,7 +154,7 @@ dotnet test tests/Ateliers.Slack.UnitTests/Ateliers.Slack.UnitTests.csproj --con
 dotnet test tests/Ateliers.Slack.FakeTests/Ateliers.Slack.FakeTests.csproj --configuration Release
 ```
 
-実Codex連携とローカルGit CLI連携を確認するIntegrationTestsは、別のxUnitプロジェクトです。通常の `dotnet test`、Visual Studioの全件実行、通常CIでは実Codex連携テストがSkipされ、モデル通信は起動しません。ローカルGit統合テストは外部GitHubへ接続しません。
+実Codex連携を確認するIntegrationTestsは、別のxUnitプロジェクトです。通常の `dotnet test`、Visual Studioの全件実行、通常CIではopt-inがないためテストはSkipされ、モデル通信は起動しません。隔離repoでローカルGit CLIだけを使う決定論的な回帰テストはFakeTestsに分類し、GitHubへ接続しません。
 
 明示的に実Codexを使う場合は、Windowsのユーザー環境変数に `ATELIERS_RUN_CODEX_INTEGRATION_TESTS=1` と `ATELIERS_CODEX_CLI_PATH=C:\絶対パス\codex.exe` を設定し、認証済みCodex CLIが使える環境でテストを実行してください。Visual Studioを使う場合は、環境変数を設定してからVisual Studioを起動し直し、テストエクスプローラーから個別テストまたは全件を実行します。環境変数が設定されていなければテストはSkipされます。
 
