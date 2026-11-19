@@ -1644,18 +1644,28 @@ static void CodexChildEnvironmentFiltersSecrets()
 {
     var original = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
     var originalProxy = Environment.GetEnvironmentVariable("HTTPS_PROXY");
-    Environment.SetEnvironmentVariable("OPENAI_API_KEY", "fixture-secret-do-not-forward");
-    Environment.SetEnvironmentVariable("HTTPS_PROXY", "http://fixture-proxy.invalid:8080");
-    var (runner, request, root) = CreateCodexFixture("success");
     try
     {
+        Environment.SetEnvironmentVariable("OPENAI_API_KEY", "fixture-secret-do-not-forward");
+        Environment.SetEnvironmentVariable("HTTPS_PROXY", "http://fixture-proxy.invalid:8080");
+        var (runner, request, root) = CreateCodexFixture("success");
         using (root)
         {
             var response = runner.Implement(request);
             Assert.True(response.Succeeded);
-            var rawEvents = File.ReadAllText(Path.Combine(request.RunDirectory!, response.ExecutionEvidence!.StandardOutputReference!));
-            Assert.True(rawEvents.Contains("\"openai_key_present\":false", StringComparison.Ordinal), "親環境のAPI keyがFake childへ継承されました。");
-            Assert.True(rawEvents.Contains("\"https_proxy_present\":true", StringComparison.Ordinal), "親環境のHTTPS proxy設定がFake childへ継承されませんでした。");
+            var stdoutPath = Path.Combine(request.RunDirectory!, response.ExecutionEvidence!.StandardOutputReference!);
+            var environmentEvents = new List<(bool OpenAiKeyPresent, bool HttpsProxyPresent)>();
+            foreach (var line in File.ReadLines(stdoutPath))
+            {
+                using var document = JsonDocument.Parse(line);
+                var environment = document.RootElement;
+                if (environment.GetProperty("type").GetString() != "fixture.environment") continue;
+                environmentEvents.Add((environment.GetProperty("openai_key_present").GetBoolean(),
+                    environment.GetProperty("https_proxy_present").GetBoolean()));
+            }
+            Assert.Equal(1, environmentEvents.Count, "Fake childの環境観測イベントが1件ではありません。");
+            Assert.False(environmentEvents[0].OpenAiKeyPresent, "親環境のAPI keyがFake childへ継承されました。");
+            Assert.True(environmentEvents[0].HttpsProxyPresent, "親環境のHTTPS proxy設定がFake childへ継承されませんでした。");
         }
     }
     finally

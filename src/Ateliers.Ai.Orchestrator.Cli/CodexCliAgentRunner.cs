@@ -14,7 +14,7 @@ internal sealed class CodexCliAgentRunner : IAgentRunner, IPullRequestWorkflowAg
     private static readonly Regex PrivateKeyBlock = new("-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----", RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly Regex KnownToken = new(@"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})\b", RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly Regex BearerCredential = new(@"(?i)\bBearer\s+[A-Za-z0-9._~+/-]+=*", RegexOptions.CultureInvariant | RegexOptions.Compiled);
-    private static readonly Regex SecretAssignment = new(@"(?i)(?<key>""?(?=[A-Za-z0-9_-]*(?:key|token|secret|password|passwd|credential|authorization)""?)[A-Za-z][A-Za-z0-9_-]{0,80}""?)\s*(?<separator>[:=])\s*(?:""(?:\\.|[^""\\])*""|'[^']*'|[^\s,;}\]]+)", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex SecretAssignment = new(@"(?i)(?<key>""?(?=[A-Za-z0-9_-]*(?:key|token|secret|password|passwd|credential|authorization)""?)[A-Za-z][A-Za-z0-9_-]{0,80}""?)\s*(?<separator>[:=])\s*(?!(?:true|false|null)(?=$|[\s,;}\]]))(?:""(?:\\.|[^""\\])*""|'[^']*'|[^\s,;}\]]+)", RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly Regex SecretFlagArgument = new(@"(?i)(?<flag>--?[A-Za-z0-9_-]*(?:key|token|secret|password|passwd|credential|authorization)[A-Za-z0-9_-]*)(?<spacing>\s+)(?:""(?:\\.|[^""\\])*""|'[^']*'|[^\s,;]+)", RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly Regex UrlCredential = new(@"(?i)\bhttps?://[^/@:\s]+:[^/@\s]+@", RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private readonly CodexCliRunnerOptions options;
