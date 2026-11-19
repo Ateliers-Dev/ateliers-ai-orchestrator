@@ -3,7 +3,7 @@ namespace Ateliers.Ai.Orchestrator.Core;
 /// <summary>公開処理の失敗時に記録できる、秘密情報を含まない固定診断です。</summary>
 public sealed record WorkflowPublicationDiagnostic(string Stage, string ReasonCode, string ExceptionType,
     int? ExitCode = null, bool? StandardOutputPresent = null, int? StandardOutputLength = null,
-    bool? StandardErrorPresent = null, int? StandardErrorLength = null);
+    bool? StandardErrorPresent = null, int? StandardErrorLength = null, string? SafeStatusSummary = null);
 
 /// <summary>公開処理の失敗を安全な診断情報とともに伝えます。</summary>
 public sealed class WorkflowPublicationFailureException : InvalidOperationException
@@ -20,7 +20,7 @@ public interface IPullRequestWorkflowAgentRunner { }
 /// <summary>GitHub提出開始前の失敗を、秘密情報を含まない段階・分類で示します。</summary>
 public sealed class WorkflowPreflightException(string stage, string reason, string exceptionType = "WorkflowPreflightException",
     int? exitCode = null, bool? standardOutputPresent = null, int? standardOutputLength = null,
-    bool? standardErrorPresent = null, int? standardErrorLength = null)
+    bool? standardErrorPresent = null, int? standardErrorLength = null, string? safeStatusSummary = null)
     : InvalidOperationException("GitHub公開の事前確認に失敗しました。詳細出力は記録していません。")
 {
     public string Stage { get; } = stage;
@@ -31,6 +31,8 @@ public sealed class WorkflowPreflightException(string stage, string reason, stri
     public int? StandardOutputLength { get; } = standardOutputLength;
     public bool? StandardErrorPresent { get; } = standardErrorPresent;
     public int? StandardErrorLength { get; } = standardErrorLength;
+    /// <summary>Git statusの本文・パスを含めない状態コード集計。clean-checkout診断専用です。</summary>
+    public string? SafeStatusSummary { get; } = safeStatusSummary;
 }
 
 /// <summary>GitHub提出を行う一実行の固定情報です。</summary>

@@ -769,7 +769,9 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                 "invalid-path-or-argument" => "invalid-input",
                 _ => "operation-rejected"
             };
-            return new WorkflowPublicationDiagnostic(preflight.Stage, preflightReason, preflight.ExceptionType);
+            return new WorkflowPublicationDiagnostic(preflight.Stage, preflightReason, preflight.ExceptionType,
+                preflight.ExitCode, preflight.StandardOutputPresent, preflight.StandardOutputLength,
+                preflight.StandardErrorPresent, preflight.StandardErrorLength, preflight.SafeStatusSummary);
         }
         var reason = exception switch
         {
@@ -792,7 +794,8 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
           $"stdoutPresent={diagnostic.StandardOutputPresent?.ToString().ToLowerInvariant() ?? "未取得"}; " +
           $"stdoutLength={diagnostic.StandardOutputLength?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "未取得"}; " +
           $"stderrPresent={diagnostic.StandardErrorPresent?.ToString().ToLowerInvariant() ?? "未取得"}; " +
-          $"stderrLength={diagnostic.StandardErrorLength?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "未取得"}";
+          $"stderrLength={diagnostic.StandardErrorLength?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "未取得"}" +
+          (diagnostic.SafeStatusSummary is null ? string.Empty : $"; statusSummary={diagnostic.SafeStatusSummary}");
 
     private static string Outcome(AgentResponse response) => response.TimedOut ? "timeout" : response.StopRequested ? "stop_requested" :
         !response.Succeeded ? "failed" : string.IsNullOrWhiteSpace(response.Content) ? "empty" : "completed";
