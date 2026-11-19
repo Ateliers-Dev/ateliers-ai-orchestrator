@@ -299,9 +299,9 @@ public sealed class CodexIntegrationTests
                 Assert.Contains("All word-count checks passed.", checksLog, StringComparison.Ordinal);
 
                 var reviewerRequestPath = Path.Combine(runDirectory, "exchanges", "reviewer-1", "request.json");
-                var reviewerRequest = await File.ReadAllTextAsync(reviewerRequestPath);
-                Assert.Contains("implementer-validation-evidence", reviewerRequest, StringComparison.Ordinal);
-                Assert.Contains("All word-count checks passed.", reviewerRequest, StringComparison.Ordinal);
+                using var reviewerRequestDocument = JsonDocument.Parse(await File.ReadAllBytesAsync(reviewerRequestPath));
+                Assert.Equal("exchanges/implementer-1/validation/validation-evidence.json",
+                    reviewerRequestDocument.RootElement.GetProperty("validationEvidenceReference").GetString());
                 var reviewerOutputPath = ResolveRunReference(runDirectory, reviewerCalls[0].GetProperty("outputReference").GetString()!);
                 var reviewerResponse = await File.ReadAllTextAsync(reviewerOutputPath);
                 Assert.Contains("build", reviewerResponse, StringComparison.OrdinalIgnoreCase);

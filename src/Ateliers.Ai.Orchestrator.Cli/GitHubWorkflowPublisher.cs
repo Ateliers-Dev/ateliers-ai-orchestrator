@@ -11,10 +11,15 @@ namespace Ateliers.Ai.Orchestrator.Cli;
 public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
 {
     private static readonly AsyncLocal<PublicationDiagnosticContext?> CurrentDiagnostic = new();
+    private readonly string ghExecutable;
     private readonly string _safeHooksPath = CreateSafeHooksPath();
     private GitConfigOverlay? _gitConfigOverlay;
     private string? _gitTemporaryDirectory;
     private CancellationToken _activeStopToken;
+
+    public GitHubWorkflowPublisher() : this("gh") { }
+
+    internal GitHubWorkflowPublisher(string ghExecutable) => this.ghExecutable = ghExecutable;
     private static readonly Regex SecretPath = new(
         @"(^|/)(\.env($|\.)|\.ssh/|id_rsa($|\.)|id_ed25519($|\.)|secrets?([._-]|$)|credentials?([._-]|$)|.*\.(pem|p12|pfx|key)$)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
@@ -57,11 +62,16 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
                 throw new WorkflowPreflightException(stage, "filter-attributed-paths-unsupported-under-isolation");
             stage = "clean-checkout";
             SetStage(stage);
-            var checkoutStatus = Git(root, "status", "--porcelain=v1", "--untracked-files=all");
+            var statusStartedAt = DateTimeOffset.UtcNow;
+            var checkoutStatus = Git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"], stopToken,
+                captureStandardOutputByteLength: true);
+            var statusSummary = SummarizeGitStatusOutput(checkoutStatus.Output, checkoutStatus.StandardOutputByteLength!.Value,
+                statusStartedAt, DateTimeOffset.UtcNow);
             if (!string.IsNullOrWhiteSpace(checkoutStatus.Output))
                 throw new WorkflowPreflightException(stage, "dirty-checkout", exitCode: checkoutStatus.ExitCode,
                     standardOutputPresent: checkoutStatus.Output.Length > 0, standardOutputLength: checkoutStatus.Output.Length,
-                    standardErrorPresent: checkoutStatus.Error.Length > 0, standardErrorLength: checkoutStatus.Error.Length);
+                    standardErrorPresent: checkoutStatus.Error.Length > 0, standardErrorLength: checkoutStatus.Error.Length,
+                    safeStatusSummary: JsonSerializer.Serialize(statusSummary));
 
             // gh handles API authentication; Git push uses the configured credential helper. Neither output is persisted.
             stage = "github-authentication";
@@ -680,6 +690,30 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
 
     internal sealed record UnsafeGitConfigEntry(string Key, string Source);
 
+    internal sealed record SafeGitStatusSummary(long Utf8ByteLength, int Utf16CodeUnitLength, int RecordCount,
+        IReadOnlyDictionary<string, int> StatusCodeCounts, DateTimeOffset ObservedAtStartUtc, DateTimeOffset ObservedAtEndUtc);
+
+    internal static SafeGitStatusSummary SummarizeGitStatusOutput(string output, long outputByteLength,
+        DateTimeOffset startedAtUtc, DateTimeOffset completedAtUtc)
+    {
+        var records = output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+        var counts = new SortedDictionary<string, int>(StringComparer.Ordinal);
+        var recordCount = 0;
+        for (var index = 0; index < records.Length; index++)
+        {
+            var record = records[index];
+            if (record.Length < 3 || record[2] != ' ')
+                continue;
+            var statusCode = record[..2];
+            counts[statusCode] = counts.GetValueOrDefault(statusCode) + 1;
+            recordCount++;
+            if (statusCode.Contains('R') || statusCode.Contains('C')) index++;
+        }
+
+        return new SafeGitStatusSummary(outputByteLength, output.Length, recordCount, counts,
+            startedAtUtc, completedAtUtc);
+    }
+
     internal sealed record GitConfigEntry(string Key, string Value);
     internal sealed record GitConfigOverlay(IReadOnlyList<GitConfigEntry> Entries);
 
@@ -888,17 +922,17 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
     private ProcessResult Git(string cwd, params string[] args) => Git(cwd, args, _activeStopToken);
 
     private ProcessResult Git(string cwd, string[] args, CancellationToken stopToken, byte[]? standardInput = null,
-        string? indexFile = null)
+        string? indexFile = null, bool captureStandardOutputByteLength = false)
     {
         EnsureSafeGitExecutionContext();
         return Run("git", cwd,
             ["-c", $"core.hooksPath={_safeHooksPath}", "-c", "commit.gpgsign=false", .. args],
             gitConfigOverlay: _gitConfigOverlay, stopToken: stopToken, standardInput: standardInput,
-            isolatedGitIndexPath: indexFile);
+            isolatedGitIndexPath: indexFile, captureStandardOutputByteLength: captureStandardOutputByteLength);
     }
-    private ProcessResult Gh(string cwd, params string[] args) => Run("gh", cwd, args, stopToken: _activeStopToken);
+    private ProcessResult Gh(string cwd, params string[] args) => Run(ghExecutable, cwd, args, stopToken: _activeStopToken);
     private ProcessResult Gh(string cwd, byte[] standardInput, params string[] args) =>
-        Run("gh", cwd, args, stopToken: _activeStopToken, standardInput: standardInput);
+        Run(ghExecutable, cwd, args, stopToken: _activeStopToken, standardInput: standardInput);
     private static ProcessResult Gh(string cwd, string[] args, CancellationToken stopToken) => Run("gh", cwd, args, stopToken: stopToken);
 
     private static T ExecuteWithDiagnostics<T>(string initialStage, Func<T> action)
@@ -919,7 +953,7 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
             throw new WorkflowPublicationFailureException(new WorkflowPublicationDiagnostic(
                 exception.Stage, MapPreflightReason(exception.Reason), exception.ExceptionType,
                 exception.ExitCode, exception.StandardOutputPresent, exception.StandardOutputLength,
-                exception.StandardErrorPresent, exception.StandardErrorLength));
+                exception.StandardErrorPresent, exception.StandardErrorLength, exception.SafeStatusSummary));
         }
         catch (WorkflowPublicationFailureException)
         {
@@ -1000,7 +1034,7 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         return path;
     }
 
-    private GitConfigOverlay CreateGitConfigOverlay(string cwd, CancellationToken stopToken)
+    internal GitConfigOverlay CreateGitConfigOverlay(string cwd, CancellationToken stopToken)
     {
         _gitTemporaryDirectory = Path.Combine(Path.GetTempPath(), $"ateliers-orchestrator-git-temp-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_gitTemporaryDirectory);
@@ -1010,7 +1044,11 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
         var entries = new List<GitConfigEntry>
         {
             new("credential.https://github.com.helper", string.Empty),
-            new("credential.https://github.com.helper", "!gh auth git-credential")
+            new("credential.https://github.com.helper", "!gh auth git-credential"),
+            // Honor Git for Windows' normal CRLF checkout conversion while keeping other inherited
+            // Git execution settings isolated. Otherwise snapshot blobs retain CRLF and --check
+            // mistakes every carriage return for trailing whitespace.
+            new("core.autocrlf", OperatingSystem.IsWindows() ? "true" : "false")
         };
         foreach (var key in new[] { "user.name", "user.email" })
         {
@@ -1089,7 +1127,8 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
 
     internal static ProcessResult Run(string executable, string cwd, IReadOnlyList<string> args,
         bool allowExitCodeOne = false, GitConfigOverlay? gitConfigOverlay = null, bool isolateGitConfig = false,
-        CancellationToken stopToken = default, byte[]? standardInput = null, string? isolatedGitIndexPath = null)
+        CancellationToken stopToken = default, byte[]? standardInput = null, string? isolatedGitIndexPath = null,
+        bool captureStandardOutputByteLength = false)
     {
         var info = new ProcessStartInfo(executable) { WorkingDirectory = cwd, UseShellExecute = false,
             RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = standardInput is not null, CreateNoWindow = true };
@@ -1111,7 +1150,12 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
             throw new PublicationCommandException("process-start-failed", exception.GetType().Name);
         }
         if (!started) throw new PublicationCommandException("process-start-failed", "ProcessStartReturnedFalse");
-        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stdoutByteCounter = captureStandardOutputByteLength ? new ByteCountingReadStream(process.StandardOutput.BaseStream) : null;
+        using var countedStdoutReader = stdoutByteCounter is null
+            ? null
+            : new StreamReader(stdoutByteCounter, Encoding.Default, detectEncodingFromByteOrderMarks: true);
+        var stdoutReader = countedStdoutReader ?? process.StandardOutput;
+        var stdout = stdoutReader.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
         try
         {
@@ -1150,8 +1194,52 @@ public sealed class GitHubWorkflowPublisher : IWorkflowPublisher, IDisposable
                 "ProcessExitNonZero", process.ExitCode,
                 stdout.Result.Length > 0, stdout.Result.Length,
                 stderr.Result.Length > 0, stderr.Result.Length);
-        return new ProcessResult(stdout.Result, stderr.Result, process.ExitCode);
+        return new ProcessResult(stdout.Result, stderr.Result, process.ExitCode, stdoutByteCounter?.BytesRead);
     }
 
-    internal sealed record ProcessResult(string Output, string Error, int ExitCode);
+    private sealed class ByteCountingReadStream(Stream inner) : Stream
+    {
+        private long bytesRead;
+        public long BytesRead => Interlocked.Read(ref bytesRead);
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var read = inner.Read(buffer, offset, count);
+            Interlocked.Add(ref bytesRead, read);
+            return read;
+        }
+        public override int Read(Span<byte> buffer)
+        {
+            var read = inner.Read(buffer);
+            Interlocked.Add(ref bytesRead, read);
+            return read;
+        }
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var read = await inner.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            Interlocked.Add(ref bytesRead, read);
+            return read;
+        }
+        public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            var read = await inner.ReadAsync(buffer, offset, count, cancellationToken).ConfigureAwait(false);
+            Interlocked.Add(ref bytesRead, read);
+            return read;
+        }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) inner.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
+    internal sealed record ProcessResult(string Output, string Error, int ExitCode, long? StandardOutputByteLength);
 }

@@ -52,7 +52,7 @@ E2EのSlack通知モードは `-SlackNotifications disabled|test|auto` で明示
 
 通知モードを明示したE2Eでは、Slack送信成功件数とrun IDの到達確認が必要です。成功を確認できない場合は、PR等の証跡があっても不合格です。確認文には選択したモードと送信先チャンネルIDが含まれます。
 
-例: テスト用チャンネルに送る場合は `-SlackNotifications test`、通常通知先へ送る場合は `-SlackNotifications auto` を実Codex起動前の準備確認後に指定します。実行スクリプトの既定モードは `disabled` です。
+TestbedレビューサイクルでSlack通知ONが指定された実行では、`-SlackNotifications test` を明示します。これは設定済み `testChannelId` への送信を選びます。通常通知先を使う `auto` はユーザーが明示した場合だけ選びます。Slack設定やBot認証が不足している場合はSlack ONのまま準備阻害として報告し、`disabled` へ切り替えません。スクリプトの一般既定値は `disabled` のため、このシナリオで通知を有効にする際は明示指定が必要です。
 
 実行は一意な一時cloneと専用作業ブランチを使います。PR作成、Reviewer結果コメント、head/base SHA、GitHub上のPRがOPENでbaseがmainであることを確認しない限り、合格を表示しません。`test` または `auto` のときはSlack送信と人間による到達確認も追加の合格条件です。自動マージはしません。PRは人間の確認後も開いたままにし、Testbed `main` へマージしません。
 
