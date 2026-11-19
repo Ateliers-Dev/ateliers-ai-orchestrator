@@ -181,6 +181,7 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("Fake CodexプロセスのJSONL・stderr・usage・未知eventを別々に記録する", CodexProcessCapturesJsonlAndSeparatesStreams);
     suite.Add("Reviewerは固定成果物のSHA-256不一致で起動しない", ReviewerRejectsChangedFixedArtifact);
     suite.Add("Codex標準入力で日本語プロンプトをUTF-8のまま渡す", CodexPromptIsPassedAsUtf8);
+    suite.Add("形式不正後の再試行指示だけがReviewer promptへ含まれる", CodexReviewFormatRetryPromptIsExplicit);
     if (OperatingSystem.IsWindows())
         suite.Add("npm codex.cmdとcodex.ps1 shimで日本語プロンプトを渡す", CodexNpmShimsReceiveUtf8Prompt);
     suite.Add("Fake Codex実行でkill処理とCLI版確認が起動しない", CodexVersionProbeKillFailureIsRecorded);
@@ -1209,6 +1210,7 @@ static int FakeCodexFixture(string[] args)
             scope_included = included,
             scope_excluded = excluded,
             os_boundary_disclaimed = prompt.Contains("作業範囲はAgentへの指示であり、OSレベルで範囲外アクセスを完全に防ぐ保証ではありません。", StringComparison.Ordinal),
+            review_format_retry_present = prompt.Contains("前のReviewer試行は応答形式を検証できませんでした。", StringComparison.Ordinal),
             utf8_bom_present = promptBytes.AsSpan().StartsWith(Encoding.UTF8.GetPreamble())
         };
         Console.WriteLine($"{{\"type\":\"fixture.prompt_policy\",\"policy\":{JsonSerializer.Serialize(policy)}}}");
@@ -1461,6 +1463,37 @@ static void CodexPromptIsPassedAsUtf8()
         Assert.True(output.Contains("\"utf8_bom_present\":false", StringComparison.Ordinal),
             "Codex子プロセスの標準入力にUTF-8 BOMが含まれていました。");
     }
+}
+
+static void CodexReviewFormatRetryPromptIsExplicit()
+{
+    static bool HasFormatRetryInstruction(bool isFormatRetry)
+    {
+        var (runner, baseRequest, root) = CreateCodexFixture("success");
+        using (root)
+        {
+            var artifactDirectory = Path.Combine(baseRequest.RunDirectory!, "artifacts");
+            Directory.CreateDirectory(artifactDirectory);
+            var artifactPath = Path.Combine(artifactDirectory, "review.patch");
+            var artifactBytes = Encoding.UTF8.GetBytes("fixed review artifact\n");
+            File.WriteAllBytes(artifactPath, artifactBytes);
+            var request = baseRequest with
+            {
+                Role = "Reviewer",
+                Attempt = 2,
+                ArtifactReference = Path.Combine("artifacts", "review.patch"),
+                ArtifactSha256 = Convert.ToHexStringLower(SHA256.HashData(artifactBytes)),
+                ReviewFormatRetry = isFormatRetry
+            };
+            var response = runner.Review(request);
+            Assert.True(response.Succeeded, response.ExecutionEvidence?.Error ?? "Fake Reviewer runが成功しませんでした。");
+            var output = File.ReadAllText(Path.Combine(request.RunDirectory!, response.ExecutionEvidence!.StandardOutputReference!));
+            return output.Contains("\"review_format_retry_present\":true", StringComparison.Ordinal);
+        }
+    }
+
+    Assert.False(HasFormatRetryInstruction(false), "形式不正ではない通常再レビューに、形式再試行の説明が含まれました。");
+    Assert.True(HasFormatRetryInstruction(true), "形式不正後の再試行に専用説明が含まれていません。");
 }
 
 static void CodexNpmShimsReceiveUtf8Prompt()
