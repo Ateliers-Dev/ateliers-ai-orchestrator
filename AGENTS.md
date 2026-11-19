@@ -137,3 +137,13 @@ Milestone 1で委譲されたIssueの作業では、Issueの範囲と上位の�
 - WindowsではUnix modeに依存する所定のテストがxUnitのSkipとして表示される。失敗とSkipを分けて報告する。
 - 他のテストプロジェクトやテスト種別には、このコマンドを流用せず、該当する CI 定義を確認する。
 
+### Testbed・IntegrationTest・最終受入E2Eの責務
+
+- `scripts/e2e/run-codex-e2e.ps1` とそのTestbedシナリオは、ユーザー本人が実施する最終受入用です。開発ワーカーは準備確認・実行ともに呼び出しません。
+- このスクリプトはソースからRelease構成のCLIをbuildして直接起動します。インストール済みCLIやMCPの導入・接続確認は別の受入対象です。
+- TestbedはE2E専用ではありません。IntegrationTestではTestbedのシナリオ・教材をローカルの隔離Git fixtureに再利用し、検証後に外部GitHubへpushしません。
+- 開発用の実Codex IntegrationTestは専用の `Ateliers.Ai.Orchestrator.IntegrationTests` プロジェクトでのみ明示opt-inして実行します。実Codex CLI認証とモデル利用枠/費用が必要です。Codexが未起動、証跡不足、またはReviewerが未確認の場合は未検証として扱い、最終受入E2Eで代替しません。
+- Issue #79の実Codex IntegrationTestでは、ImplementerのRelease buildと教材チェックのコマンド・自己申告終了コード・ログ参照をReviewerへ渡し、実在するログ内容とReviewer判定を確認します。CI Fake/契約テストはこの実Codex検証を代替しません。
+- Slack通知は、Unit/FakeではFakeを使い、Slack実APIを検証対象とする場合だけ独立した明示opt-inのSlack IntegrationTestで送信します。Issue #79の開発用実Codex IntegrationTestは通知OFFを今回の承認済みシナリオとして実行します。別の実行でSlackがON指定されている場合にワーカーが独断でOFFへ変更してはいけません。
+- Slack API送信成功の確認と、Slack画面上で人間が到達・見え方を確認することは別の受入条件です。画面確認はユーザーが最終受入で行います。
+

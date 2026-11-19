@@ -9,5 +9,6 @@
 - [CLI インストーラー技術仕様](cli-installer.md)
 - [STDIO MCP 技術仕様・導入手順](stdio-mcp.md)
 - [ImplementerからReviewerへの検証証跡](implementer-reviewer-validation-evidence.md)
+- [開発用IntegrationTest](development-integration-tests.md)
 
 新しい文書の種類や分類を追加・変更するときは、この README も併せて更新してください。

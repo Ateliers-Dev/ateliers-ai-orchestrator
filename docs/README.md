@@ -11,6 +11,7 @@
 - [requirements/](requirements/): 合意・承認された要求仕様
 - [reference/](reference/): 実装の仕様、導入・操作手順、E2E手順
   - [ImplementerからReviewerへの検証証跡](reference/implementer-reviewer-validation-evidence.md): 実装担当のビルド・テスト記録とレビューへの引き渡し
+  - [開発用IntegrationTest](reference/development-integration-tests.md): Testbed再利用、実Codex opt-in、最終受入E2Eとの責務分担
 - [reports/](reports/): 作業・検証の結果と証跡。Milestone 1は[reports/milestone-1/](reports/milestone-1/)を参照
 - このフォルダ直下: 複数の分類に関わる共通方針・ゲート
 - [guidelines/](guidelines/README.md): 運用・開発におけるガイドライン
