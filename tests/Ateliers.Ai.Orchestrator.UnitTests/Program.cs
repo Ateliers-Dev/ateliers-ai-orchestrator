@@ -133,6 +133,8 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("PublisherはGit設定・SSH実行環境を隔離しローカルfilter等を拒否する", PublisherIsolatesInheritedGitConfigAndRejectsLocalFilters);
     suite.Add("Publisher失敗は固定段階・理由コード・例外型だけを返す", PublisherFailureDiagnosticIsStructuredAndSanitized);
     suite.Add("Publisherはdirty checkoutをGitプロセス失敗と区別する", PublisherClassifiesDirtyCheckout);
+    suite.Add("Publisher Startはclean checkoutを通過しFake ghで外部通信なく停止する", PublisherStartPassesCleanCheckoutWithFakeGh);
+    suite.Add("PublisherのGit status要約はパスを含めず状態コードとbyte/文字長を保持する", PublisherGitStatusSummaryIsSafeAndStructured);
     suite.Add("PublisherはGit非ゼロ・外部コマンド出力統計・起動失敗を安全に区別する", PublisherClassifiesCommandFailuresSafely);
     suite.Add("公開診断の終了コードと出力統計をJSONLへ安全に保存する", PublicationProcessMetadataIsPersistedWithoutOutput);
     suite.Add("PublisherはPR証跡の保存確認後にpendingだけを削除する", PublisherPersistsVerifiedPrEvidenceBeforeRemovingPending);
@@ -439,6 +441,63 @@ static void PublisherClassifiesDirtyCheckout()
     Assert.Equal(true, exception.Diagnostic.StandardOutputPresent);
     Assert.True(exception.Diagnostic.StandardOutputLength > 0);
     Assert.False(exception.ToString().Contains("private-dirty-marker", StringComparison.Ordinal));
+    Assert.True(exception.Diagnostic.SafeStatusSummary is not null);
+    Assert.False(exception.Diagnostic.SafeStatusSummary!.Contains("private-dirty-marker", StringComparison.Ordinal));
+    using var summaryDocument = JsonDocument.Parse(exception.Diagnostic.SafeStatusSummary!);
+    var summaryRoot = summaryDocument.RootElement;
+    Assert.Equal(exception.Diagnostic.StandardOutputLength, summaryRoot.GetProperty("Utf16CodeUnitLength").GetInt32());
+    Assert.Equal((long)exception.Diagnostic.StandardOutputLength!.Value, summaryRoot.GetProperty("Utf8ByteLength").GetInt64(),
+        "ASCII-only fixtureのstdoutでbyte lengthとUTF-16 code unit数が一致しませんでした。");
+    Assert.Equal(1, summaryRoot.GetProperty("RecordCount").GetInt32());
+    Assert.Equal(1, summaryRoot.GetProperty("StatusCodeCounts").GetProperty("??").GetInt32());
+}
+
+static void PublisherGitStatusSummaryIsSafeAndStructured()
+{
+    const string privatePath = "?? 秘密🚩-path-with-newline\nsecond-line\0";
+    const string status = privatePath + " M tracked.txt\0R  renamed.txt\0old-name.txt\0";
+    var started = DateTimeOffset.Parse("2026-11-19T01:02:03Z");
+    var completed = started.AddMilliseconds(12);
+    var summary = GitHubWorkflowPublisher.SummarizeGitStatusOutput(status, Encoding.UTF8.GetByteCount(status), started, completed);
+
+    Assert.Equal(3, summary.RecordCount);
+    Assert.Equal(3, summary.StatusCodeCounts.Count);
+    Assert.Equal(1, summary.StatusCodeCounts["??"]);
+    Assert.Equal(1, summary.StatusCodeCounts[" M"]);
+    Assert.Equal(1, summary.StatusCodeCounts["R "]);
+    Assert.Equal(status.Length, summary.Utf16CodeUnitLength);
+    Assert.Equal(Encoding.UTF8.GetByteCount(status), summary.Utf8ByteLength);
+    Assert.True(summary.Utf8ByteLength > summary.Utf16CodeUnitLength);
+    Assert.Equal(started, summary.ObservedAtStartUtc);
+    Assert.Equal(completed, summary.ObservedAtEndUtc);
+    Assert.False(JsonSerializer.Serialize(summary).Contains("秘密", StringComparison.Ordinal));
+    Assert.False(JsonSerializer.Serialize(summary).Contains("tracked.txt", StringComparison.Ordinal));
+}
+
+static void PublisherStartPassesCleanCheckoutWithFakeGh()
+{
+    using var temp = new TemporaryDirectory();
+    var repository = Path.Combine(temp.Path, "clean-repository");
+    Directory.CreateDirectory(repository);
+    RunGitFixture(repository, "init", "-q");
+    RunGitFixture(repository, "remote", "add", "origin", "https://github.com/Ateliers-Dev/test.git");
+
+    var fakeBin = Path.Combine(temp.Path, "fake-bin");
+    Directory.CreateDirectory(fakeBin);
+    var fakeGh = Path.Combine(fakeBin, OperatingSystem.IsWindows() ? "gh.cmd" : "gh");
+    File.WriteAllText(fakeGh, OperatingSystem.IsWindows()
+        ? "@echo off\r\nexit /b 1\r\n"
+        : "#!/bin/sh\nexit 1\n", new UTF8Encoding(false));
+    if (!OperatingSystem.IsWindows())
+        File.SetUnixFileMode(fakeGh, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+    using var publisher = new GitHubWorkflowPublisher(fakeGh);
+    var exception = Assert.Throws<WorkflowPublicationFailureException>(() =>
+        publisher.Start(SampleContract() with { WorkingDirectory = repository }, "clean-checkout-fake-gh", CancellationToken.None));
+    Assert.Equal("github-authentication", exception.Diagnostic.Stage,
+        "clean-checkoutを通過せず別の段階で停止しました。");
+    Assert.Equal("command-nonzero-exit", exception.Diagnostic.ReasonCode);
+    Assert.True(string.IsNullOrWhiteSpace(RunGitFixture(repository, "status", "--porcelain=v1", "-z", "--untracked-files=all")));
 }
 
 static void PublisherChecksRealLinkedWorktreeConfigAndCleanliness()

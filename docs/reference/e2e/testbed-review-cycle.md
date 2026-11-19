@@ -1,7 +1,7 @@
 # Testbedレビューサイクル
 
 > 作成日: 2026-11-17
-> 更新日: 2026-11-18
+> 更新日: 2026-11-19
 > 作成者: yuu503
 
 このシナリオは Ateliers-Dev/ateliers-ai-orchestrator-testbed の単語数課題を使い、現行schemaVersion 1の契約とPR必須Codex経路を検証します。実行基盤の共通手順は [E2E実行基盤](README.md) を参照してください。
@@ -22,6 +22,8 @@ TestbedはPublicリポジトリです。実Codexを開始するとCodex利用枠
 [E2E実行基盤の準備確認](README.md#準備確認) を実行します。共通の準備確認は本体Release build、GitHub認証とTestbed `main` のSHA、cleanな一時clone、生成した契約の現行Release CLI検証を行います。単体テストは実行せず、E2Eの前提ゲートにも使いません。準備確認だけの実行では一時cloneを削除します。
 
 実行準備ではTestbed `main` のclean cloneをRelease buildし、チェックを実行します。`tabs and newlines` と `whitespace only` の2件だけが失敗し、`ordinary spaces`、`repeated spaces`、`empty input` が通ることを確認できない場合はCodexを起動せずNGとします。基準状態のログは一時ディレクトリに記録されます。
+
+Publisherのclean-checkout判定に関する調査時は、`publisher-clean-checkout-boundaries.json` にclone直後、baseline Release build後、baseline checks後、Publisher呼び出し直前のGit status要約を保存します。記録するのは状態コード別件数、状態レコード数、decoded出力のUTF-8 byte数とUTF-16 code unit数、観測開始・終了時刻です。status本文とパスは保存しません。このファイルはclone外のE2E一時ディレクトリに置かれます。
 
 Fake経路はこの実試験の合格判定に使いません。実CodexによるImplementer、独立Reviewer、必要時のみの修正・再レビュー、GitHub公開を実行します。Slack実通知は `test` または `auto` を明示した場合だけ追加されます。Reviewerの修正指摘を強制する偽指摘や追加変更はありません。
 

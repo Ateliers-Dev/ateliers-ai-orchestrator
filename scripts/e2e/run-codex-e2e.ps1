@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [string]$ScenarioPath,
     [switch]$RunCodex,
@@ -80,6 +80,46 @@ function Invoke-CapturedNative {
     [pscustomobject]@{ ExitCode = $nativeExitCode; Output = @($nativeOutput | ForEach-Object { "$_" }) }
 }
 
+function Save-GitStatusBoundary {
+    param([string]$GitExecutable, [string]$Checkout, [string]$Stage, [string]$SummaryPath)
+    $startedAtUtc = [DateTimeOffset]::UtcNow
+    $result = Invoke-CapturedNative -FilePath $GitExecutable -Arguments @(
+        '-C', $Checkout, 'status', '--porcelain=v1', '--untracked-files=all'
+    )
+    $completedAtUtc = [DateTimeOffset]::UtcNow
+    if ($result.ExitCode -ne 0) {
+        throw ("Git status診断に失敗しました (stage={0}, exit code={1})。出力本文は保存しません。" -f $Stage, $result.ExitCode)
+    }
+
+    $counts = [ordered]@{}
+    $recordCount = 0
+    foreach ($record in $result.Output) {
+        if ($record.Length -lt 3 -or $record[2] -ne ' ') { continue }
+        $statusCode = $record.Substring(0, 2)
+        if (-not $counts.Contains($statusCode)) { $counts[$statusCode] = 0 }
+        $counts[$statusCode]++
+        $recordCount++
+    }
+    $outputText = $result.Output -join [Environment]::NewLine
+    $summary = [pscustomobject]@{
+        stage = $Stage
+        exitCode = $result.ExitCode
+        utf8ByteLengthOfDecodedOutput = [System.Text.Encoding]::UTF8.GetByteCount($outputText)
+        utf16CodeUnitLength = $outputText.Length
+        recordCount = $recordCount
+        statusCodeCounts = $counts
+        observedAtStartUtc = $startedAtUtc.ToString('o')
+        observedAtEndUtc = $completedAtUtc.ToString('o')
+    }
+    $existing = @()
+    if (Test-Path -LiteralPath $SummaryPath -PathType Leaf) {
+        $existing = @(Get-Content -LiteralPath $SummaryPath -Raw | ConvertFrom-Json)
+    }
+    $existing += $summary
+    [System.IO.File]::WriteAllText($SummaryPath, ($existing | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding($false)))
+    return $summary
+}
+
 function Get-ScenarioRepositoryIdentity {
     param($Contract)
     if ($null -eq $Contract.inputs -or @($Contract.inputs).Count -eq 0) {
@@ -137,6 +177,7 @@ $cliExecutable = Join-Path $repositoryRoot 'src\Ateliers.Ai.Orchestrator.Cli\bin
 $executionRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('AteliersAiOrchestrator\e2e\checkout-' + [Guid]::NewGuid().ToString('N'))
 $checkoutPath = Join-Path $executionRoot 'repository'
 $tempContractPath = Join-Path $executionRoot 'task-contract.json'
+$gitStatusSummaryPath = Join-Path $executionRoot 'publisher-clean-checkout-boundaries.json'
 $runStarted = $false
 $keepExecutionRoot = $false
 
@@ -240,12 +281,10 @@ try {
         'clone', '--single-branch', '--branch', $defaultBranch, $repositoryUrl, $checkoutPath
     ) -Description 'シナリオ対象リポジトリの一時clone作成'
     $keepExecutionRoot = $true
+    $cloneStatus = Save-GitStatusBoundary -GitExecutable $gitCommand.Source -Checkout $checkoutPath -Stage 'clone-immediately-after' -SummaryPath $gitStatusSummaryPath
     $localHead = Get-CheckedNativeOutput -FilePath $gitCommand.Source -Arguments @('-C', $checkoutPath, 'rev-parse', 'HEAD') -Description '一時cloneのSHA確認'
     if (-not $localHead.Equals($remoteHead, [System.StringComparison]::OrdinalIgnoreCase)) { throw '一時cloneがGitHub既定ブランチの確認済み最新SHAと一致しません。' }
-    $gitStatus = Get-CheckedNativeOutput -FilePath $gitCommand.Source -Arguments @(
-        '-C', $checkoutPath, 'status', '--porcelain=v1', '--untracked-files=all'
-    ) -Description '一時cloneの状態確認'
-    if (-not [string]::IsNullOrWhiteSpace($gitStatus)) {
+    if ($cloneStatus.recordCount -ne 0) {
         throw 'シナリオ対象リポジトリの一時cloneがcleanではありません。Codexは起動しません。'
     }
 
@@ -255,6 +294,7 @@ try {
     )
     $baselineBuild.Output | ForEach-Object { Write-Host $_ }
     @("exit code: $($baselineBuild.ExitCode)") + $baselineBuild.Output | Set-Content -LiteralPath (Join-Path $executionRoot 'testbed-baseline-build.log') -Encoding UTF8
+    $null = Save-GitStatusBoundary -GitExecutable $gitCommand.Source -Checkout $checkoutPath -Stage 'after-baseline-release-build' -SummaryPath $gitStatusSummaryPath
     if ($baselineBuild.ExitCode -ne 0) { throw ("Testbed初期状態のRelease buildが失敗しました (exit code {0})。課題の基準状態を確認できません。" -f $baselineBuild.ExitCode) }
     $baselineChecks = Invoke-CapturedNative -FilePath $dotnetCommand.Source -Arguments @(
         'run', '--project', $testbedProject, '--configuration', 'Release', '--no-build', '--no-restore'
@@ -262,6 +302,7 @@ try {
     $baselineText = $baselineChecks.Output -join [Environment]::NewLine
     $baselineChecks.Output | ForEach-Object { Write-Host $_ }
     @("exit code: $($baselineChecks.ExitCode)") + $baselineChecks.Output | Set-Content -LiteralPath (Join-Path $executionRoot 'testbed-baseline-checks.log') -Encoding UTF8
+    $null = Save-GitStatusBoundary -GitExecutable $gitCommand.Source -Checkout $checkoutPath -Stage 'after-baseline-checks' -SummaryPath $gitStatusSummaryPath
     $expectedBaselineFailures = @('FAIL: tabs and newlines:', 'FAIL: whitespace only:')
     $hasExpectedBaseline = $baselineChecks.ExitCode -eq 1 -and
         $baselineText.Contains('2 check(s) failed.') -and
@@ -320,6 +361,7 @@ try {
     }
     $runStarted = $true
     $keepExecutionRoot = $true
+    $null = Save-GitStatusBoundary -GitExecutable $gitCommand.Source -Checkout $checkoutPath -Stage 'immediately-before-publisher-invocation' -SummaryPath $gitStatusSummaryPath
     Write-Host 'Codex E2Eを開始します。cleanな一時cloneを対象にします。'
     $savedErrorActionPreference = $ErrorActionPreference
     try {
