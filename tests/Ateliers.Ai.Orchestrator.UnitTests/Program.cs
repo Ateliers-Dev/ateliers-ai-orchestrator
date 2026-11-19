@@ -185,7 +185,6 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("検証証跡の未知フィールドを含む場合は拒否する", CodexValidationEvidenceRejectsUnknownFields);
     suite.Add("Codex標準入力で日本語プロンプトをUTF-8のまま渡す", CodexPromptIsPassedAsUtf8);
     suite.Add("形式不正後の再試行指示だけがReviewer promptへ含まれる", CodexReviewFormatRetryPromptIsExplicit);
-    suite.Add("形式不正後の再試行指示だけがReviewer promptへ含まれる", CodexReviewFormatRetryPromptIsExplicit);
     if (OperatingSystem.IsWindows())
         suite.Add("npm codex.cmdとcodex.ps1 shimで日本語プロンプトを渡す", CodexNpmShimsReceiveUtf8Prompt);
     suite.Add("Fake Codex実行でkill処理とCLI版確認が起動しない", CodexVersionProbeKillFailureIsRecorded);
