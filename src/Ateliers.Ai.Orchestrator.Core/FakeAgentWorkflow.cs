@@ -23,7 +23,8 @@ public sealed record AgentRequest(
     string? ReviewFinding = null,
     string? RunDirectory = null,
     TimeSpan? RemainingTime = null,
-    CancellationToken StopToken = default);
+    CancellationToken StopToken = default,
+    bool ReviewFormatRetry = false);
 
 /// <summary>Agent呼び出しの結果と、実行環境が観測できた範囲を表します。</summary>
 /// <param name="Content">Agentの応答本文です。</param>
@@ -371,6 +372,7 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
 
                 run.Transition(RunState.Reviewing);
                 lastFinding = null;
+                var reviewFormatRetry = false;
                 for (var attempt = 1; attempt <= (workflowOneShot ? 1 : contract.Limits.MaxRetries + 1); attempt++)
                 {
                     if (stopwatch.Elapsed >= TimeSpan.FromMinutes(contract.Limits.MaxDurationMinutes))
@@ -384,7 +386,7 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                     var reviewRequest = new AgentRequest(runId, "Reviewer", contract, reviewAttempt,
                         currentArtifact, currentHash, RunDirectory: runDirectory,
                         RemainingTime: TimeSpan.FromMinutes(contract.Limits.MaxDurationMinutes) - stopwatch.Elapsed,
-                        StopToken: stopToken);
+                        StopToken: stopToken, ReviewFormatRetry: reviewFormatRetry);
                     if (StopWasRequested(stopToken))
                     {
                         failure = "Reviewer起動前に停止要求を受け付けました。成果物をhandoffしません。";
@@ -470,6 +472,15 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                                     ? "Reviewerの判定・指摘有無・構造化指摘を照合できません。PR作成とコメント投稿は行っていません。"
                                     : "Reviewerの判定・指摘有無・構造化指摘を照合できません。",
                                 error: failure, inputReference: reviewResponseRef, diffSha256: currentHash, role: "Orchestrator");
+                            if (!workflowOneShot && attempt <= contract.Limits.MaxRetries && retryAttempts < contract.Limits.MaxRetries)
+                            {
+                                retryAttempts++;
+                                eventWriter.Append("retry_scheduled", "accepted", from: run.State, to: run.State,
+                                    detail: $"Reviewer応答形式の再確認を同じ固定成果物で実施します。再試行 {retryAttempts}/{contract.Limits.MaxRetries}",
+                                    inputReference: reviewResponseRef, diffSha256: currentHash, role: "Orchestrator");
+                                reviewFormatRetry = true;
+                                continue;
+                            }
                             run.Transition(requiresPullRequest ? RunState.Failed : RunState.NeedsHumanInput);
                             break;
                         }

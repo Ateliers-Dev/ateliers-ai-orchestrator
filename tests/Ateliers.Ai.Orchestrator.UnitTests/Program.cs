@@ -154,6 +154,7 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("禁止遷移は状態と記録を変えない", RejectedTransitionDoesNotMutate);
     suite.Add("Fake正常系は成果物固定後にレビューし証跡不足で停止する", FakeSuccessKeepsReviewAndReadyEvidenceSeparate);
     suite.Add("PR必須Codex経路はpush済み差分をレビューしPR証跡後に人間待ちへ進む", RequiredPullRequestWorkflowPushesReviewsAndCreatesPr);
+    suite.Add("PR必須経路は不正形式を承認扱いせずReviewer再試行を上限管理する", RequiredPullRequestWorkflowRetriesMalformedReviewWithinLimit);
     suite.Add("PR全体レビュー結果コメントの投稿失敗を成功扱いしない", RequiredPullRequestWorkflowFailsClosedOnReviewCommentFailure);
     suite.Add("PR必須Codex経路はpush失敗を成功扱いせずReviewerを起動しない", RequiredPullRequestWorkflowFailsClosedOnPushFailure);
     suite.Add("PR必須Codex経路はPR作成失敗を成功扱いしない", RequiredPullRequestWorkflowFailsClosedOnPrFailure);
@@ -180,6 +181,7 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("Fake CodexプロセスのJSONL・stderr・usage・未知eventを別々に記録する", CodexProcessCapturesJsonlAndSeparatesStreams);
     suite.Add("Reviewerは固定成果物のSHA-256不一致で起動しない", ReviewerRejectsChangedFixedArtifact);
     suite.Add("Codex標準入力で日本語プロンプトをUTF-8のまま渡す", CodexPromptIsPassedAsUtf8);
+    suite.Add("形式不正後の再試行指示だけがReviewer promptへ含まれる", CodexReviewFormatRetryPromptIsExplicit);
     if (OperatingSystem.IsWindows())
         suite.Add("npm codex.cmdとcodex.ps1 shimで日本語プロンプトを渡す", CodexNpmShimsReceiveUtf8Prompt);
     suite.Add("Fake Codex実行でkill処理とCLI版確認が起動しない", CodexVersionProbeKillFailureIsRecorded);
@@ -944,6 +946,51 @@ static void RequiredPullRequestWorkflowFailsClosedOnReviewCommentFailure()
     }
 }
 
+static void RequiredPullRequestWorkflowRetriesMalformedReviewWithinLimit()
+{
+    const string validReview = "判定: 承認\n指摘有無: なし\n\n差分を確認し、契約要件を満たすことを確認しました。";
+    const string malformedReview = "差分を確認しました。\n判定: 承認\n指摘有無: なし\n\n根拠を確認しました。";
+    foreach (var shouldSucceed in new[] { true, false })
+    {
+        using var temp = new TemporaryDirectory();
+        var runId = shouldSucceed ? "required-pr-review-format-retry" : "required-pr-review-format-retry-exhausted";
+        var runDirectory = Path.Combine(temp.Path, "run");
+        Directory.CreateDirectory(runDirectory);
+        using var store = JsonlRunEventStore.CreateNew(Path.Combine(runDirectory, "events.jsonl"), runId);
+        var contract = SampleContract() with
+        {
+            WorkingDirectory = temp.Path,
+            Limits = SampleContract().Limits with { MaxRetries = 1 },
+            Reporting = new ReportingRequirements { PullRequestExpected = true, FinalReportFormat = "markdown" }
+        };
+        var publisher = new StubWorkflowPublisher();
+        var responses = shouldSucceed ? new[] { malformedReview, validReview } : new[] { malformedReview, malformedReview };
+        var runner = new CountingPublicationAgentRunner(FakeScenario.Success, reviewResponseSequence: responses);
+        var result = new FakeAgentWorkflow().Run(contract, "contract-hash", runId, runDirectory, runner, store,
+            publisher: publisher);
+        store.Dispose();
+
+        Assert.Equal(2, runner.ReviewCalls);
+        var log = File.ReadAllText(Path.Combine(runDirectory, "events.jsonl"));
+        Assert.Equal(shouldSucceed ? 1 : 2, log.Split("github_review_assessment_failed", StringSplitOptions.None).Length - 1);
+        Assert.True(log.Contains("retry_scheduled", StringComparison.Ordinal));
+        Assert.True(File.Exists(Path.Combine(runDirectory, "exchanges", "reviewer-1", "response.md")));
+        Assert.True(File.Exists(Path.Combine(runDirectory, "exchanges", "reviewer-2", "response.md")));
+        if (shouldSucceed)
+        {
+            Assert.Equal(RunState.NeedsHumanInput, result.State);
+            Assert.True(publisher.Calls.Contains("create-pr"));
+            Assert.True(publisher.Calls.Contains("post-review-comment"));
+        }
+        else
+        {
+            Assert.Equal(RunState.Failed, result.State);
+            Assert.False(publisher.Calls.Contains("create-pr"));
+            Assert.False(publisher.Calls.Contains("post-review-comment"));
+        }
+    }
+}
+
 static void RequiredPullRequestWorkflowRequiresPersistedEvidence()
 {
     var root = Path.Combine(Path.GetTempPath(), $"required-pr-missing-evidence-{Guid.NewGuid():N}");
@@ -1163,6 +1210,7 @@ static int FakeCodexFixture(string[] args)
             scope_included = included,
             scope_excluded = excluded,
             os_boundary_disclaimed = prompt.Contains("作業範囲はAgentへの指示であり、OSレベルで範囲外アクセスを完全に防ぐ保証ではありません。", StringComparison.Ordinal),
+            review_format_retry_present = prompt.Contains("前のReviewer試行は応答形式を検証できませんでした。", StringComparison.Ordinal),
             utf8_bom_present = promptBytes.AsSpan().StartsWith(Encoding.UTF8.GetPreamble())
         };
         Console.WriteLine($"{{\"type\":\"fixture.prompt_policy\",\"policy\":{JsonSerializer.Serialize(policy)}}}");
@@ -1415,6 +1463,37 @@ static void CodexPromptIsPassedAsUtf8()
         Assert.True(output.Contains("\"utf8_bom_present\":false", StringComparison.Ordinal),
             "Codex子プロセスの標準入力にUTF-8 BOMが含まれていました。");
     }
+}
+
+static void CodexReviewFormatRetryPromptIsExplicit()
+{
+    static bool HasFormatRetryInstruction(bool isFormatRetry)
+    {
+        var (runner, baseRequest, root) = CreateCodexFixture("success");
+        using (root)
+        {
+            var artifactDirectory = Path.Combine(baseRequest.RunDirectory!, "artifacts");
+            Directory.CreateDirectory(artifactDirectory);
+            var artifactPath = Path.Combine(artifactDirectory, "review.patch");
+            var artifactBytes = Encoding.UTF8.GetBytes("fixed review artifact\n");
+            File.WriteAllBytes(artifactPath, artifactBytes);
+            var request = baseRequest with
+            {
+                Role = "Reviewer",
+                Attempt = 2,
+                ArtifactReference = Path.Combine("artifacts", "review.patch"),
+                ArtifactSha256 = Convert.ToHexStringLower(SHA256.HashData(artifactBytes)),
+                ReviewFormatRetry = isFormatRetry
+            };
+            var response = runner.Review(request);
+            Assert.True(response.Succeeded, response.ExecutionEvidence?.Error ?? "Fake Reviewer runが成功しませんでした。");
+            var output = File.ReadAllText(Path.Combine(request.RunDirectory!, response.ExecutionEvidence!.StandardOutputReference!));
+            return output.Contains("\"review_format_retry_present\":true", StringComparison.Ordinal);
+        }
+    }
+
+    Assert.False(HasFormatRetryInstruction(false), "形式不正ではない通常再レビューに、形式再試行の説明が含まれました。");
+    Assert.True(HasFormatRetryInstruction(true), "形式不正後の再試行に専用説明が含まれていません。");
 }
 
 static void CodexNpmShimsReceiveUtf8Prompt()
@@ -3456,9 +3535,11 @@ sealed class CountingFakeAgentRunner(FakeScenario scenario) : IAgentRunner
     }
 }
 
-sealed class CountingPublicationAgentRunner(FakeScenario scenario, string? reviewResponseOverride = null) : IAgentRunner, IPullRequestWorkflowAgentRunner
+sealed class CountingPublicationAgentRunner(FakeScenario scenario, string? reviewResponseOverride = null,
+    IReadOnlyList<string>? reviewResponseSequence = null) : IAgentRunner, IPullRequestWorkflowAgentRunner
 {
     private readonly CountingFakeAgentRunner inner = new(scenario);
+    private int sequenceIndex;
     public int ImplementationCalls => inner.ImplementationCalls;
     public int ReviewCalls => inner.ReviewCalls;
     public AgentResponse Implement(AgentRequest request) => inner.Implement(request) with
@@ -3466,6 +3547,11 @@ sealed class CountingPublicationAgentRunner(FakeScenario scenario, string? revie
     public AgentResponse Review(AgentRequest request)
     {
         var response = inner.Review(request);
+        if (reviewResponseSequence is { Count: > 0 })
+        {
+            var index = Math.Min(sequenceIndex++, reviewResponseSequence.Count - 1);
+            return response with { Content = reviewResponseSequence[index] };
+        }
         if (reviewResponseOverride is not null) return response with { Content = reviewResponseOverride };
         if (!response.Succeeded) return response;
         if (response.Content.StartsWith("レビュー合格:", StringComparison.Ordinal))
