@@ -24,6 +24,8 @@ public sealed record AgentRequest(
     string? RunDirectory = null,
     TimeSpan? RemainingTime = null,
     CancellationToken StopToken = default,
+    string? ValidationEvidenceReference = null,
+    string? TargetCommitSha = null,
     bool ReviewFormatRetry = false);
 
 /// <summary>Agent呼び出しの結果と、実行環境が観測できた範囲を表します。</summary>
@@ -35,7 +37,7 @@ public sealed record AgentRequest(
 public sealed record AgentResponse(string Content = "", bool Succeeded = true, bool TimedOut = false,
     string? SelfAssessment = null, AgentExecutionEvidence? ExecutionEvidence = null, bool StopRequested = false,
     IReadOnlyList<string>? ArtifactReferences = null, string? WorkspaceSnapshotReference = null,
-    string? WorkspaceSnapshotSha256 = null);
+    string? WorkspaceSnapshotSha256 = null, string? ValidationEvidenceReference = null);
 
 /// <summary>Agentプロセスから取得できた実行識別子と終了証跡です。</summary>
 /// <param name="ProcessId">起動したプロセスのIDです。</param>
@@ -173,6 +175,8 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
         var reviewAttempt = 0;
         var implementationAttempt = 0;
         var executionEvidence = new List<(string Role, int Attempt, AgentExecutionEvidence Evidence)>();
+        var validationEvidence = new List<(int Attempt, string? Reference)>();
+        var validationEvidenceHandoffs = new List<(int ImplementerAttempt, int ReviewerAttempt, string Reference, bool ProcessStarted)>();
         var persistenceFailed = false;
 
         var isFake = agentRunner is FakeAgentRunner;
@@ -285,10 +289,15 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                 var implementResponseRef = SaveExchange(runDirectory, "implementer", implementationAttempt, "response.md", implementResponse.Content);
                 if (implementResponse.SelfAssessment is not null)
                     SaveExchange(runDirectory, "implementer", implementationAttempt, "self-assessment.md", implementResponse.SelfAssessment);
+                if (implementResponse.ValidationEvidenceReference is not null)
+                    SaveExchange(runDirectory, "implementer", implementationAttempt, "validation-evidence-reference.txt", implementResponse.ValidationEvidenceReference);
+                validationEvidence.Add((implementationAttempt, implementResponse.ValidationEvidenceReference));
                 SaveExecutionEvidence(runDirectory, "implementer", implementationAttempt, implementResponse.ExecutionEvidence);
                 eventWriter.Append("agent_call", Outcome(implementResponse), from: run.State, to: run.State,
-                    detail: "Implementer応答を記録しました。自己評価はレビュー判定に利用しません。",
+                    detail: "Implementer応答を記録しました。自己評価はレビュー判定に利用しません。検証証跡のコマンドと終了コードはImplementer自己申告です。",
                     inputReference: implementRef, outputReference: implementResponseRef,
+                    artifactReferences: implementResponse.ValidationEvidenceReference is null ? [] : [implementResponse.ValidationEvidenceReference],
+                    unknownInformation: implementResponse.ValidationEvidenceReference is null ? ["Implementer検証証跡がありません。"] : [],
                     elapsedMilliseconds: stopwatch.ElapsedMilliseconds, role: "Implementer");
                 if (!implementResponse.Succeeded || implementResponse.StopRequested || implementResponse.TimedOut || string.IsNullOrWhiteSpace(implementResponse.Content))
                 {
@@ -386,7 +395,8 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                     var reviewRequest = new AgentRequest(runId, "Reviewer", contract, reviewAttempt,
                         currentArtifact, currentHash, RunDirectory: runDirectory,
                         RemainingTime: TimeSpan.FromMinutes(contract.Limits.MaxDurationMinutes) - stopwatch.Elapsed,
-                        StopToken: stopToken, ReviewFormatRetry: reviewFormatRetry);
+                        StopToken: stopToken, ValidationEvidenceReference: implementResponse.ValidationEvidenceReference,
+                        TargetCommitSha: publicationSnapshot?.CommitSha, ReviewFormatRetry: reviewFormatRetry);
                     if (StopWasRequested(stopToken))
                     {
                         failure = "Reviewer起動前に停止要求を受け付けました。成果物をhandoffしません。";
@@ -395,6 +405,9 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                     }
                     EmitLifecycle("Reviewer", "started", "running", run.State.ToString(), $"attempt:{reviewAttempt}", "Reviewer started.");
                     var reviewResponse = InvokeAgent(() => agentRunner.Review(reviewRequest));
+                    if (implementResponse.ValidationEvidenceReference is { } evidenceReference)
+                        validationEvidenceHandoffs.Add((implementationAttempt, reviewAttempt, evidenceReference,
+                            reviewResponse.ExecutionEvidence?.ProcessId is not null));
                     if (StopWasRequested(stopToken))
                         reviewResponse = reviewResponse with { Succeeded = false, StopRequested = true };
                     var missingReviewerOutput = reviewResponse.Succeeded && !reviewResponse.StopRequested && !reviewResponse.TimedOut &&
@@ -419,7 +432,8 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                     var reviewRef = SaveExchange(runDirectory, "reviewer", reviewAttempt, "request.json",
                         System.Text.Json.JsonSerializer.Serialize(new { role = "Reviewer", attempt = reviewAttempt,
                             workingDirectory = runDirectory, artifactReference = currentArtifact,
-                            artifactSha256 = currentHash, contractSha256 }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                            artifactSha256 = currentHash, validationEvidenceReference = reviewRequest.ValidationEvidenceReference,
+                            targetCommitSha = reviewRequest.TargetCommitSha, contractSha256 }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
                     var reviewResponseRef = string.IsNullOrWhiteSpace(reviewResponse.Content) ? null
                         : SaveExchange(runDirectory, "reviewer", reviewAttempt, "response.md", reviewResponse.Content);
                     SaveExecutionEvidence(runDirectory, "reviewer", reviewAttempt, reviewResponse.ExecutionEvidence);
@@ -679,6 +693,19 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
             var insertAt = reportLines.FindIndex(line => line.StartsWith("- 人間のマージ:", StringComparison.Ordinal));
             reportLines.Insert(insertAt, $"- 公開失敗診断: {FormatPublicationDiagnostic(publicationFailureDiagnostic)}");
         }
+        reportLines.AddRange(["", "## Implementer検証証跡", ""]);
+        if (validationEvidence.Count == 0) reportLines.Add("- 未取得（Fake Agent実行またはImplementer未起動）");
+        foreach (var (attempt, reference) in validationEvidence)
+            reportLines.Add(reference is null
+                ? $"- Implementer #{attempt}: 未取得。実行コマンド・終了コードをReviewerへ検証証跡として渡せませんでした。"
+                : $"- Implementer #{attempt}: `{reference}`（コマンド・終了コードはImplementer自己申告。保存済み）");
+        if (validationEvidenceHandoffs.Count == 0)
+            reportLines.Add("- Reviewerへの引き渡し: 未確認（Reviewer未起動または検証証跡なし）");
+        foreach (var handoff in validationEvidenceHandoffs)
+            reportLines.Add(handoff.ProcessStarted
+                ? $"- Implementer #{handoff.ImplementerAttempt} → Reviewer #{handoff.ReviewerAttempt}: `{handoff.Reference}`をReviewerプロセスへ渡しました。"
+                : $"- Implementer #{handoff.ImplementerAttempt} → Reviewer #{handoff.ReviewerAttempt}: requestへ参照を含めましたが、Reviewerプロセスの起動証跡はありません。");
+        reportLines.Add("- Orchestratorが独立して観測したのはCodex CLIプロセスの終了状態です。Agent内部のbuild/test終了コードは独立観測していません。");
         if (executionEvidence.Count == 0) reportLines.Add("- 実プロセス識別子・CLI版・token usage: 未取得（Fake実行）");
         foreach (var (role, attempt, evidence) in executionEvidence)
         {

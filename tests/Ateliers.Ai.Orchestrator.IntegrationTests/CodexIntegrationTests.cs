@@ -273,9 +273,40 @@ public sealed class CodexIntegrationTests
                 var changedPaths = ParsePorcelainPaths(await RunGitAsync(fixture.RepositoryDirectory, "status", "--porcelain", "-z", "--untracked-files=all"));
                 Assert.Equal([IsolatedFixture.TargetFile], changedPaths);
                 var targetContents = await File.ReadAllTextAsync(Path.Combine(fixture.RepositoryDirectory, IsolatedFixture.TargetFile));
-                Assert.Contains(IsolatedFixture.ExpectedMarker, targetContents, StringComparison.Ordinal);
+                Assert.Contains("CountWords", targetContents, StringComparison.Ordinal);
                 Assert.Equal(IsolatedFixture.SeedSentinel,
                     await File.ReadAllTextAsync(Path.Combine(fixture.RepositoryDirectory, IsolatedFixture.SentinelFile)));
+
+                var validationPath = Path.Combine(runDirectory, "exchanges", "implementer-1", "validation", "validation-evidence.json");
+                using var validationDocument = JsonDocument.Parse(await File.ReadAllBytesAsync(validationPath));
+                var validationCommands = validationDocument.RootElement.GetProperty("commands").EnumerateArray().ToArray();
+                Assert.Equal(2, validationCommands.Length);
+                Assert.Contains(validationCommands, command => command.GetProperty("command").GetString()!.Contains("dotnet build", StringComparison.Ordinal));
+                Assert.Contains(validationCommands, command => command.GetProperty("command").GetString()!.Contains("dotnet run", StringComparison.Ordinal));
+                Assert.All(validationCommands, command => Assert.Equal(0, command.GetProperty("exitCode").GetInt32()));
+
+                var buildCommand = Assert.Single(validationCommands, command =>
+                    command.GetProperty("command").GetString()!.Contains("dotnet build", StringComparison.Ordinal));
+                var checksCommand = Assert.Single(validationCommands, command =>
+                    command.GetProperty("command").GetString()!.Contains("dotnet run", StringComparison.Ordinal));
+                var validationDirectory = Path.GetDirectoryName(validationPath)!;
+                var buildLogPath = ResolveValidationReference(validationDirectory, buildCommand.GetProperty("logReference").GetString()!);
+                var checksLogPath = ResolveValidationReference(validationDirectory, checksCommand.GetProperty("logReference").GetString()!);
+                var buildLog = await File.ReadAllTextAsync(buildLogPath);
+                var checksLog = await File.ReadAllTextAsync(checksLogPath);
+                Assert.True(buildLog.Contains("Build succeeded", StringComparison.OrdinalIgnoreCase) ||
+                    buildLog.Contains("ビルドに成功", StringComparison.Ordinal), "Release buildの成功をログで確認できません。");
+                Assert.Contains("All word-count checks passed.", checksLog, StringComparison.Ordinal);
+
+                var reviewerRequestPath = Path.Combine(runDirectory, "exchanges", "reviewer-1", "request.json");
+                using var reviewerRequestDocument = JsonDocument.Parse(await File.ReadAllBytesAsync(reviewerRequestPath));
+                Assert.Equal("exchanges/implementer-1/validation/validation-evidence.json",
+                    reviewerRequestDocument.RootElement.GetProperty("validationEvidenceReference").GetString());
+                var reviewerOutputPath = ResolveRunReference(runDirectory, reviewerCalls[0].GetProperty("outputReference").GetString()!);
+                var reviewerResponse = await File.ReadAllTextAsync(reviewerOutputPath);
+                Assert.Contains("build", reviewerResponse, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("test", reviewerResponse, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("All word-count checks passed.", reviewerResponse, StringComparison.Ordinal);
             }
             finally
             {
@@ -471,6 +502,28 @@ public sealed class CodexIntegrationTests
         return path;
     }
 
+    private static string ResolveValidationReference(string validationDirectory, string reference)
+    {
+        var normalizedReference = reference.Replace('\\', '/');
+        var segments = normalizedReference.Split('/', StringSplitOptions.None);
+        Assert.False(Path.IsPathRooted(reference) || segments.Any(segment => segment is "" or "." or ".."),
+            $"検証証跡のログ参照が相対ファイル名ではありません: {reference}");
+        var path = Path.GetFullPath(Path.Combine(validationDirectory, normalizedReference.Replace('/', Path.DirectorySeparatorChar)));
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(validationDirectory)) + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        Assert.True(path.StartsWith(root, comparison), "検証証跡ログの参照がvalidation directory外です。");
+
+        var current = Path.GetFullPath(validationDirectory);
+        foreach (var segment in segments)
+        {
+            current = Path.Combine(current, segment);
+            Assert.False((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0,
+                "検証証跡ログの参照先にリンクを含められません。");
+        }
+        Assert.True(File.Exists(path), "検証証跡ログの参照先がありません。");
+        return path;
+    }
+
     private static string ExtractUnifiedDiff(string artifact)
     {
         const string start = "```diff\n";
@@ -525,10 +578,9 @@ public sealed class CodexIntegrationTests
         private const int FileDispositionInfoClass = 4;
         private const int FileAttributeTagInfoClass = 9;
 
-        public const string TargetFile = "target.txt";
+        public const string TargetFile = "src/WordCounter/TextMetrics.cs";
         public const string SentinelFile = "sentinel.txt";
         public const string SeedSentinel = "do not change\n";
-        public const string ExpectedMarker = "integration-test-marker-2026";
 
         private readonly string fixtureParentDirectory;
 
@@ -551,13 +603,69 @@ public sealed class CodexIntegrationTests
         {
             Directory.CreateDirectory(RepositoryDirectory);
             Directory.CreateDirectory(RunsDirectory);
-            File.WriteAllText(Path.Combine(RepositoryDirectory, TargetFile), "seed\n", new UTF8Encoding(false));
+            WriteRepositoryFile(TargetFile, """
+                namespace WordCounter;
+
+                public static class TextMetrics
+                {
+                    public static int CountWords(string text)
+                    {
+                        ArgumentNullException.ThrowIfNull(text);
+                        return text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
+                    }
+                }
+                """);
+            WriteRepositoryFile("src/WordCounter/WordCounter.csproj", """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <ImplicitUsings>enable</ImplicitUsings>
+                    <Nullable>enable</Nullable>
+                  </PropertyGroup>
+                </Project>
+                """);
+            WriteRepositoryFile("tests/WordCounter.Tests/WordCounter.Tests.csproj", """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <OutputType>Exe</OutputType>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <ImplicitUsings>enable</ImplicitUsings>
+                    <Nullable>enable</Nullable>
+                  </PropertyGroup>
+                  <ItemGroup>
+                    <ProjectReference Include="../../src/WordCounter/WordCounter.csproj" />
+                  </ItemGroup>
+                </Project>
+                """);
+            WriteRepositoryFile("tests/WordCounter.Tests/Program.cs", """
+                using WordCounter;
+
+                var failures = new List<string>();
+                Check("ordinary spaces", 3, TextMetrics.CountWords("one two three"));
+                Check("repeated spaces", 2, TextMetrics.CountWords("  one   two  "));
+                Check("tabs and newlines", 3, TextMetrics.CountWords("one\ttwo\nthree"));
+                Check("empty input", 0, TextMetrics.CountWords(""));
+                Check("whitespace only", 0, TextMetrics.CountWords(" \t\r\n "));
+                foreach (var failure in failures) Console.Error.WriteLine($"FAIL: {failure}");
+                if (failures.Count > 0) return 1;
+                Console.WriteLine("All word-count checks passed.");
+                return 0;
+
+                void Check(string name, int expected, int actual)
+                {
+                    if (expected != actual) failures.Add($"{name}: expected {expected}, got {actual}");
+                }
+                """);
+            WriteRepositoryFile(".gitignore", """
+                **/bin/
+                **/obj/
+                """);
             File.WriteAllText(Path.Combine(RepositoryDirectory, SentinelFile), SeedSentinel, new UTF8Encoding(false));
             RunGit("init", "--initial-branch=main");
             RunGit("config", "user.name", "Codex Integration Test");
             RunGit("config", "user.email", "integration@example.invalid");
             RunGit("config", "core.autocrlf", "false");
-            RunGit("add", TargetFile, SentinelFile);
+            RunGit("add", "-A");
             RunGit("commit", "-m", "seed integration fixture");
         }
 
@@ -567,18 +675,25 @@ public sealed class CodexIntegrationTests
             {
                 schemaVersion = 1,
                 taskId = "codex-integration-test",
-                purpose = "隔離された一時Gitリポジトリで指定ファイルだけを変更し、レビュー結果を記録する",
+                purpose = "TestbedのWordCounter空白区切りシナリオを隔離Git fixtureで修正し、ImplementerのRelease build・5チェック証跡を独立Reviewerへ引き継ぐ",
                 workingDirectory = RepositoryDirectory,
-                scope = new { included = new[] { TargetFile }, excluded = new[] { SentinelFile, "その他のファイル", "外部書込・commit・push・PR" } },
-                inputs = new[] { new { description = "初期seedファイル", reference = TargetFile, revision = "一時リポジトリのHEAD" } },
-                requirements = new[] { $"{TargetFile}に一度だけ {ExpectedMarker} を含む1行を追加する", "指定ファイル以外は変更しない", "レビュー後も対象差分を変更しない" },
-                acceptanceCriteria = new[] { "指定ファイルにmarker行がある", "対象外ファイルが変更されていない" },
-                delegatedOperations = new[] { $"{TargetFile}だけを編集する", "成果物のレビューを行う" },
+                scope = new { included = new[] { TargetFile }, excluded = new[] { SentinelFile, "project/test files", "外部書込・commit・push・PR" } },
+                inputs = new[] { new { description = "Testbed由来のWordCounter教材と5チェック", reference = TargetFile, revision = "Testbed main e205cd40166b8e54fd7cb01eb98cc0a57a882426 のシナリオをローカルfixture化" } },
+                requirements = new[] { "CountWordsで空白、タブ、改行を区切りとして扱う", "指定のRelease buildと5チェックを実行し、実際のexit codeと各ログを検証ディレクトリのvalidation-evidence.jsonへ記録する", "指定ファイル以外は変更しない", "レビュー後も対象差分を変更しない" },
+                acceptanceCriteria = new[] { "Release buildが成功する", "ordinary spaces / repeated spaces / tabs and newlines / empty input / whitespace only の5チェックが成功する", "Reviewerがbuild/testの検証ログを確認し、応答でその結果を明示する", "指定ファイル以外が変更されていない" },
+                delegatedOperations = new[] { $"{TargetFile}だけを編集する", "dotnet build src/WordCounter/WordCounter.csproj --configuration Releaseを実行しログを保存する", "dotnet run --project tests/WordCounter.Tests/WordCounter.Tests.csproj --configuration Releaseを実行しログを保存する", "成果物と検証証跡をレビューする" },
                 limits = new { maxDurationMinutes = 10, maxRevisionAttempts = 0, maxRetries = 0 },
                 stopConditions = new[] { "指定ファイル以外への変更が必要な場合は停止する" },
                 reporting = new { pullRequestExpected = false, finalReportFormat = "markdown" }
             };
             File.WriteAllText(ContractPath, JsonSerializer.Serialize(contract, new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
+        }
+
+        private void WriteRepositoryFile(string relativePath, string contents)
+        {
+            var path = Path.Combine(RepositoryDirectory, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, contents, new UTF8Encoding(false));
         }
 
         private void RunGit(params string[] arguments)

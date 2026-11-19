@@ -158,7 +158,9 @@ dotnet test tests/Ateliers.Ai.Orchestrator.UnitTests/Ateliers.Ai.Orchestrator.Un
 dotnet test tests/Ateliers.Ai.Orchestrator.IntegrationTests/Ateliers.Ai.Orchestrator.IntegrationTests.csproj --configuration Release
 ```
 
-opt-in時はImplementerとReviewerを各1回呼び出すため、モデル利用枠や費用が発生する場合があります。テストは一時ディレクトリにGit seed、task contract、実行記録先を作り、成功時に削除します。失敗時はfixtureとrun証跡を保持し、テスト失敗メッセージに保存場所とOrchestratorのstdout/stderrを含めます。`NeedsHumanInput` はCLI標準出力文字列だけに依存せず、永続化された `report.md` と `events.jsonl` の状態遷移・停止イベントで確認します。Implementer/Reviewerの各1回、終了証跡、イベント/report、契約対象ファイルだけの変更、固定差分と最終Git差分、成果物参照先も検証します。原因を確認できていない以前の失敗を成功扱いしません。OSレベルの完全隔離を証明するテストではありません。
+opt-in時はImplementerとReviewerを各1回呼び出すため、モデル利用枠や費用が発生する場合があります。Issue #79のfixtureはTestbed WordCounter教材と同じ5チェックを使い、ImplementerのRelease build・チェック結果をReviewerへ渡す証跡を確認します。Testbed本体へ接続・pushせず、Slack通知もこの開発用シナリオでは無効です。テストは一時ディレクトリにGit seed、task contract、実行記録先を作り、成功時に削除します。失敗時はfixtureとrun証跡を保持し、テスト失敗メッセージに保存場所とOrchestratorのstdout/stderrを含めます。`NeedsHumanInput` はCLI標準出力文字列だけに依存せず、永続化された `report.md` と `events.jsonl` の状態遷移・停止イベントで確認します。Implementer/Reviewerの各1回、終了証跡、イベント/report、契約対象ファイルだけの変更、固定差分と最終Git差分、成果物参照先も検証します。原因を確認できていない以前の失敗を成功扱いしません。OSレベルの完全隔離を証明するテストではありません。
+
+Testbed、開発用IntegrationTest、ユーザー専用の最終受入E2EとCLI/MCP導入受入の責務は、[開発用IntegrationTestの実行範囲](docs/reference/development-integration-tests.md)を参照してください。
 
 ソリューション全体のビルドは次の通りです。
 
