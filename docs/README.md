@@ -12,6 +12,8 @@
 - [reference/](reference/): 実装の仕様、導入・操作手順、E2E手順
 - [reports/](reports/): 作業・検証の結果と証跡。Milestone 1は[reports/milestone-1/](reports/milestone-1/)を参照
 - このフォルダ直下: 複数の分類に関わる共通方針・ゲート
-- [エラー時の診断記録ポリシー](error-diagnostic-recording-policy.md): 秘密情報を保護しながら、失敗の診断情報を構造化して記録する共通方針
+- [guidelines/](guidelines/README.md): 運用・開発におけるガイドライン
+  - [エラー時の診断記録ポリシー](guidelines/error-diagnostic-recording-policy.md): 共通原則と診断手順の索引
+  - [診断記録方法](guidelines/diagnostic-recording-method/README.md): 特定ケースごとの診断手順
 
 新しい種類の文書やフォルダを追加・変更するときは、この README と該当フォルダの README も併せて更新してください。

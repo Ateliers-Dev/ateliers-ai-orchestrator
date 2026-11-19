@@ -42,7 +42,7 @@ Milestone 1で委譲されたIssueの作業では、Issueの範囲と上位の�
 
 ## エラー時の診断記録
 
-- エラー時の診断項目、安全な記録方法、保存先・アクセス制限・保持、および原因未特定時の報告は、[エラー時の診断記録ポリシー](docs/error-diagnostic-recording-policy.md)を参照して従う。
+- エラー時の診断項目、安全な記録方法、保存先・アクセス制限・保持、および原因未特定時の報告は、[エラー時の診断記録ポリシー](docs/guidelines/error-diagnostic-recording-policy.md)を参照して従う。
 
 ## 原因未特定・再現不可の場合の調査
 
