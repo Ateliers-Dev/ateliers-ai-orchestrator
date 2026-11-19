@@ -470,6 +470,14 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                                     ? "Reviewerの判定・指摘有無・構造化指摘を照合できません。PR作成とコメント投稿は行っていません。"
                                     : "Reviewerの判定・指摘有無・構造化指摘を照合できません。",
                                 error: failure, inputReference: reviewResponseRef, diffSha256: currentHash, role: "Orchestrator");
+                            if (!workflowOneShot && attempt <= contract.Limits.MaxRetries && retryAttempts < contract.Limits.MaxRetries)
+                            {
+                                retryAttempts++;
+                                eventWriter.Append("retry_scheduled", "accepted", from: run.State, to: run.State,
+                                    detail: $"Reviewer応答形式の再確認を同じ固定成果物で実施します。再試行 {retryAttempts}/{contract.Limits.MaxRetries}",
+                                    inputReference: reviewResponseRef, diffSha256: currentHash, role: "Orchestrator");
+                                continue;
+                            }
                             run.Transition(requiresPullRequest ? RunState.Failed : RunState.NeedsHumanInput);
                             break;
                         }
