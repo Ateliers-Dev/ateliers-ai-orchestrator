@@ -134,6 +134,7 @@ static void AddUnitTests(TestSuite suite)
     suite.Add("Publisher失敗は固定段階・理由コード・例外型だけを返す", PublisherFailureDiagnosticIsStructuredAndSanitized);
     suite.Add("Publisherはdirty checkoutをGitプロセス失敗と区別する", PublisherClassifiesDirtyCheckout);
     suite.Add("Publisher Startはclean checkoutを通過しFake ghで外部通信なく停止する", PublisherStartPassesCleanCheckoutWithFakeGh);
+    suite.Add("PublisherはWindows CRLF snapshotを正規化し意図した末尾空白を拒否する", PublisherNormalizesCrLfSnapshotAndRejectsTrailingWhitespace);
     suite.Add("PublisherのGit status要約はパスを含めず状態コードとbyte/文字長を保持する", PublisherGitStatusSummaryIsSafeAndStructured);
     suite.Add("PublisherはGit非ゼロ・外部コマンド出力統計・起動失敗を安全に区別する", PublisherClassifiesCommandFailuresSafely);
     suite.Add("公開診断の終了コードと出力統計をJSONLへ安全に保存する", PublicationProcessMetadataIsPersistedWithoutOutput);
@@ -498,6 +499,51 @@ static void PublisherStartPassesCleanCheckoutWithFakeGh()
         "clean-checkoutを通過せず別の段階で停止しました。");
     Assert.Equal("command-nonzero-exit", exception.Diagnostic.ReasonCode);
     Assert.True(string.IsNullOrWhiteSpace(RunGitFixture(repository, "status", "--porcelain=v1", "-z", "--untracked-files=all")));
+}
+
+static void PublisherNormalizesCrLfSnapshotAndRejectsTrailingWhitespace()
+{
+    using var temp = new TemporaryDirectory();
+    var repository = Path.Combine(temp.Path, "crlf-repository");
+    temp.AdditionalPath = repository;
+    Directory.CreateDirectory(repository);
+    RunGitFixture(repository, "init", "-q");
+    File.WriteAllText(Path.Combine(repository, "sample.txt"), "baseline\n", new UTF8Encoding(false));
+    RunGitFixture(repository, "add", "sample.txt");
+    RunGitFixture(repository, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "baseline", "-q");
+    var baseSha = RunGitFixture(repository, "rev-parse", "HEAD").Trim();
+
+    using var publisher = new GitHubWorkflowPublisher();
+    var productionOverlay = publisher.CreateGitConfigOverlay(repository, CancellationToken.None);
+    var expectedAutoCrlf = OperatingSystem.IsWindows() ? "true" : "false";
+    Assert.Equal(expectedAutoCrlf, productionOverlay.Entries.Single(entry => entry.Key == "core.autocrlf").Value);
+    var overlay = new GitHubWorkflowPublisher.GitConfigOverlay(
+        [.. productionOverlay.Entries.Where(entry => entry.Key != "core.autocrlf"), new("core.autocrlf", "true")]);
+
+    var snapshotIndex = Path.Combine(temp.Path, "snapshot-index");
+    GitHubWorkflowPublisher.Run("git", repository, ["read-tree", baseSha], gitConfigOverlay: overlay,
+        isolatedGitIndexPath: snapshotIndex);
+    var crlfBytes = Encoding.UTF8.GetBytes("first line\r\nsecond line\r\n");
+    var crlfBlob = GitHubWorkflowPublisher.Run("git", repository,
+        ["hash-object", "-w", "--path=sample.txt", "--stdin"], gitConfigOverlay: overlay, standardInput: crlfBytes).Output.Trim();
+    var indexInfo = Encoding.UTF8.GetBytes($"100644 {crlfBlob}\tsample.txt\0");
+    GitHubWorkflowPublisher.Run("git", repository, ["update-index", "-z", "--index-info"],
+        gitConfigOverlay: overlay, standardInput: indexInfo, isolatedGitIndexPath: snapshotIndex);
+    GitHubWorkflowPublisher.Run("git", repository, ["diff", "--cached", "--check", baseSha, "--"],
+        gitConfigOverlay: overlay, isolatedGitIndexPath: snapshotIndex);
+
+    var whitespaceBytes = Encoding.UTF8.GetBytes("line with trailing space \r\n");
+    var whitespaceBlob = GitHubWorkflowPublisher.Run("git", repository,
+        ["hash-object", "-w", "--path=sample.txt", "--stdin"], gitConfigOverlay: overlay, standardInput: whitespaceBytes).Output.Trim();
+    indexInfo = Encoding.UTF8.GetBytes($"100644 {whitespaceBlob}\tsample.txt\0");
+    GitHubWorkflowPublisher.Run("git", repository, ["update-index", "-z", "--index-info"],
+        gitConfigOverlay: overlay, standardInput: indexInfo, isolatedGitIndexPath: snapshotIndex);
+    var exception = Assert.Throws<GitHubWorkflowPublisher.PublicationCommandException>(() =>
+        GitHubWorkflowPublisher.Run("git", repository, ["diff", "--cached", "--check", baseSha, "--"],
+            gitConfigOverlay: overlay, isolatedGitIndexPath: snapshotIndex));
+    Assert.Equal(2, exception.ExitCode);
+    Assert.Equal(true, exception.StandardOutputPresent,
+        "意図した末尾空白をGit diff --checkが検出しませんでした。");
 }
 
 static void PublisherChecksRealLinkedWorktreeConfigAndCleanliness()
