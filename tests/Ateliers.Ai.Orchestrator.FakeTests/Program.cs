@@ -158,6 +158,7 @@ static void AddGitFakeTests(TestSuite suite)
     suite.Add("linked worktreeのconfig・clean/dirty判定を実Gitで確認する", PublisherChecksRealLinkedWorktreeConfigAndCleanliness);
     suite.Add("linked worktree内の子プロセス生成差分をsnapshotへ固定する", CodexChildChangesAreSnapshottedFromLinkedWorktree);
     suite.Add("既定の管理ログはGit作業領域外へ保存されFake Codexのclean-checkを通過する", DefaultRunDataDoesNotDirtyGitWorkspace);
+    suite.Add("runの--runsと--lifecycle-logは既定値から独立して優先される", RunDataPathOverridesAreIndependent);
     suite.Add("Codexのdirty clean-check診断は段階・コマンド・安全な差分パスを記録し起動を止める", CodexDirtyWorkspaceDiagnosticIsSafeAndStopsBeforeLaunch);
     suite.Add("Git statusのrename診断はsource記録を重複計上せずdestinationを示す", CodexDirtyRenameWorkspaceDiagnosticUsesDestinationPath);
 }
@@ -2496,7 +2497,7 @@ static void DefaultRunDataDoesNotDirtyGitWorkspace()
         new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
 
     var productionDataDirectory = OrchestratorCli.GetDefaultDataDirectory(dataDirectory);
-    var expectedProductionDataDirectory = Path.Combine(dataDirectory, "Ateliers", "Orchestrator");
+    var expectedProductionDataDirectory = Path.Combine(dataDirectory, "Ateliers-Dev", "Ai-Orchestrator");
     Assert.Equal(Path.GetFullPath(expectedProductionDataDirectory), Path.GetFullPath(productionDataDirectory),
         "本番の既定データ保存先がユーザー用アプリケーションデータ領域から外れています。");
     var startOutput = new StringWriter();
@@ -2532,6 +2533,29 @@ static void DefaultRunDataDoesNotDirtyGitWorkspace()
         }
     }
 
+    var explicitStartRuns = Path.Combine(temp.Path, "explicit-start-runs");
+    using (var explicitStartOutput = new StringWriter())
+    {
+        var priorOutput = Console.Out;
+        try
+        {
+            Console.SetOut(explicitStartOutput);
+            var explicitStartExitCode = OrchestratorCli.RunAsync(
+                ["start", contractPath, "--runs", explicitStartRuns], dataDirectory).GetAwaiter().GetResult();
+            Assert.Equal(0, explicitStartExitCode, explicitStartOutput.ToString());
+        }
+        finally
+        {
+            Console.SetOut(priorOutput);
+        }
+    }
+    Assert.Equal(1, Directory.GetFiles(explicitStartRuns, "events.jsonl", SearchOption.AllDirectories).Length,
+        "startの--runs明示指定が優先されませんでした。");
+    Assert.Equal(0, Directory.GetFiles(Path.Combine(productionDataDirectory, "runs"), "events.jsonl", SearchOption.AllDirectories).Length,
+        "startの--runs明示指定時に既定の実行記録先へ保存されました。");
+    Assert.Equal(string.Empty, RunGitFixture(workspace, "status", "--porcelain", "--untracked-files=all"),
+        "startの--runs明示指定がGit作業領域をdirtyにしました。");
+
     var originalDirectory = Environment.CurrentDirectory;
     var previousOutput = Console.Out;
     var previousError = Console.Error;
@@ -2558,6 +2582,8 @@ static void DefaultRunDataDoesNotDirtyGitWorkspace()
     Assert.True(Directory.GetFiles(runsDirectory, "events.jsonl", SearchOption.AllDirectories).Length == 1,
         "既定の実行記録がユーザーデータ領域に作成されませんでした。");
     Assert.True(File.Exists(lifecyclePath), "既定のライフサイクルログがユーザーデータ領域に作成されませんでした。");
+    Assert.False(Directory.Exists(Path.Combine(dataDirectory, "Ateliers", "Orchestrator")),
+        "旧既定ディレクトリが新規作成されました。");
     Assert.Equal(string.Empty, RunGitFixture(workspace, "status", "--porcelain", "--untracked-files=all"),
         "Orchestratorの既定記録がGit作業領域をdirtyにしました。");
 
@@ -2572,6 +2598,73 @@ static void DefaultRunDataDoesNotDirtyGitWorkspace()
         RunDirectory: runDirectory, RemainingTime: TimeSpan.FromSeconds(5)));
     Assert.True(response.Succeeded, response.ExecutionEvidence?.Error ?? "Fake Codex子プロセスがclean-check後に完了しませんでした。");
     Assert.True(File.Exists(Path.Combine(workspace, "example.txt")), "Fake Codex子プロセスがclean-check後に起動しませんでした。");
+}
+
+static void RunDataPathOverridesAreIndependent()
+{
+    RunCase("runs-only", overrideRuns: true, overrideLifecycle: false);
+    RunCase("lifecycle-only", overrideRuns: false, overrideLifecycle: true);
+    RunCase("both-explicit", overrideRuns: true, overrideLifecycle: true);
+
+    static void RunCase(string name, bool overrideRuns, bool overrideLifecycle)
+    {
+        using var temp = new TemporaryDirectory();
+        var workspace = Path.Combine(temp.Path, "repository");
+        var localApplicationData = Path.Combine(temp.Path, "local-app-data");
+        temp.AdditionalPath = workspace;
+        Directory.CreateDirectory(workspace);
+        File.WriteAllText(Path.Combine(workspace, "baseline.txt"), "baseline\n");
+        RunGitFixture(workspace, "init", "--quiet");
+        RunGitFixture(workspace, "add", "baseline.txt");
+        RunGitFixture(workspace, "-c", "user.name=Orchestrator Test", "-c", "user.email=orchestrator-test@example.invalid", "commit", "-qm", "baseline");
+
+        var contractPath = Path.Combine(temp.Path, "contract.json");
+        var contract = SampleContract() with { WorkingDirectory = workspace };
+        File.WriteAllText(contractPath, JsonSerializer.Serialize(contract,
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+
+        var explicitRuns = Path.Combine(temp.Path, "explicit-runs");
+        var explicitLifecycle = Path.Combine(temp.Path, "explicit-lifecycle.jsonl");
+        var args = new List<string> { "run", contractPath, "--slack-notifications", "disabled" };
+        if (overrideRuns) args.AddRange(["--runs", explicitRuns]);
+        if (overrideLifecycle) args.AddRange(["--lifecycle-log", explicitLifecycle]);
+
+        var originalDirectory = Environment.CurrentDirectory;
+        var previousOutput = Console.Out;
+        var previousError = Console.Error;
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        int exitCode;
+        try
+        {
+            Environment.CurrentDirectory = workspace;
+            Console.SetOut(output);
+            Console.SetError(error);
+            exitCode = OrchestratorCli.RunAsync(args.ToArray(), localApplicationData).GetAwaiter().GetResult();
+        }
+        finally
+        {
+            Console.SetOut(previousOutput);
+            Console.SetError(previousError);
+            Environment.CurrentDirectory = originalDirectory;
+        }
+
+        Assert.Equal(0, exitCode, error.ToString());
+        var defaultRoot = Path.Combine(localApplicationData, "Ateliers-Dev", "Ai-Orchestrator");
+        var defaultRuns = Path.Combine(defaultRoot, "runs");
+        var defaultLifecycle = Path.Combine(defaultRoot, "lifecycle.jsonl");
+        var runsRoot = overrideRuns ? explicitRuns : defaultRuns;
+        var lifecyclePath = overrideLifecycle ? explicitLifecycle : defaultLifecycle;
+        Assert.Equal(1, Directory.GetFiles(runsRoot, "events.jsonl", SearchOption.AllDirectories).Length,
+            $"{name}: 実行記録が指定された保存先にありません。");
+        Assert.True(File.Exists(lifecyclePath), $"{name}: ライフサイクルログが指定された保存先にありません。");
+        Assert.Equal(overrideRuns, !Directory.Exists(defaultRuns), $"{name}: --runs と既定の実行記録先が独立していません。");
+        Assert.Equal(overrideLifecycle, !File.Exists(defaultLifecycle), $"{name}: --lifecycle-log と既定のログ先が独立していません。");
+        Assert.False(Directory.Exists(Path.Combine(localApplicationData, "Ateliers", "Orchestrator")),
+            $"{name}: 旧既定ディレクトリが新規作成されました。");
+        Assert.Equal(string.Empty, RunGitFixture(workspace, "status", "--porcelain", "--untracked-files=all"),
+            $"{name}: CLIがGit checkoutをdirtyにしました。");
+    }
 }
 
 static void CodexDirtyWorkspaceDiagnosticIsSafeAndStopsBeforeLaunch()

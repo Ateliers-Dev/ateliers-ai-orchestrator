@@ -94,7 +94,7 @@ Fake Agentの縦断フローを実行します。シナリオは `Success`、`Re
 dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- run examples/task-contract.json --scenario RevisionThenSuccess
 ```
 
-実行記録とライフサイクルJSONLは、未指定時にOSのユーザー用アプリケーションデータ領域の `Ateliers/Orchestrator` 配下へ保存します。ユーザー領域はOS設定で解決し、Windowsでは通常 `%LOCALAPPDATA%` 配下です。従来の `.ateliers-orchestrator` 内にある記録は自動移動・削除しません。`--runs` と `--lifecycle-log` で別の保存先を明示できます。Git checkout内へ指定するとclean-checkを妨げるため、作業領域の外を指定してください。
+実行記録とライフサイクルJSONLは、未指定時にOSのLocalApplicationDataにある `Ateliers-Dev/Ai-Orchestrator` 配下へ保存します（Windowsでは `%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator`）。実行記録は `runs`、ライフサイクルログは `lifecycle.jsonl` です。従来の `%LOCALAPPDATA%\Ateliers\Orchestrator`（Windows）にあるデータは旧保存先に残り、自動移動・削除されません。既存データは `events.jsonl`、`report.md`、`lifecycle.jsonl` をファイルとして直接参照してください。旧保存先へ今後の実行記録やログを書き続ける場合に限り、`--runs <旧保存先のrunsディレクトリ>` または `--lifecycle-log <旧保存先のlifecycle.jsonl>` を出力先として指定できます。各オプションは独立して指定できます。Git checkout内へ指定するとclean-checkを妨げるため、作業領域の外を指定してください。
 
 ```powershell
 dotnet run --project src/Ateliers.Ai.Orchestrator.Cli -- run examples/task-contract.json `
