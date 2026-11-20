@@ -32,6 +32,8 @@ try {
     $betaArguments = @(Get-CliReleaseCreateArguments -Tag 'v0.0.4-beta.7' -ArtifactDirectory 'artifacts')
     Assert-True ($betaArguments -contains '--prerelease') 'Beta release arguments do not contain the prerelease flag.'
     Assert-Throws { Get-CliReleaseTagInfo -Tag 'v1.2' } 'Invalid CLI release tag'
+    Assert-Throws { Get-CliReleaseTagInfo -Tag 'v1.2.3-beta..7' } 'Invalid CLI release tag'
+    Assert-Throws { Get-CliReleaseTagInfo -Tag 'v1.2.3-01' } 'Invalid CLI release tag'
 
     $publishDirectory = Join-Path $tempRoot 'publish'
     $artifactDirectory = Join-Path $tempRoot 'artifacts'

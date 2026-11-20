@@ -4,7 +4,9 @@ function Get-CliReleaseTagInfo {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$Tag)
 
-    if ($Tag -notmatch '^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?$') {
+    $identifier = '(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)'
+    $tagPattern = '^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-' + $identifier + '(?:\.' + $identifier + ')*)?$'
+    if ($Tag -notmatch $tagPattern) {
         throw "Invalid CLI release tag: $Tag"
     }
 
