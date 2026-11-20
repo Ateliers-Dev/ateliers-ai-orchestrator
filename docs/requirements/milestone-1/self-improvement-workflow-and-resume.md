@@ -4,7 +4,7 @@
 > 更新日: 2026-11-21
 > 作成者: Codex
 
-> 状態: 要求合意済み。詳細設計の未決事項は第8節。実装前に人間が文書を確認する。
+> 状態: 要求合意済み。設計方針は第8節に記載。実装前に人間が文書を確認する。
 
 ## 1. 目的と変更理由
 
@@ -50,7 +50,7 @@ ChatGPT WorkからMCPへ渡す判断には、Run ID、decision ID（冪等性キ
 
 現行RunStateではNeedsHumanInputは終端であり、現行MCPに既存Runの再開APIはない。新しい明示的なMCP再開ToolとCLI契約を設ける案とし、run_orchestrationに暗黙の再開動作を追加しない。
 
-保存形式に版を持たせる。旧RunにPhase/checkpoint/証跡が無ければ自動推定せず再開不可とする。NeedsHumanInputを終端とみなす既存クライアントとの互換、status能力表示/protocol version、移行失敗時挙動は未決。
+保存形式に版を持たせる。旧RunにPhase/checkpoint/証跡が無ければ自動推定せず再開不可とする。NeedsHumanInputの再開可能化に合わせCLI/MCP protocol v2へ更新し、get_run_statusの状態結果にcanResume能力情報を含める。
 
 - 不正入力/古いrevision/許可外判断: Run状態を変えず拒否。
 - Branch/SHA/artifact不一致: 自動再開せずNeedsHumanInputを維持し、差分を監査へ記録。
