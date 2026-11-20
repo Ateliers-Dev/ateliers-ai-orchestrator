@@ -50,13 +50,13 @@ NeedsHumanInputを非終端にする変更は既存clientが終端扱いする�
 
 新規MCP Tool名はresume_orchestrationを候補とし、対応CLIコマンド/プロトコル契約を追加する。これは現行Toolではない。WorkはRun状態と保留質問を取得し、人間の回答を同じRun IDでMCPへ渡す。Slack経路は提供しない。
 
-要求する論理field: runId, decisionId, expectedStateRevision, expectedPhase, expectedHeadSha, expectedDiffDigest, answer.choice/answer.text。ID、revision、checkpoint SHA、回答を必須とする。正確なJSON名・choice schemaは未決。
+要求する論理field: runId, decisionId, expectedStateRevision, expectedPhase, expectedHeadSha, expectedDiffDigest, answer.choice/answer.text。ID、revision、checkpoint SHA、回答を必須とする。Workから届く判断を何の信頼境界で人間/呼出元に結び付けるかは未決。callerが自由に指定するactor IDを認証済み証拠として扱わず、現行stdio/MCPのローカル起動境界と既存権限を確認する。認証機構の拡張が必要かも実装前に判断する。
 
 応答はaccepted/duplicate、same runId/decisionId、state、resumedPhase、new state revision、安定したerror code/current revisionを返す案。成功でもRun IDを変えない。拒否時は状態/成果物を変更しない。
 
 ### 再開順序
 
-1. 入力/回答/IDを検証しRun単位の排他を取得する。
+1. 入力/回答/IDを検証し、信頼済み境界からcaller provenanceを確立できるか確認したうえでRun単位の排他を取得する。callerを認証/識別できない場合は判断の受理・再開を行わない。
 2. NeedsHumanInput、保留質問、許可された判断、状態revisionとPhaseを確認する。
 3. contract/checkpoint integrity、branch/base/head SHA、worktree status/diff digestと全参照artifact digestを停止時記録と照合する。変更を自動resetしない。
 4. decisionId ledgerを確認する。同じID/内容は過去の結果を返す。同じID/異なる内容と競合revisionは拒否する。
@@ -68,7 +68,7 @@ FilesystemとGitHubの外部副作用は単一transactionにできない。pendi
 
 ## 6. 失敗時の挙動
 
-- 不正判断、decision ID内容衝突、古いrevision、状態不一致: 拒否、Runは不変。
+- 不正判断、信頼できない/不明なcaller provenance、decision ID内容衝突、古いrevision、状態不一致: 拒否、Runは不変。
 - Branch/SHA/artifact/diff mismatch: NeedsHumanInputを維持し、証跡を記録して人間へ返す。
 - 欠落/未知の旧checkpoint: 自動推定せず再開不可を返す。
 - checkpoint破損、回復不能な保存障害: 診断後Failed。回答を受け付けない。
