@@ -8,7 +8,7 @@ $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count -gt 0) { throw "E2Eスクリプトの構文エラー: $($parseErrors[0].Message)" }
 
-foreach ($functionName in @('Resolve-CodexExecutable', 'Get-StructuredRunResult', 'Resolve-E2ESlackSettings')) {
+foreach ($functionName in @('Resolve-CodexExecutable', 'Get-StructuredRunResult', 'Resolve-E2ESlackSettings', 'Get-CodexProcessStartEvidence', 'Write-E2ERunStatus')) {
     $functionAst = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq $functionName }, $true)
     if ($null -eq $functionAst) { throw "必要な関数がありません: $functionName" }
     Invoke-Expression $functionAst.Extent.Text
@@ -80,6 +80,21 @@ try {
     $parsed = Get-StructuredRunResult -Output @('diagnostic line', '{"protocolVersion":1,"ok":true,"exitCode":0,"runId":"run-1","state":"NeedsHumanInput","slack":{"sent":3,"failed":0}}')
     if ($null -eq $parsed -or $parsed.runId -cne 'run-1' -or [int]$parsed.slack.sent -ne 3) { throw '機械可読なrun結果の解析に失敗しました。' }
     if ($null -ne (Get-StructuredRunResult -Output @('not-json'))) { throw '不正なrun結果を有効として扱いました。' }
+
+    $runRoot = Join-Path $tempRoot 'runs'
+    $runDirectory = Join-Path $runRoot 'run-started'
+    $evidenceDirectory = Join-Path $runDirectory 'exchanges\implementer-1'
+    New-Item -ItemType Directory -Path $evidenceDirectory -Force | Out-Null
+    $evidencePath = Join-Path $evidenceDirectory 'execution-evidence.json'
+    [System.IO.File]::WriteAllText($evidencePath, '{"ProcessId":1234}')
+    if ((Get-CodexProcessStartEvidence -RunRoot $runRoot -RunId 'run-started') -ne $true) { throw 'Codexプロセス起動証跡を検出できません。' }
+    [System.IO.File]::WriteAllText($evidencePath, '{"ProcessId":null}')
+    if ((Get-CodexProcessStartEvidence -RunRoot $runRoot -RunId 'run-started') -ne $false) { throw 'Codex未起動を示す証跡を検出できません。' }
+    if ($null -ne (Get-CodexProcessStartEvidence -RunRoot $runRoot -RunId 'missing')) { throw '証跡のないrunを起動済み/未起動と断定しました。' }
+    $statusPath = Join-Path $tempRoot 'e2e-result.json'
+    Write-E2ERunStatus -Path $statusPath -Phase 'failed_after_codex_start' -OrchestratorStarted $true -CodexStarted $true -RunId 'run-started' -Message 'test'
+    $savedStatus = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+    if ($savedStatus.runId -cne 'run-started' -or $savedStatus.codexStarted -ne $true) { throw '結果ファイルでCodex起動状態またはrun IDを保持できません。' }
 
     Write-Host 'E2E preflight deterministic tests passed.'
 }
