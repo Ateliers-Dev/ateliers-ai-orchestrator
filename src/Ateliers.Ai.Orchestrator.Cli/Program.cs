@@ -196,7 +196,8 @@ internal static class OrchestratorCli
                 var exitCode = result.State == RunState.Failed ? 3 : 0;
                 if (structuredRun)
                     WriteStructuredResult(exitCode == 0, exitCode, fakeRunId, result.State.ToString(), fakeRunDirectory,
-                        exitCode == 0 ? null : "workflow_failed", exitCode == 0 ? null : "オーケストレーションが失敗しました。");
+                        exitCode == 0 ? null : "workflow_failed", exitCode == 0 ? null : "オーケストレーションが失敗しました。",
+                        lifecycleWriter.SentSlackSends, lifecycleWriter.FailedSlackSends);
                 else
                 {
                     Console.WriteLine($"{(agentKind == "codex" ? "Codex CLI実行" : "Fake実行")}を記録しました: {fakeRunId}");
@@ -305,8 +306,10 @@ internal static class OrchestratorCli
     private static void WriteStructuredError(string code, string message, int exitCode, IReadOnlyList<string>? details = null) =>
         Console.WriteLine(JsonSerializer.Serialize(new { protocolVersion = 1, ok = false, exitCode, error = new { code, message, details } }));
 
-    private static void WriteStructuredResult(bool ok, int exitCode, string? runId, string? state, string? runDirectory, string? errorCode, string? message) =>
+    private static void WriteStructuredResult(bool ok, int exitCode, string? runId, string? state, string? runDirectory, string? errorCode, string? message,
+        int slackSent = 0, int slackFailed = 0) =>
         Console.WriteLine(JsonSerializer.Serialize(new { protocolVersion = 1, ok, exitCode, runId, state, runDirectory,
+            slack = new { sent = slackSent, failed = slackFailed },
             error = errorCode is null ? null : new { code = errorCode, message } }, new JsonSerializerOptions { Converters = { new JsonStringEnumConverter() } }));
 
     /// <summary>startコマンドの引数から実行記録の保存先を解決します。</summary>

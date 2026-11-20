@@ -86,6 +86,8 @@ public sealed class StdioJsonCliTests
             using var json = JsonDocument.Parse(output.ToString());
             Assert.True(json.RootElement.GetProperty("ok").GetBoolean());
             Assert.Equal("NeedsHumanInput", json.RootElement.GetProperty("state").GetString());
+            Assert.Equal(0, json.RootElement.GetProperty("slack").GetProperty("sent").GetInt32());
+            Assert.Equal(0, json.RootElement.GetProperty("slack").GetProperty("failed").GetInt32());
             Assert.True(Directory.Exists(json.RootElement.GetProperty("runDirectory").GetString()));
             Assert.DoesNotContain("状態:", output.ToString());
         }

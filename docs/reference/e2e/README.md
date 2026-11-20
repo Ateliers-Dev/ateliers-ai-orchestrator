@@ -1,14 +1,14 @@
 # E2E実行基盤
 
 > 作成日: 2026-11-17
-> 更新日: 2026-11-18
+> 更新日: 2026-11-20
 > 作成者: yuu503
 
 ## このフォルダについて
 
 このフォルダには、E2E 実行基盤の共通手順と、個別シナリオの実行条件・確認項目を置きます。新しい種類の文書やシナリオを追加・変更するときは、この README も併せて更新してください。
 
-このE2E基盤とTestbedシナリオの実行主体はユーザー本人です。開発ワーカーは準備確認・実行を行いません。開発時は [IntegrationTestの実行範囲と手順](../development-integration-tests.md) を参照してください。ここで起動するのはソースからRelease buildしたCLIであり、インストール済みCLIやMCPの導入・接続確認は別の最終受入項目です。
+実Codexを使うTestbedシナリオの準備確認・実行はユーザー本人が行います。開発ワーカーはこのスクリプトを呼び出しません。開発時は [IntegrationTestの実行範囲と手順](../development-integration-tests.md) を参照してください。ここで起動するのはソースからRelease buildしたCLIであり、インストール済みCLIやMCPの導入・接続確認は別の最終受入項目です。
 
 `scripts/e2e/run-codex-e2e.ps1` は、シナリオ契約を受け取り、契約の `inputs[].reference` にある単一のGitHubリポジトリを使って準備確認または明示許可後のCodex実行を行います。参照形式はGitHubのblob、issue、commitなどを使えますが、全参照はUserInfo・query・fragmentを含まない `https://github.com/{owner}/{repo}/...` 形式で同じリポジトリを指す必要があります。形式が不明、または複数のリポジトリを指す場合は停止します。共通の起動、終了コード確認、一時領域、公開操作ゲート、証跡確認を担当します。シナリオ固有の作業範囲と受入条件は `scripts/e2e/scenarios/` の契約ファイルに置きます。
 
@@ -34,27 +34,27 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\e2e\run-codex-
 
 ## 実Codex実行
 
-準備確認が成功した後、`-RunCodex` を指定します。開始前に公開操作と費用可能性を表示し、確認文の完全一致を要求します。
+準備確認が成功した後、`-RunCodex` を指定します。これは実行開始の明示指定です。スクリプトは対話入力を使わず、すべての前提を検証してからCodexを起動します。CI/CDではこのスイッチを明示したジョブだけが実行します。
 
 ~~~powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\e2e\run-codex-e2e.ps1 -RunCodex
 ~~~
 
-Codex CLIをPATHから解決できない環境では、絶対パスを指定できます。
+Codex CLIは `-CodexExecutable`、環境変数 `ATELIERS_CODEX_CLI_PATH`、PATH上の `codex.exe` / `codex.ps1` / `codex.cmd` の順で解決します。明示パスは絶対パスにしてください。
 
 ~~~powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\e2e\run-codex-e2e.ps1 -RunCodex -CodexExecutable 'C:\Tools\Codex\codex.exe'
 ~~~
 
-E2EのSlack通知モードは `-SlackNotifications disabled|test|auto` で明示できます。省略時は `disabled` で、Slack設定を読み込まず、認証通信も送信もしません。通知を検証するときだけ `test` または `auto` を選びます。
+Milestone 1の最終E2EではSlack通知は必須で、`testChannelId` 固定です。`disabled` と `auto` は受け付けません。
 
-`test` は `%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\config\slack.json` の `testChannelId` へ `[Ateliers AI TEST]` と明示した通知を送り、`auto` は各Botの通常 `channelId` へ送ります。必要なら `-SlackConfigurationPath` と `-SlackSecretsPath` の両方でローカル設定の場所を指定できます。Bot認証と送信先を実Codex起動前に確認し、送信先IDを表示します。Token値は表示・記録しません。通常チャンネルとテストチャンネルは異なる値でなければなりません。
+通知は `%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\config\slack.json` の `testChannelId` へ送ります。必要なら `-SlackConfigurationPath` と `-SlackSecretsPath` の両方でローカル設定の場所を指定できます。Bot認証と送信先を実Codex起動前に確認し、Token値は表示・記録しません。
 
-通知モードを明示したE2Eでは、Slack送信成功件数とrun IDの到達確認が必要です。成功を確認できない場合は、PR等の証跡があっても不合格です。確認文には選択したモードと送信先チャンネルIDが含まれます。
+Slack API成功件数が機械可読なCLI結果で1件以上、失敗0件であることを確認します。結果は一時実行領域の `e2e-result.json` に段階・run IDとともに記録されます。Slack画面での受信確認はこのE2Eゲートに含めません。
 
-TestbedレビューサイクルでSlack通知ONが指定された実行では、`-SlackNotifications test` を明示します。これは設定済み `testChannelId` への送信を選びます。通常通知先を使う `auto` はユーザーが明示した場合だけ選びます。Slack設定やBot認証が不足している場合はSlack ONのまま準備阻害として報告し、`disabled` へ切り替えません。スクリプトの一般既定値は `disabled` のため、このシナリオで通知を有効にする際は明示指定が必要です。
+Slack設定やBot認証が不足している場合は準備段階で停止し、通知を無効化したり通常通知先へ切り替えたりしません。
 
-実行は一意な一時cloneと専用作業ブランチを使います。PR作成、Reviewer結果コメント、head/base SHA、GitHub上のPRがOPENでbaseがmainであることを確認しない限り、合格を表示しません。`test` または `auto` のときはSlack送信と人間による到達確認も追加の合格条件です。自動マージはしません。PRは人間の確認後も開いたままにし、Testbed `main` へマージしません。
+実行は一意な一時cloneと専用作業ブランチを使います。PR作成、Reviewer結果コメント、head/base SHA、GitHub上のPRがOPENでbaseがmainであることを確認しない限り、合格を表示しません。Slack API送信成功も合格条件です。自動マージはしません。PRは人間の確認後も開いたままにし、Testbed `main` へマージしません。
 
 Codex開始後の失敗、中断、証跡不一致では一時cloneと実行記録を保持します。GitHub上にpush済みブランチやPRが残った可能性がある場合、人間が状態を確認してください。正常終了した場合も記録は自動削除しません。
 
