@@ -50,7 +50,7 @@ NeedsHumanInputを非終端にするためCLI/MCP protocol versionをv2へ更新
 
 新規MCP Tool resume_orchestrationと読み取り専用get_run_statusを追加し、対応CLI契約を加える。これらは現行Toolではない。run_orchestrationは変更しない。CLI/MCP protocol versionをv2へ更新し、get_run_status応答にcanResumeを含める。checkpointのない旧Runは原則再開不可。WorkはRun状態と保留質問を取得し、人間の回答を同じRun IDでMCPへ渡す。Slack経路は提供しない。
 
-resume_orchestrationのprotocol v2要求field: runId, decisionId, expectedStateRevision, expectedPhase, expectedHeadSha, expectedDiffDigest, answer.choice/answer.text。これらを必須とする。get_run_statusはrunIdを受け、state, canResume, pending question/phase, stateRevision, checkpoint SHAを返す。ローカルMCPの認可済み接続の実行権限と操作経路を信頼境界とし、その設定/経路を監査へ記録する。Workでは明示的な人間回答を得てからresume要求を送る。認可済みローカルMCP接続の実行権限/操作経路を信頼境界として記録し、自己申告actorIdは信頼しない。ローカルMCP接続を人間本人性の証明とはみなさず、本人認証基盤はMilestone 1に追加しない。
+resume_orchestrationのprotocol v2要求field: runId, decisionId, expectedStateRevision, expectedPhase, expectedHeadSha, expectedDiffDigest, answer.choice/answer.text。これらを必須とする。get_run_statusはrunIdを受け、state, canResume, pending question/phase, stateRevision, checkpoint SHAを返す。認可済みローカルMCP接続の実行権限/操作経路を信頼境界とし、その情報を監査に記録する。Work側で明示的な人間回答を得てからresume要求を送る。自己申告actorIdは信頼せず、ローカルMCP接続を人間本人性の証明とはみなさない。本人認証基盤はMilestone 1に追加しない。
 
 応答はaccepted/duplicate、same runId/decisionId、state、resumedPhase、new state revision、安定したerror code/current revisionを返す案。成功でもRun IDを変えない。拒否時は状態/成果物を変更しない。
 
