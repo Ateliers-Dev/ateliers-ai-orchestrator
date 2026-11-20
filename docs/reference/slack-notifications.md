@@ -92,5 +92,5 @@ Agent個別設定にある `slackBotId` は `slack.json` の `bots[].id` を参�
 ## 関連資料
 
 - [Agent設定と指示管理](agent-configuration-and-instructions.md)
-- [AIエージェント機能の概要](../Feature/README.md)
+- [AIエージェントのSlack通知機能](../Feature/ai-agent-slack-notifications.md)
 - [Slack E2Eの通知モード](e2e/README.md)

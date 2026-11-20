@@ -120,5 +120,5 @@ Slackの接続先と秘密情報は、既存の `config/slack.json` と `config/
 ## 関連資料
 
 - [Slack通知設計](slack-notifications.md)
-- [AIエージェント機能の概要](../Feature/README.md)
+- [AIエージェントのSlack通知機能](../Feature/ai-agent-slack-notifications.md)
 - [Slack設定サンプルの説明](../../config/README.md)
