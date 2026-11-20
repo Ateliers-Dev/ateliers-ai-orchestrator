@@ -27,9 +27,17 @@
     └── backups\
 ```
 
+実行時データも同じ製品rootを使いますが、インストーラーの `bin` や `config` には含まれません。
+
+```text
+%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\
+├── runs\                 # CLI start/runの既定実行記録
+└── lifecycle.jsonl        # CLI runの既定ライフサイクルログ
+```
+
 `bin` がインストール物の単位で、MCP等の後続プロセスは常に `bin\Ateliers.Ai.Orchestrator.Cli.exe` を指定する。起動バージョンは同階層のマニフェストとCLI自身の `--version` で確認できる。インストール先はPATHへ追加しない。
 
-実行記録・ライフサイクルログの既定先はOSのユーザー用アプリケーションデータ領域にある `Ateliers/Orchestrator` です。CLIの実行場所やGit作業領域から切り離し、既定動作でcheckoutを汚さないようにします。`--runs` と `--lifecycle-log` による明示パスは維持します。Slack設定は独立したユーザー設定として `config` に配置し、CLIの実行場所・カレントディレクトリから切り離します。`--slack-config` と `--slack-secrets` による明示パスは維持します。ユーザー設定がない開発実行は、CLI実行ファイルの配置先からリポジトリの `config` を探します。
+CLI `start` と `run` の実行記録・ライフサイクルログは、未指定なら正規製品root `%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator` の `runs` と `lifecycle.jsonl` を使います。CLIの実行場所やGit作業領域から切り離し、既定動作でcheckoutを汚さないようにします。`--runs` と `--lifecycle-log` による明示パスはそれぞれ独立して優先されます。旧既定先 `%LOCALAPPDATA%\Ateliers\Orchestrator` の実行記録やログは旧場所に残し、自動移動・削除しません。既存データはファイルとして直接参照し、旧保存先を今後の実行記録・ログの出力先にする場合に限り、`--runs <旧保存先のrunsディレクトリ>` または `--lifecycle-log <旧保存先のlifecycle.jsonl>` を指定してください。Slack設定は独立したユーザー設定として `config` に配置し、CLIの実行場所・カレントディレクトリから切り離します。`--slack-config` と `--slack-secrets` による明示パスは維持します。ユーザー設定がない開発実行は、CLI実行ファイルの配置先からリポジトリの `config` を探します。
 
 ## 3. Release生成と配布物
 

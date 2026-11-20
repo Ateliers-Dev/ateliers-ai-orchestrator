@@ -331,7 +331,7 @@ internal static class OrchestratorCli
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (string.IsNullOrWhiteSpace(localDataDirectory))
             throw new InvalidOperationException("ユーザーデータ保存先を解決できません。");
-        return Path.Combine(localDataDirectory, "Ateliers", "Orchestrator");
+        return Path.Combine(localDataDirectory, "Ateliers-Dev", "Ai-Orchestrator");
     }
 
     /// <summary>Fake実行のシナリオと保存先、外部証跡入力を解析します。</summary>
