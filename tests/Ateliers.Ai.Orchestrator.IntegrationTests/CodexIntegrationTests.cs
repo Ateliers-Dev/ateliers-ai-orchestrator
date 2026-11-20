@@ -40,12 +40,25 @@ public sealed class CodexIntegrationTests
             run = await InvokeOrchestratorAsync(cliAssembly, Path.GetFullPath(codexExecutable!), fixture);
             Assert.True(run.ExitCode == 0,
                 $"Orchestrator終了コードが0ではありません: {run.ExitCode}");
+            var runDirectoryLine = run.StandardOutput.Split(Environment.NewLine)
+                .FirstOrDefault(line => line.StartsWith("記録先: ", StringComparison.Ordinal));
+            Assert.False(string.IsNullOrWhiteSpace(runDirectoryLine),
+                $"Orchestrator出力に実行記録先がありません。stdout:{Environment.NewLine}{run.StandardOutput}");
+            runDirectory = Path.GetFullPath(runDirectoryLine!["記録先: ".Length..].Trim());
+            var runsRoot = Path.GetFullPath(fixture.RunsDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                + Path.DirectorySeparatorChar;
+            Assert.True(runDirectory.StartsWith(runsRoot,
+                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal),
+                $"実行記録先がfixtureのruns配下ではありません: {runDirectory}");
+
             var exchangeDirectory = Path.Combine(runDirectory, "exchanges");
-            var implementerResponses = Directory.Exists(exchangeDirectory)
-                ? Directory.EnumerateDirectories(exchangeDirectory, "implementer-*")
-                    .Select(directory => Path.Combine(directory, "response.md"))
-                    .Where(File.Exists)
-                : [];
+            Assert.True(Directory.Exists(exchangeDirectory), $"Agent応答の保存先がありません: {exchangeDirectory}");
+            var implementerResponses = Directory.EnumerateDirectories(exchangeDirectory, "implementer-*")
+                .Select(directory => Path.Combine(directory, "response.md"))
+                .Where(File.Exists)
+                .ToArray();
+            Assert.True(implementerResponses.Length > 0,
+                $"Implementer応答ファイルが見つかりません: {exchangeDirectory}");
             Assert.Contains(implementerResponses,
                 path => !string.IsNullOrWhiteSpace(File.ReadAllText(path)));
             succeeded = true;
