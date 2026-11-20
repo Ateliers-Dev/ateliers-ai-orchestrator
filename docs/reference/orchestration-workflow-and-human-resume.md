@@ -17,18 +17,18 @@
 | Phase | 変更範囲 | 成功ゲート/証跡 |
 | --- | --- | --- |
 | 1 実装 | 本体コード。テスト変更なし | 開始/終了SHA、許可範囲内のdiff、実行記録。テストbuild失敗を許容 |
-| 2 コードレビュー | 変更なし | Implementerと異なるReviewer Agent ID/実行ID。対象SHA/diff digestと結果 |
-| 3 テスト | テストコードのみ | 本体コード差分なしをGit情報で判定。テスト実行記録 |
-| 4 全体レビュー | 変更なし | Phase 2とは別の実行。設計版、本体/テストSHA/diff、指摘結果 |
-| 5 PR/最終レビュー | PR作成とレビュー | PR head/base SHA、別Reviewer ID/実行、差分digest、CIと指摘解消。成功後ReadyForHumanReview |
+| 2 コードレビュー | 変更なし | Implementerと異なるAgent ID。Orchestrator発行の新しいAgent実行IDを実起動結果に結び付け、対象SHA/diff digestと結果を保存 |
+| 3 テスト | テストコードのみ | 本体コード差分なしをGit情報で判定。Phase完了時に必要なRelease buildおよび全必須テスト成功の記録 |
+| 4 全体レビュー | 変更なし | Orchestrator発行の新しいAgent実行IDを実起動結果に結び付ける。Agent IDはImplementerと異なる（同じReviewer個体の再利用可）。設計版、本体/テストSHA/diff、指摘結果 |
+| 5 PR/最終レビュー | PR作成とレビュー | PR head/base SHA、Orchestrator発行の新Agent実行IDと実起動結果、Agent ID、差分digest、CIと指摘解消。成功後ReadyForHumanReview |
 
-レビュー後に対象SHAが変わればそのレビューを失効とする。Reviewer IDはrole名やRun IDではなく起動元が発行した識別子とする。Agent起動基盤が識別子を安定して提供できない場合はゲート不合格/NeedsHumanInput。
+レビュー後に対象SHAが変わればそのレビューを失効とする。OrchestratorはAgent ID（例: altair、誰がレビューしたか）とAgent実行ID（例: review-0004、どの独立実行か）を分ける。実行IDはOrchestratorが発行し、実際のReviewer起動結果に関連付ける。Phase 2/4/5ごとに新しい実行を必須とし、Reviewer個体の再利用は許可する。起動結果のないID発行、Agent IDがImplementerと同じ、対象SHA/レビュー証跡不一致ではゲートを通さない。
 
 ## 3. ゲートと差し戻し
 
 標準順序はPrepared→Phase1→2→3→4→5→ReadyForHumanReview。Phase 2の実装指摘はPhase 1、Phase 4/5の本体指摘はPhase 1、テスト指摘はPhase 3へ戻す。すべて担当Phaseと対象SHA、理由、試行回数を記録する。
 
-ゲートはRun/phase ID、branch/SHA、diff/artifact digest、変更path、必要なテスト/build終了コードと件数、Reviewer ID/実行/対象SHA/結果を検証する。証跡の無い条件はunknownで不合格。reviewer ID重複、対象SHA差、未解決指摘、変更範囲違反で先に進まない。上限値は既存のPRレビュー最大3回・gate再試行1回を候補とし、Phase横断値は実装前の未決。
+ゲートはRun/phase ID、branch/SHA、diff/artifact digest、変更path、必要なテスト/build終了コードと件数、Reviewer ID/実行/対象SHA/結果を検証する。証跡の無い条件はunknownで不合格。reviewer ID重複、対象SHA差、未解決指摘、変更範囲違反で先に進まない。修正・再レビューはPhase 2/4/5ごとに最大3回（初回レビュー除外）、一時的なgate再試行はPhaseごとに最大1回、Run全体の自動差し戻しは最大6回。コード変更を伴うgate retryは修正回数にも算入する。回数をcheckpointに保存しリセットしない。Milestone 1では固定値とする。
 
 ## 4. 状態と保存
 
@@ -42,21 +42,21 @@
 | ReadyForHumanReview | PRとPhase 5レビュー完了。人間の最終確認待ち、AI再開なし |
 | Failed | 自動継続不能。通常resumeなし |
 
-推奨はRun directory内の版付きcheckpoint manifestと既存JSONL event logの追記を使う。manifestはcurrent checkpointを示し、JSONLはtransition/decision/effect履歴を保つ。新DBは提案しない。manifestにrun/contract hash、state revision、phase/attempt、質問/選択肢、branch/base/head SHA、worktree/diff digest、artifact refs/digests、pending decision/effect ledgerを含める。ファイル名、atomic replace/fsync、lock方式は未決。
+Run単位の排他制御下で、Run directory内の版付きcheckpoint manifestをPhase完了時とNeedsHumanInput移行時に原子的に更新する。manifestはcurrent checkpointを示し、既存JSONL event logはtransition/decision/effectの監査履歴を保つ。外部操作は実行直前に予定、実行直後に結果を記録する。既存成果物はレビュー/テスト/PR証跡、外部操作記録は重複防止を担う。新DBは導入しない。manifestにrun/contract hash、state revision、phase/attempt、質問/選択肢、branch/base/head SHA、worktree/diff digest、artifact refs/digests、pending decision/effect ledgerを含める。ファイル形式の詳細は実装設計で定める。不整合・破損時は推測復旧せず停止する。
 
-NeedsHumanInputを非終端にする変更は既存clientが終端扱いする場合に影響する。isTerminal/canResumeの明示fieldかprotocol version変更かを決め、旧Runは再開checkpointがない限りlegacy-not-resumableとする。
+NeedsHumanInputを非終端にするためCLI/MCP protocol versionをv2へ更新し、状態取得の応答にcanResume等の能力fieldを含める。MCPに読み取り専用get_run_statusとresume_orchestrationを追加し、既存run_orchestrationは変更しない。旧Runにcheckpointがなければlegacy-not-resumableとする。
 
 ## 5. MCP再開契約案
 
-新規MCP Tool名はresume_orchestrationを候補とし、対応CLIコマンド/プロトコル契約を追加する。これは現行Toolではない。WorkはRun状態と保留質問を取得し、人間の回答を同じRun IDでMCPへ渡す。Slack経路は提供しない。
+新規MCP Tool resume_orchestrationと読み取り専用get_run_statusを追加し、対応CLI契約を加える。これらは現行Toolではない。run_orchestrationは変更しない。CLI/MCP protocol versionをv2へ更新し、get_run_status応答にcanResumeを含める。checkpointのない旧Runは原則再開不可。WorkはRun状態と保留質問を取得し、人間の回答を同じRun IDでMCPへ渡す。Slack経路は提供しない。
 
-要求する論理field: runId, decisionId, expectedStateRevision, expectedPhase, expectedHeadSha, expectedDiffDigest, answer.choice/answer.text。ID、revision、checkpoint SHA、回答を必須とする。Workから届く判断を何の信頼境界で人間/呼出元に結び付けるかは未決。callerが自由に指定するactor IDを認証済み証拠として扱わず、現行stdio/MCPのローカル起動境界と既存権限を確認する。認証機構の拡張が必要かも実装前に判断する。
+resume_orchestrationのprotocol v2要求field: runId, decisionId, expectedStateRevision, expectedPhase, expectedHeadSha, expectedDiffDigest, answer.choice/answer.text。これらを必須とする。get_run_statusはrunIdを受け、state, canResume, pending question/phase, stateRevision, checkpoint SHAを返す。ローカルMCPの認可済み接続の実行権限と操作経路を信頼境界とし、その設定/経路を監査へ記録する。Workでは明示的な人間回答を得てからresume要求を送る。認可済みローカルMCP接続の実行権限/操作経路を信頼境界として記録し、自己申告actorIdは信頼しない。ローカルMCP接続を人間本人性の証明とはみなさず、本人認証基盤はMilestone 1に追加しない。
 
 応答はaccepted/duplicate、same runId/decisionId、state、resumedPhase、new state revision、安定したerror code/current revisionを返す案。成功でもRun IDを変えない。拒否時は状態/成果物を変更しない。
 
 ### 再開順序
 
-1. 入力/回答/IDを検証し、信頼済み境界からcaller provenanceを確立できるか確認したうえでRun単位の排他を取得する。callerを認証/識別できない場合は判断の受理・再開を行わない。
+1. 入力/回答/IDを検証し、認可済みローカルMCP接続の実行権限/操作経路を確認・記録したうえでRun単位の排他を取得する。caller由来のactorIdは認可証拠に使わない。
 2. NeedsHumanInput、保留質問、許可された判断、状態revisionとPhaseを確認する。
 3. contract/checkpoint integrity、branch/base/head SHA、worktree status/diff digestと全参照artifact digestを停止時記録と照合する。変更を自動resetしない。
 4. decisionId ledgerを確認する。同じID/内容は過去の結果を返す。同じID/異なる内容と競合revisionは拒否する。
@@ -68,7 +68,7 @@ FilesystemとGitHubの外部副作用は単一transactionにできない。pendi
 
 ## 6. 失敗時の挙動
 
-- 不正判断、信頼できない/不明なcaller provenance、decision ID内容衝突、古いrevision、状態不一致: 拒否、Runは不変。
+- 不正判断、未認可ローカルMCP接続、decision ID内容衝突、古いrevision、状態不一致: 拒否、Runは不変。
 - Branch/SHA/artifact/diff mismatch: NeedsHumanInputを維持し、証跡を記録して人間へ返す。
 - 欠落/未知の旧checkpoint: 自動推定せず再開不可を返す。
 - checkpoint破損、回復不能な保存障害: 診断後Failed。回答を受け付けない。
@@ -77,11 +77,11 @@ FilesystemとGitHubの外部副作用は単一transactionにできない。pendi
 
 ## 7. 検証計画
 
-本設計文書PRでは実施しない。実装時にUnit/FakeTestsでPhase順/allowlist、独立ReviewerとSHA、gate判断、差戻し/上限、状態遷移、旧checkpoint、通常再開/mismatch、重複/並行回答、監査/中断復旧、重複push/PR/comment防止を決定論的に検証する。MCP→CLI→Coreのrequest/response、互換性、秘匿もfakeで確認する。実Codex/Slack/GitHub副作用は文書確認後の別E2Eだけで扱う。
+本設計文書PRでは実施しない。実装時にUnit/FakeTestsでPhase順/allowlist、独立ReviewerとSHA、gate判断、Phase/Run上限、Phase 3のRelease build/テスト成功、状態遷移、旧checkpoint、通常再開/mismatch、重複/並行回答、監査/中断復旧、重複push/PR/comment防止を決定論的に検証する。MCP→CLI→Coreのrequest/response、互換性、秘匿もfakeで確認する。実Codex/Slack/GitHub副作用は文書確認後の別E2Eだけで扱う。
 
 ## 8. Issue/PR
 
-- #109: Milestone 1最終Testbed E2E。5 Phase/resume受入を追加するか文書確認後に判断。ここでは変更しない。
+- #109: 既存最終Testbed E2E受入条件を維持する。5段階/再開のUnit/FakeTests受入を事前ゲートとして通し、#109では5段階実行証跡を確認する。判断待ちを強制せず、再開はUnit/FakeTestsで検証する。Slack Run IDはスレッド内専用返信に1回だけ表示する条件へ明確化する。
 - #79: Implementer検証証跡を再利用する。
 - #80: push前検査を再利用し、過去の原因未確定を維持する。
 - #84: 解決済み子プロセス.NET環境との整合を受入確認する。
