@@ -14,5 +14,6 @@
 - [Git安全性の回帰対策](git-safety-regressions.md)
 - [Agent設定と指示管理](agent-configuration-and-instructions.md)
 - [Slack通知設計](slack-notifications.md)
+- [ワークフロー・品質ゲート・Run再開の設計](orchestration-workflow-and-human-resume.md): Milestone 1の将来設計
 
 新しい文書の種類や分類を追加・変更するときは、この README も併せて更新してください。

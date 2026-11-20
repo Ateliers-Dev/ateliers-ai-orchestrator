@@ -1,10 +1,10 @@
 # Ateliers AI Orchestrator 開発計画
 
 > 作成日: 2026-11-18
-> 更新日: 2026-11-20
+> 更新日: 2026-11-21
 > 作成者: yuu503
 
-> 状態: Milestone 0完了記録・Milestone 1残作業案（#109が最終受入ゲート、#105は独立追跡、自律マージは将来候補）
+> 状態: Milestone 0完了記録・Milestone 1計画（5段階標準と再開設計を追加。文書PR確認後に実装着手）
 
 > 対象: Ateliers-Dev/ateliers-ai-orchestrator
 
@@ -68,7 +68,17 @@ Milestone 0の目的は、MCP→CLI→Coreの実行経路、契約に基づくFa
 
 ### 3.1 中心目標と委譲運用方針（合意済み）
 
-Milestone 1の目標は、オーケストレーションの仕組みをオーケストレーション自身によって改善できることを実証することである。Issueと上位の指示で許可された範囲内で、実装の委譲、独立レビュー、指摘修正と再レビュー、品質ゲート、PR作成、成果物と証跡の記録までを行う。PRの最終的な承認とマージ判断・操作は人間が担当する。自律マージ機能はMilestone 1の必須条件ではなく、実装・受入テストを行わない。
+Milestone 1の目標は、従来のワークフローでは「Orchestratorが自身の改善を完遂する」という目標について機能的成功は可能でも、要求する品質基準に達しない可能性があるという課題を解消し、Orchestrator自身の改善を品質証跡とともにPR作成まで完遂できることを実証することである。Issueと上位の指示で許可された範囲で、5段階標準ワークフロー、再開可能な人間判断待ち、品質ゲートと証跡記録までを扱う。PRの最終承認とマージ判断・操作は人間が担当する。自律マージはMilestone 1の必須条件ではなく、実装・受入テストを行わない。設計文書は[Milestone 1自己改善ワークフローとRun再開要求](../requirements/milestone-1/self-improvement-workflow-and-resume.md)、[ワークフロー・品質ゲート・Run再開の設計](../reference/orchestration-workflow-and-human-resume.md)を参照する。
+
+#### 標準の5段階ワークフロー
+
+1. **本体機能実装** — テストコードを変更しない。テストビルドの失敗は許容する。
+2. **本体コードの独立レビュー** — Implementerとは別のReviewer Agentを明示起動し、Reviewer Agent ID、実行ID、対象コミット/差分、結果を保存する。
+3. **テスト追加・修正** — テストコードだけを変更し、本体コードを変更しない。差分検査で範囲を確認する。Phase 3完了時に必要なRelease buildとテスト成功を必須にする。
+4. **設計・本体コード・テストの独立全体レビュー** — Reviewer Agentの新しい独立実行を明示起動し、設計と全差分を確認する。
+5. **PR作成・最終独立レビュー** — PRのhead/base SHAに対し、さらに新しいReviewer実行を起動する。指摘修正は担当Phaseへ戻す。完了後は人間の最終確認待ちとし、AIはマージしない。
+
+Phase間ゲートはレビュー結果に加えテスト結果、変更範囲、対象コミット/SHA、差分証跡で判定する。自己レビュー、対象SHA不一致、必須証跡欠落、Phase範囲違反、未解決指摘を成功扱いしない。Phase 2・4・5それぞれで指摘への修正・再レビューを最大3回（初回レビューは除外）、同一Phase内の一時的な品質ゲート失敗の再実行を最大1回、Run全体の自動差し戻しを合計6回までとする。コード変更を伴うゲート再試行はPhaseの修正回数にも数える。各カウンターはcheckpointへ保存し、再開後もリセットしない。Milestone 1では固定値を使い、将来設定可能とする拡張は対象外。問題は担当Phaseへ差し戻し、上限超過または人間判断が必要なら再開可能なNeedsHumanInputに停止する。
 
 #### PRレビューと人間による最終マージ
 
@@ -111,24 +121,31 @@ Milestone 1では自律マージを実装せず、FakeTestsを含む自律マー
 
 | 順序 | Issue / 項目 | 状態・位置づけ | 次に必要な検証 |
 | --- | --- | --- | --- |
-| 1（最終段階） | [#109 最終Testbed E2E](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/109) | Open・タイトルP1。M1最終ゲート。[PR #114](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/pull/114)はmerge commit `fae6204` でmainへ反映済み。Windows/Ubuntu必須CIと独立レビュー成功。最終E2E未実施。 | PR #114の非対話準備はmainへ反映済み。受入範囲を整理する本件文書PRを別途レビューする。以降の#109最終E2Eでは実Codex/Reviewer接続・Run証跡、Release build・5 checks、testChannel API成功、必要なpush/PR経路、SHA整合、main不変を確認する。成功PRはOPENで終了し、最終マージは人間が担当する。 |
+| 1（最終段階） | [#109 最終Testbed E2E](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/109) | Open・タイトルP1。M1最終ゲート。[PR #114](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/pull/114)はmerge commit `fae6204` でmainへ反映済み。Windows/Ubuntu必須CIと独立レビュー成功。最終E2E未実施。 | PR #114の非対話準備はmainへ反映済み。受入範囲を整理する本件文書PRを別途レビューする。5段階/再開のUnit/FakeTestsを事前ゲートとして成功させた後、#109最終E2Eでは実Codex/Reviewer接続・Run証跡、Release build・5 checks、testChannel API成功、必要なpush/PR経路、SHA整合、main不変を確認する。Runの人間判断待ちが自然発生しなければ強制しない。成功PRはOPENで終了し、最終マージは人間が担当する。 |
 | 独立追跡 | [#105 testhost接続問題](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/105) | Open・タイトルP2。M1完了条件外。 | Work環境の制約をCI/別Windows環境の結果と分けて調査。解消を他開発の前提にしない。 |
 | 後続候補 | [#36 Slackライフサイクル通知](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/36) | Open・Milestone/priorityなし。現計画では機能拡張。 | #109はtestChannelへの最小API成功だけを確認。スレッド/broadcast/複数Bot設計は#36の個別範囲。 |
 | 後続候補 | [#77 MCP実行環境パス](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/77) | Open・Milestone/priorityなし。今回の対象外。 | 既存の固定CLIパスで不足が再発・拡大した場合に再優先付けする。 |
 
 完了済み前提は[#84](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/84)、[#79](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/79)、[#80](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/80)、[#107](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/107)、[#108](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/108)。checkout/worktreeと実Git回帰はClosedの#51/#54等を再利用し、重複実装しない。
 
-### 3.3 Milestone 1の最小完了条件（提案）
+### 3.3 Milestone 1の最小完了条件（合意済み）
 
-1. #84/#79/#80/#107/#108はそれぞれの受入条件・証跡により完了済み。#80の元Run原因未確定は残存リスクとして保ち、原因特定を遡及的な必須条件にしない。
-2. 通常PRでは対象Windows・Ubuntu必須CI（UnitTests/FakeTests）と独立レビューを確認する。変更範囲が要求しない実外部IntegrationTestsやAI判断品質を重複ゲート化しない。
-3. #109を一度実施し、CLI経由の実Codex起動、Implementer/Reviewer接続、Run ID/対象SHA、Release build・Testbed 5 checks、専用testChannelへのSlack API成功、必要な専用一時ブランチのpush/PRと証跡のhead/base SHA一致を記録する。GitHub公開経路はIssue本文の元の要求を満たすのに必要な範囲を保ち、実施前にその必要十分性を明記する。
-4. Testbed mainは不変、既存ブランチ/PRは無変更、force pushなし、成功PRはOPENで終了とする。E2Eで自律マージや実マージを試験しない。失敗時は外部状態を自動削除/クローズせず、Codex未開始と開始後失敗を区別する。
-5. Run ID、対象SHA、PR、CI/Reviewerコメント、Slack API応答、最終状態を相互に追跡可能にする。Reviewerの自然言語判断品質、Slack画面到達確認、#36全体はこのゲートに含めない。
+文書PRを人間が確認するまで本体コード実装と#109最終E2Eを開始しない。5段階と再開機能のUnitTests/FakeTests受入を事前ゲートとして完了し、既存の#109受入条件を維持したうえで、5段階の実行証跡を#109で確認する。判断待ちが自然発生しない場合にE2Eで無理に発生させず、再開機能はUnit/Fakeで決定論的に検証する。文書確認後は、次の順序で機能を実装・受け入れる。
 
-自律マージはMilestone 1の完了条件から除外する。Issue #109本文・受入条件は変更しない。testChannel、権限、対象SHAを安全に確認できない場合は実E2Eを開始せず準備阻害として扱う。#105解決は他の開発やM1完了の前提にしない。
+1. 5段階標準を実装し、Phase 1/3の差分制約、Phase 2/4/5のImplementerとは異なるAgent ID、Phaseごとの新規実行ID、対象SHA/差分証跡をUnit/FakeTestsで検証する。
+2. テスト結果、変更範囲、対象コミット/SHAなどの客観証跡から各ゲートを判定し、担当Phaseへの差し戻し、上限到達時のNeedsHumanInputをUnit/FakeTestsで確認する。
+3. NeedsHumanInputから同一Run IDで信頼可能な人間判断を受領し、安全checkpointから再開する。branch/SHA/artifact/revisionの一致、認可済みローカルMCP接続の記録、decision ID冪等性、重複外部副作用防止、監査記録と失敗挙動をUnit/FakeTestsで検証する。
+4. #84/#79/#80/#107/#108はそれぞれの受入条件・証跡により完了済み。#80の元Run原因未確定は残存リスクとして保ち、原因特定を遡及的な必須条件にしない。
+5. 通常PRでは対象Windows・Ubuntu必須CI（UnitTests/FakeTests）と独立レビューを確認する。変更範囲が要求しない実外部IntegrationTestsやAI判断品質を重複ゲート化しない。
+6. 上記実装と決定論的受入が完了した後に#109を一度実施し、CLI経由の実Codex起動、Implementer/Reviewer接続、Run ID/対象SHA、Release build・Testbed 5 checks、専用testChannelへのSlack API成功、必要な専用一時ブランチのpush/PRと証跡のhead/base SHA一致を記録する。GitHub公開経路はIssue本文の元の要求を満たすのに必要な範囲を保ち、実施前にその必要十分性を明記する。
+7. Testbed mainは不変、既存ブランチ/PRは無変更、force pushなし、成功PRはOPENで終了とする。E2Eで自律マージや実マージを試験しない。失敗時は外部状態を自動削除/クローズせず、Codex未開始と開始後失敗を区別する。
+8. Run ID、対象SHA、PR、CI/Reviewerコメント、Slack API応答、最終状態を相互に追跡可能にする。Reviewerの自然言語判断品質、Slack画面到達確認、#36全体はこのゲートに含めない。
+
+軽量/他ワークフローと自律マージはMilestone 1の完了条件から除外する。Issue #109の受入条件は維持し、Slack Run IDの表示位置だけをスレッド内専用返信1回に明確化する。testChannel、権限、対象SHAを安全に確認できない場合は実E2Eを開始せず準備阻害として扱う。#105解決は他の開発やM1完了の前提にしない。
 
 ## 4. Milestone 1では必須にしない後続候補
+
+軽量ワークフロー、5段階標準以外のワークフロー構成、Phase省略や選択は今回対象外とする。標準の実証後、品質/コストの証跡をもとに将来Issueで扱う。
 
 これらは自己改善の最小サイクルを成立させるための必須条件から外す提案である。価値がないという意味ではなく、基本経路の実証後に優先度を判断する。
 
@@ -163,7 +180,7 @@ Milestone 1では自律マージを実装せず、FakeTestsを含む自律マー
 
 ## 6. 現在の判断状況
 
-2026-11-20の方針変更を本書および状況報告に記録する。自律マージ機能の新規Issueは作成せず、Issue #109の本文・状態・受入条件、他の既存IssueおよびGitHub Milestoneは変更しない。Milestone 1では人間がPRの最終承認とマージを行う。
+2026-11-20の人間最終マージ方針と、2026-11-21に合意した5段階標準・再開設計を本書と関連文書に記録する。Issue #109の既存最終E2E受入条件は維持し、5段階/再開のUnit/FakeTestsを実行前ゲートとして追加した。最終E2Eでは5段階の実行証跡を確認し、NeedsHumanInputが自然に発生しない場合は強制しない。Slack Run IDの表示条件はスレッド内専用返信1回に明確化した。Issue #109の変更は再開設計の判断を反映したものであり、#109の既存受入条件やGitHub Milestoneの範囲は変更していない。軽量/他ワークフローのIssueは今回作成しない。Milestone 1では人間がPRの最終承認とマージを行う。
 
 ## 7. 参照資料
 
@@ -176,6 +193,8 @@ Milestone 1では自律マージを実装せず、FakeTestsを含む自律マー
 - [Testbed PR #2 — E2E通知モードとシナリオ文書](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator-testbed/pull/2)
 - [PR #73 — PowerShell 5.1文字コード修正](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/pull/73)
 - 関連確認対象: [#45](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/45)、[#47](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/47)、[#51](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/51)、[#54](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/54)
+- [Milestone 1自己改善ワークフローとRun再開要求](../requirements/milestone-1/self-improvement-workflow-and-resume.md)
+- [ワークフロー・品質ゲート・Run再開の設計](../reference/orchestration-workflow-and-human-resume.md)
 - [Ateliers ドキュメント作成ガイドライン](https://github.com/Ateliers-Dev/ateliers-website/blob/main/docs/development-guidelines/documentation-guidelines.md) — Feature/Referenceの目的と粒度、実装済みと計画中の区別、Docusaurus文書の構成方針を参照。本書はFeature/Reference仕様書ではなく、次の開発判断へ渡す計画・引継ぎ文書として作成した。
 
 
