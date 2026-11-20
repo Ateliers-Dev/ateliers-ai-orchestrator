@@ -52,6 +52,8 @@ PowerShellでバージョンを明示してRelease CLIをユーザー単位で�
 & .\scripts\cli-installer\Install-AteliersAiOrchestrator.ps1 -Verify
 ```
 
+ベータ版を試す場合は、公開済みのプレリリース番号を明示します（例: `-Version 0.0.4-beta.7`）。インストーラーは安定版と同じSHA-256検証を行い、GitHub Releaseが未公開、またはZIP/checksumが不足している場合は理由を表示して停止します。
+
 CLIの配置先は `%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\bin\`、ユーザー設定先は `%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\config\` です。初回インストール・更新のたびに対象バージョンを明示します。インストーラーはGitHub Release ZIPのSHA-256とCLIのバージョン表示を確認し、配置後に設定インストーラーを既存設定維持モードで呼び出します。インストール、更新、配置確認の挙動と制約は[CLIインストーラー技術仕様](docs/reference/cli-installer.md)を参照してください。
 
 Slack設定を初めて配置するときは、ローカルの `config/slack.json` と `config/slack.secrets.json` を用意してからCLIインストーラーを実行します。JSONだけを更新する場合は次を単独実行します。既存設定はタイムスタンプ付きバックアップへ保存してから置き換えます。

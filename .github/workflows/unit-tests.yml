@@ -24,6 +24,11 @@ jobs:
         shell: powershell
         run: .\tests\cli-installer\Test-AteliersAiOrchestratorConfigInstaller.ps1
 
+      - name: Run CLI release packaging and metadata tests
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\tests\cli-installer\Test-CliRelease.ps1
+
       - name: Set up .NET 10
         uses: actions/setup-dotnet@v4
         with:

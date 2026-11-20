@@ -1,7 +1,7 @@
 # CLIインストーラー技術仕様
 
 > 作成日: 2026-11-17
-> 更新日: 2026-11-18
+> 更新日: 2026-11-20
 > 作成者: yuu503
 
 > 対象実装: `scripts/cli-installer/Install-AteliersAiOrchestrator.ps1`、`.github/workflows/release-cli.yml`、CLI `--version` コマンド。Phase 1 の実装状態を記録する。
@@ -41,14 +41,14 @@ CLI `start` と `run` の実行記録・ライフサイクルログは、未指�
 
 ## 3. Release生成と配布物
 
-`.github/workflows/release-cli.yml` は `v*.*.*` タグのpushで起動する。ハイフンを含むベータ等のプレリリースタグでは公開ジョブを実行せず、GitHub Releaseを作成しない。安定版タグでは.NET 10でソリューションをrestore/buildし、Fake-only Unitテスト（`Category=Unit`）を実行した後、CLIプロジェクトを `win-x64`、self-contained、Releaseでpublishする。プロジェクトの `Version` と `InformationalVersion` に `v` を除いたタグ値を埋め込み、ReleaseソースSHAを記録する。
+`.github/workflows/release-cli.yml` は `v*.*.*` タグのpushで起動する。安定版とハイフン付きプレリリースの両方で.NET 10のrestore/build、Unit/Fakeテストを実行した後、CLIプロジェクトを `win-x64`、self-contained、Releaseでpublishする。プロジェクトの `Version` と `InformationalVersion` に `v` を除いたタグ値を埋め込み、ReleaseソースSHAを記録する。プレリリースタグではGitHub Releaseをprereleaseとして作成する。安定版Releaseは従来どおり安定版として作成する。
 
 GitHub Releaseに次の2つの資産を作る。
 
 - `Ateliers.Ai.Orchestrator-win-x64-v<version>.zip`: publishファイルと `release-manifest.json`
 - `Ateliers.Ai.Orchestrator-win-x64-v<version>.zip.sha256`: ZIP全体のSHA-256とファイル名
 
-`release-manifest.json` は `version`、`runtimeIdentifier` (`win-x64`)、`commit` を持つ。通常のPRビルドとベータタグはReleaseを作成しない。安定版タグのpushでGitHub Releaseを作成する。
+`release-manifest.json` は `version`、`runtimeIdentifier` (`win-x64`)、`commit` を持つ。通常のPRビルドはReleaseを作成しない。タグpush後にRelease作成が完了すると、インストーラーが安定版・プレリリースのどちらも同じ固定URLとアセット名で取得できる。
 
 ## 4. インストールと更新
 
@@ -60,7 +60,7 @@ PowerShell 5.1以降で、バージョンを明示して実行する。
 
 CLIインストーラーは配置後に `Install-AteliersAiOrchestratorConfig.ps1 -PreserveExisting` を呼び、ソースリポジトリにある既知の `slack.json` と `slack.secrets.json` のみを不足分へコピーする。既存ファイルは維持し、元ファイルがないときは設定を変更しない。JSONだけを手動更新する場合は、設定スクリプトを引数なしで単独実行する。この場合、置き換える既存設定を `config\backups\yyyyMMdd-HHmmss\` へ退避してから更新する。同秒に複数回実行したときは連番を付け、既存バックアップを上書きしない。バックアップは自動削除しない。値はログへ出さない。
 
-`Version` は `1.2.3` または `v1.2.3` 形式（SemVerのmajor.minor.patchと任意のprerelease識別子）を受け付ける。スクリプトは先頭の `v` を除去して `v<version>` タグと固定Release URLを組み立てる。`latest` 検索はしない。該当Release ZIPと`.sha256`を一時フォルダーへダウンロードし、SHA-256を照合する。
+`Version` は `1.2.3`、`v1.2.3`、`0.0.4-beta.7` 等（SemVerのmajor.minor.patchと任意のprerelease識別子）を受け付ける。スクリプトはGitHub Release APIで指定タグのReleaseが公開済みであること、安定版/プレリリースの種別とタグが一致すること、ZIPと`.sha256`の両アセットがあることを確認する。Release未公開の場合とアセット不足の場合は個別に停止理由を表示する。その後、固定Release URLから両ファイルを一時フォルダーへダウンロードし、SHA-256を照合する。`latest` 検索はしない。
 
 展開物のReleaseマニフェスト、Windows x64 RID、実行ファイルの存在を確認し、ZIP内のCLIを `--version` で実行して要求バージョンと一致することを確認する。その後 `install.json` を作成する。既存 `bin` があれば同じ親ディレクトリ内の一時名へ移し、検査済みstageを `bin` に改名する。切替後にもファイル・マニフェスト・実行バージョンを再確認する。確認に失敗すると新しい `bin` を退避し、直前の `bin` があれば復元する。ZIP展開や事前検査に失敗した場合、既存 `bin` は切替前のまま残る。
 
@@ -92,4 +92,4 @@ CLIとMCPは個別にRelease/バージョン管理される。CLIの固定パス
 
 ## 8. 検証範囲と未実施事項
 
-UnitTestsとローカルのPowerShell構文・確認系検証はPhase 1の実装検証対象である。GitHub Actions上でタグからReleaseを実際に作ること、GitHub Release資産をネットワーク越しにインストールすること、非管理者の別Windows環境で検証することはタグ公開を伴うため、この変更の通常テストでは行わない。Phase 3の既定E2Eスクリプト起動確認も対象外である。PR報告では実測結果、未確認事項、失敗を区別する。
+UnitTestsとローカルのPowerShell構文・Release ZIP/checksum生成・タグ/Release metadata確認は実装検証対象である。GitHub Actions上でタグからReleaseを実際に作ること、GitHub Release資産をネットワーク越しにインストールすること、非管理者の別Windows環境で検証することは公開副作用を伴うため、PR段階では行わない。PRマージ後に次の未使用ベータタグを発行し、GitHub Actions成功とReleaseのprerelease表示、ZIP/checksum名を確認してから、そのタグをインストーラーで導入する。既存タグは移動せず、Releaseも後付けしない。Phase 3の既定E2Eスクリプト起動確認も対象外である。PR報告では実測結果、未確認事項、失敗を区別する。
