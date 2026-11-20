@@ -111,7 +111,7 @@ Milestone 1では自律マージを実装せず、FakeTestsを含む自律マー
 
 | 順序 | Issue / 項目 | 状態・位置づけ | 次に必要な検証 |
 | --- | --- | --- | --- |
-| 1（最終段階） | [#109 最終Testbed E2E](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/109) | Open・タイトルP1。M1最終ゲート。[PR #114](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/pull/114)はOPEN、head `b3f23ed` のWindows/Ubuntu必須CI成功。必要なPR上レビュー証跡は未完了。最終E2E未実施。 | PR #114の非対話準備はmainへ反映済み。受入範囲を整理する本件文書PRを別途レビューする。以降の#109最終E2Eでは実Codex/Reviewer接続・Run証跡、Release build・5 checks、testChannel API成功、必要なpush/PR経路、SHA整合、main不変を確認する。成功PRはOPENで終了し、最終マージは人間が担当する。 |
+| 1（最終段階） | [#109 最終Testbed E2E](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/109) | Open・タイトルP1。M1最終ゲート。[PR #114](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/pull/114)はmerge commit `fae6204` でmainへ反映済み。Windows/Ubuntu必須CIと独立レビュー成功。最終E2E未実施。 | PR #114の非対話準備はmainへ反映済み。受入範囲を整理する本件文書PRを別途レビューする。以降の#109最終E2Eでは実Codex/Reviewer接続・Run証跡、Release build・5 checks、testChannel API成功、必要なpush/PR経路、SHA整合、main不変を確認する。成功PRはOPENで終了し、最終マージは人間が担当する。 |
 | 独立追跡 | [#105 testhost接続問題](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/105) | Open・タイトルP2。M1完了条件外。 | Work環境の制約をCI/別Windows環境の結果と分けて調査。解消を他開発の前提にしない。 |
 | 後続候補 | [#36 Slackライフサイクル通知](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/36) | Open・Milestone/priorityなし。現計画では機能拡張。 | #109はtestChannelへの最小API成功だけを確認。スレッド/broadcast/複数Bot設計は#36の個別範囲。 |
 | 後続候補 | [#77 MCP実行環境パス](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/77) | Open・Milestone/priorityなし。今回の対象外。 | 既存の固定CLIパスで不足が再発・拡大した場合に再優先付けする。 |
