@@ -1,15 +1,18 @@
 # docs
 
 > 作成日: 2026-11-18
-> 更新日: 2026-11-20
+> 更新日: 2026-11-21
 > 作成者: yuu503
 
 このフォルダには、プロジェクトの方針、計画、要求、実装・運用の参照資料、実施結果を置きます。
 
 - [issues/](issues/): 個別課題の背景、判断経緯、関連資料
+- [Feature/](Feature/README.md): 利用者向けにプロダクト機能、特徴、利用価値、制約を説明
 - [plans/](plans/): 開発計画とマイルストーン
 - [requirements/](requirements/): 合意・承認された要求仕様
 - [reference/](reference/): 実装の仕様、導入・操作手順、E2E手順
+  - [Agent設定と指示管理](reference/agent-configuration-and-instructions.md): Agentの識別、Role割り当て、指示ファイルの設計
+  - [Slack通知設計](reference/slack-notifications.md): 通知イベント、Agent報告、Slack配送の設計と現状
   - [テスト種別と責務](reference/testing-classification.md): UnitTests・FakeTests・IntegrationTestsの境界とAI接続テストの原則
   - [ImplementerからReviewerへの検証証跡](reference/implementer-reviewer-validation-evidence.md): 実装担当のビルド・テスト記録とレビューへの引き渡し
   - [開発用IntegrationTest](reference/development-integration-tests.md): Testbed再利用、実Codex opt-in、最終受入E2Eとの責務分担
