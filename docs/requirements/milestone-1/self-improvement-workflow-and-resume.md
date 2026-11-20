@@ -67,6 +67,7 @@ Unit/FakeTestsでPhase順・範囲、別Agent ID/実行/対象SHA、証跡に基
 - Phase 1でテストビルド失敗を許容しつつ、後段で必要なbuild/test gateをいつ必須にするか。
 - Reviewer Agent IDの発行元、安定性、独立性の保証方法。
 - 再開Tool/CLI名、引数/応答、state revisionとprotocol version。
+- Workから届く判断の信頼主体、呼出元/人間の実行者識別と監査 provenance を何で確立するか。callerが自己申告する値を認証証拠にしない。認証機構を追加するかは現行stdio/MCP trust boundaryを確認してから決める。
 - JSONL監査と既存run artifactsにcheckpointを追加する方法、原子性/lock/復旧方式。
 - #109の最終受入条件に5段階・resume確認を加えるか、別のゲートにするか。
 
