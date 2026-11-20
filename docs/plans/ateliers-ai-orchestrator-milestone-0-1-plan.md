@@ -130,15 +130,18 @@ Milestone 1では自律マージを実装せず、FakeTestsを含む自律マー
 
 ### 3.3 Milestone 1の最小完了条件（提案）
 
-文書PRを人間が確認するまで本体コード実装と#109最終E2Eを開始しない。
+文書PRを人間が確認するまで本体コード実装と#109最終E2Eを開始しない。文書確認後は、次の順序で機能を実装・受け入れる。
 
-1. #84/#79/#80/#107/#108はそれぞれの受入条件・証跡により完了済み。#80の元Run原因未確定は残存リスクとして保ち、原因特定を遡及的な必須条件にしない。
-2. 通常PRでは対象Windows・Ubuntu必須CI（UnitTests/FakeTests）と独立レビューを確認する。変更範囲が要求しない実外部IntegrationTestsやAI判断品質を重複ゲート化しない。
-3. #109を一度実施し、CLI経由の実Codex起動、Implementer/Reviewer接続、Run ID/対象SHA、Release build・Testbed 5 checks、専用testChannelへのSlack API成功、必要な専用一時ブランチのpush/PRと証跡のhead/base SHA一致を記録する。GitHub公開経路はIssue本文の元の要求を満たすのに必要な範囲を保ち、実施前にその必要十分性を明記する。
-4. Testbed mainは不変、既存ブランチ/PRは無変更、force pushなし、成功PRはOPENで終了とする。E2Eで自律マージや実マージを試験しない。失敗時は外部状態を自動削除/クローズせず、Codex未開始と開始後失敗を区別する。
-5. Run ID、対象SHA、PR、CI/Reviewerコメント、Slack API応答、最終状態を相互に追跡可能にする。Reviewerの自然言語判断品質、Slack画面到達確認、#36全体はこのゲートに含めない。
+1. 5段階標準を実装し、Phase 1/3の差分制約、Phase 2/4/5の別Agent ID・実行記録・対象SHA/差分証跡をUnit/FakeTestsで検証する。
+2. テスト結果、変更範囲、対象コミット/SHAなどの客観証跡から各ゲートを判定し、担当Phaseへの差し戻し、上限到達時のNeedsHumanInputをUnit/FakeTestsで確認する。
+3. NeedsHumanInputから同一Run IDで信頼可能な人間判断を受領し、安全checkpointから再開する。branch/SHA/artifact/revisionの一致、caller provenance、decision ID冪等性、重複外部副作用防止、監査記録と失敗挙動をUnit/FakeTestsで検証する。
+4. #84/#79/#80/#107/#108はそれぞれの受入条件・証跡により完了済み。#80の元Run原因未確定は残存リスクとして保ち、原因特定を遡及的な必須条件にしない。
+5. 通常PRでは対象Windows・Ubuntu必須CI（UnitTests/FakeTests）と独立レビューを確認する。変更範囲が要求しない実外部IntegrationTestsやAI判断品質を重複ゲート化しない。
+6. 上記実装と決定論的受入が完了した後に#109を一度実施し、CLI経由の実Codex起動、Implementer/Reviewer接続、Run ID/対象SHA、Release build・Testbed 5 checks、専用testChannelへのSlack API成功、必要な専用一時ブランチのpush/PRと証跡のhead/base SHA一致を記録する。GitHub公開経路はIssue本文の元の要求を満たすのに必要な範囲を保ち、実施前にその必要十分性を明記する。
+7. Testbed mainは不変、既存ブランチ/PRは無変更、force pushなし、成功PRはOPENで終了とする。E2Eで自律マージや実マージを試験しない。失敗時は外部状態を自動削除/クローズせず、Codex未開始と開始後失敗を区別する。
+8. Run ID、対象SHA、PR、CI/Reviewerコメント、Slack API応答、最終状態を相互に追跡可能にする。Reviewerの自然言語判断品質、Slack画面到達確認、#36全体はこのゲートに含めない。
 
-自律マージはMilestone 1の完了条件から除外する。Issue #109本文・受入条件は変更しない。testChannel、権限、対象SHAを安全に確認できない場合は実E2Eを開始せず準備阻害として扱う。#105解決は他の開発やM1完了の前提にしない。
+軽量/他ワークフローと自律マージはMilestone 1の完了条件から除外する。Issue #109本文・受入条件はこの文書PRでは変更しない。testChannel、権限、対象SHAを安全に確認できない場合は実E2Eを開始せず準備阻害として扱う。#105解決は他の開発やM1完了の前提にしない。Issue #109本文・受入条件は変更しない。testChannel、権限、対象SHAを安全に確認できない場合は実E2Eを開始せず準備阻害として扱う。#105解決は他の開発やM1完了の前提にしない。
 
 ## 4. Milestone 1では必須にしない後続候補
 
