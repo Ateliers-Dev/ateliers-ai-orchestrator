@@ -25,7 +25,7 @@
 | 項目 | 記録 |
 | --- | --- |
 | 検証対象SHA | `7f1bf4cca1fa82a88b1cfa8e8cf1ed6bd3297cd1`（PR #106 merge commit、検証コードを含むmain） |
-| 対象段階 | Publisherのpush前 `secret-scan-and-whitespace-check` 相当。隔離Git index上の `git diff --cached --check` |
+| 対象段階 | Publisherの `push.secret-scan-and-whitespace-check` 内にあるCRLF正規化・末尾空白判定。隔離Git index上の `git diff --cached --check` |
 | チェック名 | `PublisherNormalizesCrLfSnapshotAndRejectsTrailingWhitespace`（FakeTests） |
 | GitHub/Slack/実AIへの接続 | なし |
 | 実行環境・コマンド | Windows、`dotnet run --project tests/Ateliers.Ai.Orchestrator.FakeTests/Ateliers.Ai.Orchestrator.FakeTests.csproj --configuration Release --no-build --no-restore -- --run-fake-case-direct "PublisherはWindows CRLF snapshotを正規化し意図した末尾空白を拒否する"` |
@@ -40,5 +40,5 @@
 ### 未確認・残るリスク
 
 - 元Runの直接原因・再現条件は判明していない。CRLF問題は後続Runで観測された別問題であり、元Runの原因と同一とは断定しない。
-- 隔離fixtureはPublisherの関連snapshot/whitespace処理を検証する。実Reviewer、Slack、push、GitHub PR作成までの公開E2Eは検証しない。
+- 隔離fixtureはPublisherのCRLF snapshot正規化・末尾空白検査を検証する。secret scan自体の動作、実Reviewer、Slack、push、GitHub PR作成までの公開E2Eはこの限定検証で再実行していない。
 - Milestone最終E2EにPublisherを含む実際のPR必須経路の確認が残る場合、#109のゲートで実施する。
