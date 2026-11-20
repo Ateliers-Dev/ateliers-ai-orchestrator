@@ -27,24 +27,34 @@ public sealed class SlackLifecycleNotificationDispatcherTests
             Assert.Equal(SlackNotificationSendResult.Sent, await dispatcher!.TrySendAsync(RunId, role, "started", "running", "Implementing",
                 new DateTimeOffset(2026, 11, 13, 2, 3, 4, TimeSpan.Zero)));
             var handler = handlers[botId];
-            Assert.Single(handler.Requests);
+            Assert.Equal(role == "Orchestrator" ? 2 : 1, handler.Requests.Count);
             Assert.Equal($"Bearer {TokenPrefix}{botId}", handler.Requests[0].Headers.Authorization!.ToString());
             using var payload = JsonDocument.Parse(handler.RequestBodies[0]!);
             Assert.Equal("C_orchestrator", payload.RootElement.GetProperty("channel").GetString());
             var message = payload.RootElement.GetProperty("text").GetString()!;
-            Assert.Contains($"role={role} event=started status=running state=Implementing at=2026-11-13T02:03:04.0000000+00:00", message, StringComparison.Ordinal);
-            if (role == "Orchestrator") Assert.StartsWith($"Run開始: {RunId}\n", message, StringComparison.Ordinal);
-            else Assert.StartsWith("作業開始:", message, StringComparison.Ordinal);
+            Assert.DoesNotContain("run=", message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("role=", message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("event=", message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("status=", message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("state=", message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("at=", message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(RunId, message, StringComparison.Ordinal);
+            Assert.StartsWith("*", message, StringComparison.Ordinal);
             if (role == "Orchestrator") Assert.False(payload.RootElement.TryGetProperty("thread_ts", out _));
             else Assert.Equal("1700000000.000001", payload.RootElement.GetProperty("thread_ts").GetString());
             Assert.DoesNotContain(TokenPrefix, message, StringComparison.Ordinal);
             Assert.DoesNotContain("prompt", message, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("response", message, StringComparison.OrdinalIgnoreCase);
         }
+        using (var runIdReply = JsonDocument.Parse(handlers["orchestrator"].RequestBodies[1]!))
+        {
+            Assert.Equal($"Run ID: {RunId}", runIdReply.RootElement.GetProperty("text").GetString());
+            Assert.Equal("1700000000.000001", runIdReply.RootElement.GetProperty("thread_ts").GetString());
+        }
         Assert.Equal(SlackNotificationSendResult.Skipped,
             await dispatcher!.TrySendAsync(RunId, "Orchestrator", "completed", "needs_human_input", "NeedsHumanInput", DateTimeOffset.UtcNow));
         Assert.Equal(0, dispatcher.FailedSends);
-        Assert.Single(handlers["orchestrator"].Requests);
+        Assert.Equal(2, handlers["orchestrator"].Requests.Count);
     }
 
     [Fact]
@@ -59,8 +69,10 @@ public sealed class SlackLifecycleNotificationDispatcherTests
         Assert.Equal(SlackNotificationSendResult.Sent, await dispatcher!.TrySendAsync(RunId, "Orchestrator", "started", "running", "Prepared", DateTimeOffset.UtcNow));
         Assert.Equal(SlackNotificationSendResult.Sent, await dispatcher.TrySendAsync(RunId, "Implementer", "completed", "succeeded", "Reviewing",
             DateTimeOffset.UtcNow, "agent-one", "Builder", "implementer", "Done", "担当: 実装\n結果: 完了\n未完了・人間判断: なし"));
+        Assert.Equal(SlackNotificationSendResult.Sent, await dispatcher.TrySendAsync(RunId, "Reviewer", "completed", "succeeded", "ReadyForHumanReview",
+            DateTimeOffset.UtcNow, "agent-two", "Reviewer", "reviewer", "Done", "xoxb-1234567890-secret"));
         Assert.Equal(SlackNotificationSendResult.Sent, await dispatcher.TrySendAsync(RunId, "Orchestrator", "final_result", "succeeded", "ReadyForHumanReview",
-            DateTimeOffset.UtcNow, null, null, null, "完了しました", null));
+            DateTimeOffset.UtcNow, null, null, null, "実装とレビューが完了しました。変更内容を確認してください。", null));
 
         using var completion = JsonDocument.Parse(handlers["implementer"].RequestBodies.Single()!);
         Assert.Equal("C_orchestrator", completion.RootElement.GetProperty("channel").GetString());
@@ -68,13 +80,44 @@ public sealed class SlackLifecycleNotificationDispatcherTests
         Assert.Contains("担当: 実装", completion.RootElement.GetProperty("text").GetString(), StringComparison.Ordinal);
         using var finalResult = JsonDocument.Parse(handlers["orchestrator"].RequestBodies.Last()!);
         Assert.False(finalResult.RootElement.TryGetProperty("thread_ts", out _));
-        Assert.StartsWith("完了しました\n", finalResult.RootElement.GetProperty("text").GetString(), StringComparison.Ordinal);
+        var finalText = finalResult.RootElement.GetProperty("text").GetString()!;
+        Assert.StartsWith("*最終結果: 作業が完了しました*\n", finalText, StringComparison.Ordinal);
+        Assert.Contains("実装とレビューが完了しました。", finalText, StringComparison.Ordinal);
+        Assert.DoesNotContain(RunId, finalText, StringComparison.Ordinal);
+        Assert.DoesNotContain("run=", finalText, StringComparison.OrdinalIgnoreCase);
 
-        Assert.Equal(SlackNotificationSendResult.Sent, await dispatcher.TrySendAsync(RunId, "Reviewer", "completed", "succeeded", "ReadyForHumanReview",
-            DateTimeOffset.UtcNow, "agent-two", "Reviewer", "reviewer", "Done", "xoxb-1234567890-secret"));
         using var fallback = JsonDocument.Parse(handlers["reviewer"].RequestBodies.Single()!);
-        Assert.Contains("作業が完了しました。詳細は実行記録を確認してください。", fallback.RootElement.GetProperty("text").GetString(), StringComparison.Ordinal);
+        Assert.Contains("安全な完了報告を利用できないため", fallback.RootElement.GetProperty("text").GetString(), StringComparison.Ordinal);
         Assert.DoesNotContain("xoxb-", fallback.RootElement.GetProperty("text").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TrySend_FinalResultUsesHumanSummaryAndRemovesInternalExecutionLines()
+    {
+        using var files = new LifecycleSettingsFiles();
+        var handlers = new Dictionary<string, RecordingHandlerBase>(StringComparer.Ordinal);
+        using var dispatcher = SlackLifecycleNotificationDispatcher.TryCreate(files.ConfigurationPath, files.SecretsPath,
+            botId => handlers[botId] = new SuccessRecordingHandler(_ => SuccessResponse(botId)));
+        Assert.NotNull(dispatcher);
+
+        Assert.Equal(SlackNotificationSendResult.Sent, await dispatcher!.TrySendAsync(RunId, "Orchestrator", "final_result",
+            "needs_human_input", "NeedsHumanInput", DateTimeOffset.UtcNow, null, null, null, summary:
+            $"人の判断が必要な理由: ReviewerはAgent IDの扱いと配送監査に問題があると報告しました。\n指摘内容を確認し、修正を依頼するか判断してください。\nRun ID: {RunId}\nrun={RunId} role=Orchestrator event=final_result status=needs_human_input state=NeedsHumanInput at=2026-11-20T18:51:34.0000000+00:00\n2026-11-20T18:51:34.0000000+00:00", slackCompletionMessage: null));
+
+        using var payload = JsonDocument.Parse(handlers["orchestrator"].RequestBodies.Single()!);
+        var message = payload.RootElement.GetProperty("text").GetString()!;
+        Assert.Contains("人の判断が必要な理由:", message, StringComparison.Ordinal);
+        Assert.Contains("Agent IDの扱いと配送監査に問題があると報告しました。", message, StringComparison.Ordinal);
+        Assert.Contains("修正を依頼するか判断してください。", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("Run ID", message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(RunId, message, StringComparison.Ordinal);
+        Assert.DoesNotContain("run=", message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("role=", message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("event=", message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("status=", message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("state=", message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("at=", message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("2026-11-20T18:51:34", message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -94,6 +137,41 @@ public sealed class SlackLifecycleNotificationDispatcherTests
         var message = payload.RootElement.GetProperty("text").GetString()!;
         Assert.DoesNotContain("<@U12345678>", message, StringComparison.Ordinal);
         Assert.Contains("‹@U12345678>", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunStart_UsesHumanParentThenThreadedRunIdReply_AndAuditsReplyFailure()
+    {
+        using var files = new LifecycleSettingsFiles();
+        var handlers = new Dictionary<string, RecordingHandlerBase>(StringComparer.Ordinal);
+        var orchestratorRequestCount = 0;
+        using var dispatcher = SlackLifecycleNotificationDispatcher.TryCreate(files.ConfigurationPath, files.SecretsPath,
+            botId => handlers[botId] = new SuccessRecordingHandler(_ =>
+            {
+                if (botId == "orchestrator" && ++orchestratorRequestCount == 2)
+                    return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { Content = new StringContent("not available") };
+                return SuccessResponse(botId);
+            }));
+
+        Assert.NotNull(dispatcher);
+        var outcome = await dispatcher!.TrySendWithAuditAsync(RunId, "Orchestrator", "started", "running", "Prepared",
+            DateTimeOffset.UtcNow, summary: "対象: Slack通知を改善します。\nImplementerが作業を開始します。");
+
+        Assert.Equal(SlackNotificationSendResult.Failed, outcome.Result);
+        Assert.Equal("run_id_reply", outcome.FailureStage);
+        Assert.Equal("1700000000.000001", outcome.ParentMessageTimestamp);
+        Assert.Null(outcome.RunIdReplyTimestamp);
+        using var parent = JsonDocument.Parse(handlers["orchestrator"].RequestBodies[0]!);
+        using var idReply = JsonDocument.Parse(handlers["orchestrator"].RequestBodies[1]!);
+        var parentText = parent.RootElement.GetProperty("text").GetString()!;
+        Assert.Contains("*新しい作業を開始しました*", parentText, StringComparison.Ordinal);
+        Assert.Contains("対象: Slack通知を改善します。", parentText, StringComparison.Ordinal);
+        Assert.DoesNotContain(RunId, parentText, StringComparison.Ordinal);
+        Assert.Equal($"Run ID: {RunId}", idReply.RootElement.GetProperty("text").GetString());
+        Assert.Equal("1700000000.000001", idReply.RootElement.GetProperty("thread_ts").GetString());
+
+        Assert.Equal(SlackNotificationSendResult.Sent,
+            await dispatcher.TrySendAsync(RunId, "Implementer", "started", "running", "Implementing", DateTimeOffset.UtcNow));
     }
 
     [Fact]
@@ -132,9 +210,10 @@ public sealed class SlackLifecycleNotificationDispatcherTests
         })
         {
             Assert.Equal(SlackNotificationSendResult.Sent, await dispatcher!.TrySendAsync(RunId, role, "started", "running", "Implementing", DateTimeOffset.UtcNow));
-            using var payload = JsonDocument.Parse(handlers[botId].RequestBodies.Single()!);
+            using var payload = JsonDocument.Parse(handlers[botId].RequestBodies[0]!);
             Assert.Equal("C_TEST", payload.RootElement.GetProperty("channel").GetString());
-            Assert.Equal($"Bearer {TokenPrefix}{botId}", handlers[botId].Requests.Single().Headers.Authorization!.ToString());
+            Assert.Equal($"Bearer {TokenPrefix}{botId}", handlers[botId].Requests[0].Headers.Authorization!.ToString());
+            Assert.Equal(role == "Orchestrator" ? 2 : 1, handlers[botId].Requests.Count);
             Assert.Contains("[Ateliers AI TEST] ", payload.RootElement.GetProperty("text").GetString(), StringComparison.Ordinal);
         }
     }

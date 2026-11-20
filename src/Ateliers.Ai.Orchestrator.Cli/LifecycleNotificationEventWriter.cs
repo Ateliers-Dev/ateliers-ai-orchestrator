@@ -63,6 +63,18 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
     {
         ArgumentNullException.ThrowIfNull(notificationSender);
         jsonlWriter = new JsonlLifecycleEventWriter(lifecycleLogPath);
+        if (!notificationsDisabled) StartNotificationWorker(async (item, cancellationToken) =>
+        {
+            var result = await notificationSender(item, cancellationToken).ConfigureAwait(false);
+            return new SlackNotificationDeliveryOutcome(result);
+        });
+    }
+
+    internal LifecycleNotificationEventWriter(string lifecycleLogPath, bool notificationsDisabled,
+        Func<LifecycleEvent, CancellationToken, Task<SlackNotificationDeliveryOutcome>> notificationSender)
+    {
+        ArgumentNullException.ThrowIfNull(notificationSender);
+        jsonlWriter = new JsonlLifecycleEventWriter(lifecycleLogPath);
         if (!notificationsDisabled) StartNotificationWorker(notificationSender);
     }
 
@@ -85,7 +97,7 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
             if (slackDispatcher is not null)
                 StartNotificationWorker(async (item, cancellationToken) =>
                 {
-                    return await slackDispatcher.TrySendAsync(item.RunId, item.Role, item.EventType, item.Status, item.State,
+                    return await slackDispatcher.TrySendWithAuditAsync(item.RunId, item.Role, item.EventType, item.Status, item.State,
                         item.TimestampUtc, item.AgentId, item.AgentName, item.SlackBotId, item.Summary, item.SlackCompletionMessage,
                         cancellationToken).ConfigureAwait(false);
                 });
@@ -125,7 +137,10 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
                     }
                 }
             }
-            if (deliveryResult is not null) RecordDeliveryResult(item, deliveryResult);
+            if (deliveryResult is not null)
+                RecordDeliveryResult(item, new SlackNotificationDeliveryOutcome(
+                    deliveryResult == "abandoned" ? SlackNotificationSendResult.Abandoned : SlackNotificationSendResult.Dropped,
+                    FailureStage: deliveryResult));
         }
         return recorded;
     }
@@ -162,7 +177,7 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
         slackCancellation?.Dispose();
     }
 
-    private void StartNotificationWorker(Func<LifecycleEvent, CancellationToken, Task<SlackNotificationSendResult>> notificationSender)
+    private void StartNotificationWorker(Func<LifecycleEvent, CancellationToken, Task<SlackNotificationDeliveryOutcome>> notificationSender)
     {
         slackQueue = Channel.CreateBounded<LifecycleEvent>(new BoundedChannelOptions(256)
         {
@@ -186,17 +201,17 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
                         inFlightNotification = item;
                         inFlightMarkedAbandoned = false;
                     }
-                    SlackNotificationSendResult result;
+                    SlackNotificationDeliveryOutcome outcome;
                     try
                     {
-                        result = await notificationSender(item, slackCancellation.Token).ConfigureAwait(false);
+                        outcome = await notificationSender(item, slackCancellation.Token).ConfigureAwait(false);
                     }
                     catch (Exception)
                     {
-                        result = SlackNotificationSendResult.Failed;
+                        outcome = new SlackNotificationDeliveryOutcome(SlackNotificationSendResult.Failed);
                     }
-                    if (CompleteNotification(item, result))
-                        RecordDeliveryResult(item, result.ToString().ToLowerInvariant());
+                    if (CompleteNotification(item, outcome.Result))
+                        RecordDeliveryResult(item, outcome);
                     if (slackCancellation.IsCancellationRequested) return;
                 }
             }
@@ -231,7 +246,7 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
         }
     }
 
-    private void RecordDeliveryResult(LifecycleEvent source, string result)
+    private void RecordDeliveryResult(LifecycleEvent source, SlackNotificationDeliveryOutcome outcome)
     {
         _ = jsonlWriter.TryAppend(new LifecycleEvent
         {
@@ -239,13 +254,17 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
             TimestampUtc = DateTimeOffset.UtcNow,
             Role = source.Role,
             EventType = "slack_delivery_result",
-            Status = result,
+            Status = outcome.Result.ToString().ToLowerInvariant(),
             State = source.State,
             AgentId = source.AgentId,
             AgentName = source.AgentName,
             SlackBotId = source.SlackBotId,
             RelatedId = source.EventType,
-            Summary = "Slack通知配送結果です。本文は監査記録へ複製していません。"
+            Summary = "Slack通知配送結果です。本文は監査記録へ複製していません。",
+            SlackMessageTimestamp = outcome.MessageTimestamp,
+            SlackParentMessageTimestamp = outcome.ParentMessageTimestamp,
+            SlackRunIdReplyTimestamp = outcome.RunIdReplyTimestamp,
+            SlackDeliveryFailureStage = outcome.FailureStage
         });
     }
 
@@ -271,7 +290,8 @@ internal sealed class LifecycleNotificationEventWriter : ILifecycleEventWriter, 
             }
             Interlocked.Add(ref abandonedNotifications, notificationsForAbandonment.Count);
         }
-        foreach (var item in notificationsForAbandonment) RecordDeliveryResult(item, "abandoned");
+        foreach (var item in notificationsForAbandonment)
+            RecordDeliveryResult(item, new SlackNotificationDeliveryOutcome(SlackNotificationSendResult.Abandoned, FailureStage: "abandoned"));
         try { slackCancellation?.Cancel(); }
         catch (Exception) { }
     }

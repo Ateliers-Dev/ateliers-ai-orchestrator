@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace Ateliers.Slack;
@@ -7,8 +6,14 @@ public enum SlackNotificationSendResult
 {
     Sent,
     Skipped,
-    Failed
+    Failed,
+    Dropped,
+    Abandoned
 }
+
+public sealed record SlackNotificationDeliveryOutcome(SlackNotificationSendResult Result,
+    string? MessageTimestamp = null, string? ParentMessageTimestamp = null,
+    string? RunIdReplyTimestamp = null, string? FailureStage = null);
 
 /// <summary>ライフサイクルイベントを役割別Botから短い固定形式で通知します。</summary>
 public sealed class SlackLifecycleNotificationDispatcher : IDisposable
@@ -169,7 +174,13 @@ public sealed class SlackLifecycleNotificationDispatcher : IDisposable
 
     public async Task<SlackNotificationSendResult> TrySendAsync(string runId, string role, string eventType, string status, string state,
         DateTimeOffset timestampUtc, string? agentId, string? agentName, string? botId, string? summary, string? slackCompletionMessage,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        (await TrySendWithAuditAsync(runId, role, eventType, status, state, timestampUtc, agentId, agentName, botId,
+            summary, slackCompletionMessage, cancellationToken).ConfigureAwait(false)).Result;
+
+    public async Task<SlackNotificationDeliveryOutcome> TrySendWithAuditAsync(string runId, string role, string eventType, string status, string state,
+        DateTimeOffset timestampUtc, string? agentId = null, string? agentName = null, string? botId = null,
+        string? summary = null, string? slackCompletionMessage = null, CancellationToken cancellationToken = default)
     {
         if (!clients.TryGetValue(role, out var client) || !botRoutes.TryGetValue(role, out var expectedBotId) ||
             !Guid.TryParseExact(runId, "N", out _) ||
@@ -178,14 +189,14 @@ public sealed class SlackLifecycleNotificationDispatcher : IDisposable
             (botId is not null && !string.Equals(botId, expectedBotId, StringComparison.Ordinal)))
         {
             Interlocked.Increment(ref failedSends);
-            return SlackNotificationSendResult.Failed;
+            return new(SlackNotificationSendResult.Failed, FailureStage: "validation");
         }
 
         // NeedsHumanInput専用イベントの直後に同じ状態の終端イベントも出るため、重複を抑止します。
-        if (eventType == "completed" && status == "needs_human_input") return SlackNotificationSendResult.Skipped;
+        if (eventType == "completed" && status == "needs_human_input") return new(SlackNotificationSendResult.Skipped);
 
         var label = useTestChannel ? "[Ateliers AI TEST]" : "[Ateliers AI]";
-        var message = FormatMessage(label, runId, role, eventType, status, state, timestampUtc, agentId, agentName, summary, slackCompletionMessage);
+        var message = FormatMessage(label, runId, role, eventType, status, agentId, agentName, summary, slackCompletionMessage);
         string? threadTs = null;
         var parent = role == "Orchestrator" && eventType == "started";
         var finalResult = eventType == "final_result";
@@ -197,49 +208,119 @@ public sealed class SlackLifecycleNotificationDispatcher : IDisposable
                 threadAvailable = runThreads.TryGetValue(runId, out threadTs);
             }
         }
-        if (!threadAvailable) message = $"スレッド親投稿を利用できないため、チャンネルへ単独投稿します。\n{message}";
+        if (!threadAvailable) message = $"Runのスレッドを利用できなかったため、チャンネルへ投稿します。\n{message}";
         var channelId = clients["Orchestrator"].ChannelId;
+        if (parent)
+        {
+            SlackPostMessageResult parentMessage;
+            try
+            {
+                parentMessage = await client.SendMessageAsync(message, channelId, threadTs: null, cancellationToken: cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                Interlocked.Increment(ref failedSends);
+                return new(SlackNotificationSendResult.Failed, FailureStage: "parent_message");
+            }
+
+            lock (threadLock) runThreads[runId] = parentMessage.Timestamp;
+            try
+            {
+                var runIdReply = await client.SendMessageAsync($"Run ID: {runId}", channelId, parentMessage.Timestamp, cancellationToken).ConfigureAwait(false);
+                return new(SlackNotificationSendResult.Sent, ParentMessageTimestamp: parentMessage.Timestamp,
+                    RunIdReplyTimestamp: runIdReply.Timestamp);
+            }
+            catch (Exception)
+            {
+                Interlocked.Increment(ref failedSends);
+                return new(SlackNotificationSendResult.Failed, ParentMessageTimestamp: parentMessage.Timestamp,
+                    FailureStage: "run_id_reply");
+            }
+        }
+
         try
         {
             var sent = await client.SendMessageAsync(message, channelId, threadTs, cancellationToken).ConfigureAwait(false);
-            if (parent)
-            {
-                lock (threadLock) runThreads[runId] = sent.Timestamp;
-            }
             if (finalResult)
             {
                 lock (threadLock) runThreads.Remove(runId);
             }
-            return SlackNotificationSendResult.Sent;
+            return new(SlackNotificationSendResult.Sent, MessageTimestamp: sent.Timestamp);
         }
         catch (Exception)
         {
             Interlocked.Increment(ref failedSends);
-            return SlackNotificationSendResult.Failed;
+            return new(SlackNotificationSendResult.Failed, FailureStage: threadAvailable ? "message" : "thread_fallback_message");
         }
     }
 
-    private static string FormatMessage(string label, string runId, string role, string eventType, string status, string state,
-        DateTimeOffset timestampUtc, string? agentId, string? agentName, string? summary, string? slackCompletionMessage)
+    private static string FormatMessage(string label, string runId, string role, string eventType, string status,
+        string? agentId, string? agentName, string? summary, string? slackCompletionMessage)
     {
-        string text;
-        if (eventType == "started" && role == "Orchestrator") text = $"Run開始: {runId}";
-        else if (eventType == "final_result") text = SanitizeAgentMessage(summary) ?? "最終結果を記録しました。詳細はOrchestratorの実行記録を確認してください。";
-        else if (eventType == "started") text = $"作業開始: {SanitizeAgentMessage(agentName) ?? agentId ?? role} ({role})";
-        else if (eventType == "completed" && role != "Orchestrator")
-            text = SanitizeAgentMessage(slackCompletionMessage) ?? $"{agentId ?? role} ({role}) の作業が完了しました。詳細は実行記録を確認してください。";
-        else if (eventType == "failed") text = $"{role} の作業が失敗しました。状態: {state}。詳細は実行記録を確認してください。";
-        else if (eventType == "needs_human_input") text = "人間の確認が必要です。詳細は実行記録を確認してください。";
-        else text = role == "Orchestrator" && status == "succeeded" ? "Runが完了しました。" : $"Runが終了しました。状態: {state}。";
+        var headline = eventType switch
+        {
+            "final_result" => status switch
+            {
+                "succeeded" => "最終結果: 作業が完了しました",
+                "failed" => "最終結果: 作業を完了できませんでした",
+                _ => "最終結果: 人による確認が必要です"
+            },
+            "needs_human_input" => "人による確認が必要です",
+            "failed" => role == "Reviewer" ? "レビューを完了できませんでした" : "作業を完了できませんでした",
+            "completed" when role == "Orchestrator" => status == "succeeded" ? "作業とレビューが完了しました" : "人による確認が必要です",
+            "completed" => "作業完了の報告",
+            "started" when role == "Orchestrator" => "新しい作業を開始しました",
+            "started" => $"{SanitizeNotificationText(agentName ?? agentId ?? role, runId, 3_000) ?? "担当Agent"} が作業を開始しました",
+            _ => "作業状況を更新しました"
+        };
 
-        var metadata = string.Create(CultureInfo.InvariantCulture,
-            $"{label} run={runId} role={role} event={eventType} status={status} state={state} at={timestampUtc.ToUniversalTime():O}");
-        return $"{text}\n{metadata}";
+        var maximumBodyLength = status == "needs_human_input" ? 12_000 : 3_000;
+        string? body = eventType == "completed" && role != "Orchestrator"
+            ? SanitizeNotificationText(slackCompletionMessage, runId, 3_000)
+            : SanitizeNotificationText(summary, runId, maximumBodyLength);
+        if (body is null)
+        {
+            body = eventType switch
+            {
+                "started" when role == "Orchestrator" => "タスクの目的を確認し、担当Agentの作業を開始します。",
+                "started" when role == "Reviewer" => "成果物の確認を始めます。指摘が見つかった場合は修正を依頼し、確認後に結果を報告します。",
+                "started" => "担当作業を進めます。完了後、Reviewerによる確認へ進みます。",
+                "completed" when role != "Orchestrator" => "作業は完了しました。安全な完了報告を利用できないため、実行記録で作業内容と確認結果を確認してください。",
+                "failed" => "実行記録を確認し、原因と次の対応を判断してください。",
+                "needs_human_input" => "実行記録を確認し、次の対応を判断してください。",
+                "final_result" when status == "succeeded" => "変更内容とレビュー結果を確認してください。",
+                "final_result" => "実行記録を確認し、原因と次の対応を判断してください。",
+                _ => "実行記録で詳細を確認してください。"
+            };
+        }
+
+        var prefix = useTestLabel(label) ? $"{label} " : string.Empty;
+        return $"{prefix}*{headline}*\n{body}";
     }
 
-    private static string? SanitizeAgentMessage(string? message)
+    private static bool useTestLabel(string label) => label == "[Ateliers AI TEST]";
+
+    private static string? SanitizeNotificationText(string? message, string runId, int maximumLength)
     {
-        if (string.IsNullOrWhiteSpace(message) || message.Length > 3_000 ||
+        var sanitized = SanitizeAgentMessage(message, maximumLength);
+        if (sanitized is null) return null;
+        sanitized = Regex.Replace(sanitized, @"(?im)^.*\b(?:run|role|event|status|state|at)=\S+.*(?:\r?\n|$)", string.Empty,
+            RegexOptions.CultureInvariant);
+        sanitized = Regex.Replace(sanitized, @"(?im)^\s*\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\s*$", string.Empty,
+            RegexOptions.CultureInvariant);
+        sanitized = Regex.Replace(sanitized, @"(?im)^.*\brun[\s_-]*id\s*[:=].*(?:\r?\n|$)", string.Empty, RegexOptions.CultureInvariant);
+        sanitized = sanitized.Replace(runId, string.Empty, StringComparison.OrdinalIgnoreCase).Trim();
+        if (sanitized.Length > maximumLength)
+        {
+            const string omitted = "\n\n（通知の文字数上限に達しました。続きは実行記録を確認してください。）";
+            sanitized = sanitized[..(maximumLength - omitted.Length)].TrimEnd() + omitted;
+        }
+        return string.IsNullOrWhiteSpace(sanitized) ? null : sanitized;
+    }
+
+    private static string? SanitizeAgentMessage(string? message, int maximumLength = 3_000)
+    {
+        if (string.IsNullOrWhiteSpace(message) || message.Length > maximumLength * 4 ||
             message.Contains("-----BEGIN", StringComparison.OrdinalIgnoreCase) ||
             Regex.IsMatch(message, @"(?i)\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,})\b") ||
             Regex.IsMatch(message, @"(?i)\bBearer\s+\S+") ||

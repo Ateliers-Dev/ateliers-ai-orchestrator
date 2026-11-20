@@ -3056,6 +3056,12 @@ static void LifecycleEventsCoverFailureStopAndRevision()
     Assert.Equal("failed", reviewerFailure.Events[^1].Status);
     Assert.Equal("Failed", reviewerFailure.Events[^1].State);
 
+    var reviewerStop = RunWithLifecycle(new FakeAgentRunner(FakeScenario.Stop), "reviewer-stop");
+    Assert.Equal(RunState.NeedsHumanInput, reviewerStop.State);
+    Assert.True(reviewerStop.Events[^1].Summary!.Contains("既存成果物の変更範囲を特定できません", StringComparison.Ordinal),
+        $"Reviewerの停止理由が最終ライフサイクル通知に含まれません: {reviewerStop.Events[^1].Summary}");
+    Assert.True(reviewerStop.Events[^1].Summary!.Contains("次の対応を判断してください", StringComparison.Ordinal));
+
     using var cancellation = new CancellationTokenSource();
     var stopped = RunWithLifecycle(new CancellingAgentRunner(cancellation), "cancelled", cancellation.Token);
     Assert.Equal(RunState.NeedsHumanInput, stopped.State);
@@ -3063,6 +3069,9 @@ static void LifecycleEventsCoverFailureStopAndRevision()
         "停止要求時のImplementerイベント順が不正です。");
     Assert.True(stopped.Events.Any(item => item.EventType == "needs_human_input" && item.State == "NeedsHumanInput"));
     Assert.Equal("needs_human_input", stopped.Events[^1].Status);
+    Assert.True(stopped.Events[^1].Summary!.Contains("Implementerへの利用者停止要求を受け付けました", StringComparison.Ordinal),
+        $"停止理由が最終ライフサイクル通知に含まれません: {stopped.Events[^1].Summary}");
+    Assert.True(stopped.Events[^1].Summary!.Contains("次の対応を判断してください", StringComparison.Ordinal));
 
     var revised = RunWithLifecycle(new FakeAgentRunner(FakeScenario.RevisionThenSuccess), "revision");
     Assert.Equal(RunState.NeedsHumanInput, revised.State);
@@ -3072,6 +3081,8 @@ static void LifecycleEventsCoverFailureStopAndRevision()
             .Select(item => $"{item.Role}:{item.EventType}")), "再レビュー時の役割イベント順が不正です。");
     Assert.Equal("final_result", revised.Events[^1].EventType);
     Assert.Equal("needs_human_input", revised.Events[^1].Status);
+    Assert.True(revised.Events[^1].Summary!.Contains("独立レビュー記録・全受け入れ条件の検証・実PR作成記録が揃っていません", StringComparison.Ordinal),
+        $"人間判断の理由が最終ライフサイクル通知に含まれません: {revised.Events[^1].Summary}");
 
     (RunState State, LifecycleEvent[] Events) RunWithLifecycle(IAgentRunner runner, string runId, CancellationToken stopToken = default)
     {

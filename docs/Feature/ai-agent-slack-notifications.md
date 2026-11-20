@@ -32,7 +32,7 @@ Milestone 1では、各Roleに1 Agentを割り当て、そのAgentの設定と�
 
 Run（ひとまとまりの実行）ごとにSlackのスレッドを作り、開始、担当者の進捗、作業完了、最終状態をまとめます。加えて、Runの最終結果はチャンネルにも投稿し、スレッドを開かなくても結果を把握できる形を目指します。
 
-Milestone 1では、Runごとに開始投稿とスレッドを作り、Agentの開始・完了、Orchestratorの終了、最終結果を通知します。完了文をAgentが生成できない、形式を満たさない、または安全に使えない場合はOrchestratorが短い代替文を送ります。通知の設計と動作は[Slack通知設計](../reference/slack-notifications.md)に記載しています。
+Milestone 1では、Runごとに人間向けの開始投稿を作り、そのスレッドにRun IDだけを返信します。AgentとOrchestratorの作業状況や最終結果は、内部イベント名やIDの羅列ではなく、作業概要と次の対応がわかる短い文章で知らせます。Run IDはスレッド内の専用返信だけに表示し、Agent完了文はAgent自身が生成します。生成できない場合や安全に使えない場合はOrchestratorが短い代替文を送ります。通知の設計と動作は[Slack通知設計](../reference/slack-notifications.md)に記載しています。
 
 ## 何を期待できるか
 

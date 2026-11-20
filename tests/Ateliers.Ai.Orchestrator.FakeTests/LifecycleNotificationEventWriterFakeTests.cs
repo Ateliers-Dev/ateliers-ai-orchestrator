@@ -49,6 +49,29 @@ public sealed class LifecycleNotificationEventWriterFakeTests
         }
     }
 
+    [Fact]
+    public async Task RunIdReplyFailure_IsAuditedWithRunAndParentMessageReferences()
+    {
+        using var temp = new TemporaryDirectory();
+        var logPath = Path.Combine(temp.Path, "lifecycle.jsonl");
+        var runId = Guid.NewGuid().ToString("N");
+        using var writer = new LifecycleNotificationEventWriter(logPath, notificationsDisabled: false,
+            (_, _) => Task.FromResult(new SlackNotificationDeliveryOutcome(SlackNotificationSendResult.Failed,
+                ParentMessageTimestamp: "1700000000.000001", FailureStage: "run_id_reply")));
+
+        writer.TryAppend(Event("start") with { RunId = runId, Role = "Orchestrator", AgentId = null, AgentName = null, SlackBotId = "orchestrator" });
+        await writer.FlushSlackNotificationsAsync();
+
+        using var record = JsonDocument.Parse(File.ReadAllLines(logPath).Single(line => line.Contains("slack_delivery_result", StringComparison.Ordinal)));
+        var result = record.RootElement;
+        Assert.Equal(runId, result.GetProperty("runId").GetString());
+        Assert.Equal("started", result.GetProperty("relatedId").GetString());
+        Assert.Equal("failed", result.GetProperty("status").GetString());
+        Assert.Equal("1700000000.000001", result.GetProperty("slackParentMessageTimestamp").GetString());
+        Assert.Equal("run_id_reply", result.GetProperty("slackDeliveryFailureStage").GetString());
+        Assert.Equal(JsonValueKind.Null, result.GetProperty("slackRunIdReplyTimestamp").ValueKind);
+    }
+
     private static LifecycleEvent Event(string relatedId) => new()
     {
         RunId = Guid.NewGuid().ToString("N"),

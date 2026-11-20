@@ -229,7 +229,8 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
         }
         try
         {
-            EmitLifecycle("Orchestrator", "started", "running", run.State.ToString(), summary: "Workflow started.");
+            EmitLifecycle("Orchestrator", "started", "running", run.State.ToString(),
+                summary: $"対象: {contract.Purpose}\nImplementerが作業を開始します。");
             eventWriter.Append("agent_configuration_loaded", "accepted", from: run.State, to: run.State,
                 detail: "Run開始時に解決したAgent ID、Role、Slack Bot ID、モデル設定、指示ハッシュを記録しました。指示本文は監査JSONへ複製していません。",
                 outputReference: agentConfigurationReference, role: "Orchestrator");
@@ -297,7 +298,8 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                     run.Transition(requiresPullRequest ? RunState.Failed : RunState.NeedsHumanInput);
                     break;
                 }
-                EmitLifecycle("Implementer", "started", "running", run.State.ToString(), $"attempt:{implementationAttempt}", "Implementer started.");
+                EmitLifecycle("Implementer", "started", "running", run.State.ToString(), $"attempt:{implementationAttempt}",
+                    "実装作業を開始しました。完了後、Reviewerによる確認へ進みます。");
                 var implementResponse = InvokeAgent(() => agentRunner.Implement(implementRequest));
                 if (StopWasRequested(stopToken))
                     implementResponse = implementResponse with { Succeeded = false, StopRequested = true };
@@ -305,7 +307,7 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                     !string.IsNullOrWhiteSpace(implementResponse.Content);
                 EmitLifecycle("Implementer", implementSucceeded ? "completed" : "failed",
                     implementSucceeded ? "succeeded" : "failed", run.State.ToString(), $"attempt:{implementationAttempt}",
-                    implementSucceeded ? "Implementer completed." : "Implementer did not complete successfully.",
+                    implementSucceeded ? "実装作業を完了しました。変更内容と確認結果を報告します。" : "実装作業を完了できませんでした。実行記録を確認してください。",
                     implementSucceeded ? implementResponse.SlackCompletionMessage : null);
                 if (implementResponse.ExecutionEvidence is { } implementEvidence)
                     executionEvidence.Add(("Implementer", implementationAttempt, implementEvidence));
@@ -435,7 +437,8 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                         run.Transition(requiresPullRequest ? RunState.Failed : RunState.NeedsHumanInput);
                         break;
                     }
-                    EmitLifecycle("Reviewer", "started", "running", run.State.ToString(), $"attempt:{reviewAttempt}", "Reviewer started.");
+                    EmitLifecycle("Reviewer", "started", "running", run.State.ToString(), $"attempt:{reviewAttempt}",
+                        "成果物の確認を開始しました。指摘の有無を確認し、次の対応を報告します。");
                     var reviewResponse = InvokeAgent(() => agentRunner.Review(reviewRequest));
                     if (implementResponse.ValidationEvidenceReference is { } evidenceReference)
                         validationEvidenceHandoffs.Add((implementationAttempt, reviewAttempt, evidenceReference,
@@ -449,7 +452,7 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                     var reviewSucceeded = reviewResponse.Succeeded && !reviewResponse.StopRequested && !reviewResponse.TimedOut && !missingReviewerOutput;
                     EmitLifecycle("Reviewer", reviewSucceeded ? "completed" : "failed",
                         reviewSucceeded ? "succeeded" : "failed", run.State.ToString(), $"attempt:{reviewAttempt}",
-                        reviewSucceeded ? "Reviewer completed." : "Reviewer did not complete successfully.",
+                        reviewSucceeded ? "レビューを完了しました。指摘内容と判断を報告します。" : "レビューを完了できませんでした。実行記録を確認してください。",
                         reviewSucceeded ? reviewResponse.SlackCompletionMessage : null);
                     oneShotReviewOutcome = !reviewResponse.Succeeded || reviewResponse.StopRequested || reviewResponse.TimedOut
                         ? Outcome(reviewResponse)
@@ -788,18 +791,28 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
             failure = AppendFailure(failure, "状態は人間判断待ちですが、実行記録が不完全です。");
             run.StopInMemoryAfterPersistenceFailure();
         }
+        var humanDecisionReason = failure;
+        if (!string.IsNullOrWhiteSpace(lastFinding) && (string.IsNullOrWhiteSpace(failure) ||
+            !failure.Contains(lastFinding, StringComparison.Ordinal)))
+            humanDecisionReason = string.IsNullOrWhiteSpace(failure) ? lastFinding : $"{failure}\n最後に確認したレビュー指摘: {lastFinding}";
+        var lifecycleFinalSummary = run.State switch
+        {
+            RunState.ReadyForHumanReview => $"最終確認が必要です。{humanDecisionReason ?? "実装とレビューが完了しました。成果物とレビュー結果を確認してください。"}",
+            RunState.NeedsHumanInput when humanDecisionReason is not null => $"人の判断が必要な理由: {humanDecisionReason}\n実行記録と指摘内容を確認し、次の対応を判断してください。",
+            RunState.NeedsHumanInput => "停止理由を特定できる情報が記録されていません。実行記録を確認し、次の対応を判断してください。",
+            RunState.Failed => "作業を完了できませんでした。実行記録を確認し、原因と次の対応を判断してください。",
+            _ => "作業が完了しました。実行結果を確認してください。"
+        };
         if (run.State is RunState.NeedsHumanInput or RunState.ReadyForHumanReview)
             EmitLifecycle("Orchestrator", "needs_human_input", "needs_human_input", run.State.ToString(),
-                summary: "Workflow is waiting for human input.");
+                summary: lifecycleFinalSummary);
         EmitLifecycle("Orchestrator", run.State == RunState.Failed ? "failed" : "completed",
             run.State == RunState.Failed ? "failed" : run.State is RunState.NeedsHumanInput or RunState.ReadyForHumanReview ? "needs_human_input" : "succeeded",
             run.State.ToString(),
-            summary: run.State == RunState.Failed ? "Workflow failed." : run.State is RunState.NeedsHumanInput or RunState.ReadyForHumanReview ? "Workflow stopped for human input." : "Workflow completed.");
+            summary: lifecycleFinalSummary);
         EmitLifecycle("Orchestrator", "final_result",
             run.State == RunState.Failed ? "failed" : run.State is RunState.NeedsHumanInput or RunState.ReadyForHumanReview ? "needs_human_input" : "succeeded",
-            run.State.ToString(), summary: run.State == RunState.Failed ? "最終結果: 失敗。詳細は実行記録を確認してください。" :
-                run.State is RunState.NeedsHumanInput or RunState.ReadyForHumanReview ? "最終結果: 人間の確認が必要です。詳細は実行記録を確認してください。" :
-                "最終結果: 完了しました。詳細は実行記録を確認してください。");
+            run.State.ToString(), summary: lifecycleFinalSummary);
         return new FakeWorkflowResult(run.State, currentArtifact, currentHash, implementationAttempt,
             reviewAttempt, revisionAttempts, retryAttempts, "report.md", failure, persistenceSucceeded);
     }
