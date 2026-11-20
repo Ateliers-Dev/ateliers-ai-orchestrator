@@ -46,13 +46,13 @@ Run単位の排他制御下で、Run directory内の版付きcheckpoint manifest
 
 NeedsHumanInputを非終端にするためCLI/MCP protocol versionをv2へ更新し、状態取得の応答にcanResume等の能力fieldを含める。MCPに読み取り専用get_run_statusとresume_orchestrationを追加し、既存run_orchestrationは変更しない。旧Runにcheckpointがなければlegacy-not-resumableとする。
 
-## 5. MCP再開契約案
+## 5. MCP再開契約
 
 新規MCP Tool resume_orchestrationと読み取り専用get_run_statusを追加し、対応CLI契約を加える。これらは現行Toolではない。run_orchestrationは変更しない。CLI/MCP protocol versionをv2へ更新し、get_run_status応答にcanResumeを含める。checkpointのない旧Runは原則再開不可。WorkはRun状態と保留質問を取得し、人間の回答を同じRun IDでMCPへ渡す。Slack経路は提供しない。
 
 resume_orchestrationのprotocol v2要求field: runId, decisionId, expectedStateRevision, expectedPhase, expectedHeadSha, expectedDiffDigest, answer.choice/answer.text。これらを必須とする。get_run_statusはrunIdを受け、state, canResume, pending question/phase, stateRevision, checkpoint SHAを返す。認可済みローカルMCP接続の実行権限/操作経路を信頼境界とし、その情報を監査に記録する。Work側で明示的な人間回答を得てからresume要求を送る。自己申告actorIdは信頼せず、ローカルMCP接続を人間本人性の証明とはみなさない。本人認証基盤はMilestone 1に追加しない。
 
-応答はaccepted/duplicate、same runId/decisionId、state、resumedPhase、new state revision、安定したerror code/current revisionを返す案。成功でもRun IDを変えない。拒否時は状態/成果物を変更しない。
+protocol v2の応答にはaccepted、duplicate、runId、decisionId、state、stateRevisionを含める。受理時はresumedPhaseを含める。拒否時はerror.code、currentRevision、理由を含めるが、状態/成果物は変更しない。同じdecisionIdの再送はduplicate=trueで以前の結果を返し、Run IDは維持する。エラーコードは機械判定可能で安定させ、理由は秘密情報を含めず人が読める形にする。
 
 ### 再開順序
 
