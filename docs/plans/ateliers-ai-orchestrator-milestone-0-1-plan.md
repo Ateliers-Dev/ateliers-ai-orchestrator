@@ -4,7 +4,7 @@
 > 更新日: 2026-11-20
 > 作成者: yuu503
 
-> 状態: Milestone 0完了記録・Milestone 1計画案（委譲運用方針は合意済み、Issue範囲・受け入れ条件は未確定）  
+> 状態: Milestone 0完了記録・Milestone 1残作業案（#109が最終受入ゲート、#105は独立追跡）
 
 > 対象: Ateliers-Dev/ateliers-ai-orchestrator
 
@@ -68,7 +68,7 @@ Milestone 0の目的は、MCP→CLI→Coreの実行経路、契約に基づくFa
 
 ### 3.1 中心目標と委譲運用方針（運用方針は合意済み）
 
-オーケストレーター自身の改善IssueをAIへ委譲し、Issueの範囲内で実装、独立レビュー、指摘修正、再レビュー、品質ゲート、PR作成とマージまでを自律実行する。対象Issueの範囲と上位の権限・承認・安全制約を守る。
+オーケストレーター自身の改善IssueをAIへ委譲し、Issueの範囲内で実装、独立レビュー、指摘修正、再レビュー、品質ゲート、PR作成までを実行する。マージは当該作業への明示的な委譲と上位の権限・承認・安全制約の範囲で行う。#109のTestbed最終E2Eが作るPRはIssueの受入条件どおりOPENのまま人間レビューへ渡す。
 
 #### PRレビューとマージの手順
 
@@ -87,58 +87,31 @@ Milestone 0の目的は、MCP→CLI→Coreの実行経路、契約に基づくFa
 - レビュー指摘が未解決である。
 - テスト・CI等の品質ゲートが、修正または再試行後も未達である。
 
-Milestone 1の委譲Issueでは、上記の手順と停止条件に従うことをもって、PRマージまでの実行を委譲する。
+委譲範囲にPRマージが含まれる場合に限り、上記の手順と停止条件に従ってマージする。#109の最終Testbed E2EはPR作成後にOPENで停止する。
 
-### 3.2 必須候補と提案する順序
+### 3.2 現在の残作業と提案する順序（2026-11-20棚卸し）
 
-[#84](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/84)と[#79](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/79)はMilestone 1の必須対応とする。その他は**必須候補（未確定）**であり、GitHub Milestoneへの登録や対象Issueの確定はまだ行っていない。順序は依存関係を示す案で、計画を確定するチャットで調整する。
+現在の状態・証跡・当初計画とのギャップは[Milestone 1状況・受入条件棚卸し](../reports/milestone-1/current-status.md)を参照する。確認対象IssueにGitHub Milestone紐付け・ラベルはなく、[P1]等はIssueタイトル上の優先度表記である。
 
-| 順序 | 必須候補 | 既存課題との関係 | 提案する受け入れ条件 |
+| 順序 | Issue / 項目 | 状態・位置づけ | 次に必要な検証 |
 | --- | --- | --- | --- |
-| 1 | **実Codex子プロセスの .NET ビルド環境を直す** | [#84](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/84)。[#79](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/79)の証跡確認の前提となる。 | `DOTNET_CLI_HOME` の設定元・実パス・生成時期・書込権限・子プロセスへの継承を診断し、直接原因と再現条件を記録する。MCP→CLI→実CodexのRun中にImplementer自身がRelease buildと対象チェックを成功させる。人間や別プロセスの後追い環境変更に依存しない。 |
-| 2 | **PR必須経路のpush前チェック** | [#80](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/80)。関連する[#45](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/45)、[#47](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/47)はGitHub上でClosed。 | 元Runの直接原因は未確定のまま保持する。修正後のPublisher push前チェックについて、通常のWindows CRLF差分が通り、意図した末尾空白が拒否されることを、隔離Git fixtureまたは同等の限定検証で記録する。Reviewer・実push・PR作成はこのIssueの受入条件と分け、Milestone最終E2Eで扱う。 |
-| 3 | **clean checkout/worktreeと生成ログ・成果物の配置を整理する** | #80のclean判定・clone内ログの観測に対応。[#51](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/51)と[#54](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/54)はClosed。必要なら完了済みIssueを仕様・経緯の参照として使い、重複作業を避ける。 | 作業用checkout/worktreeの作成・clean判定・後片付けの責務を定義する。生成ログ・成果物が対象checkoutを意図せずdirtyにしない配置とし、失敗時も診断と証跡を残す。実Git回帰確認でclean/dirtyと生成物の期待動作を示す。 |
-| 4 | **ImplementerからReviewerへの検証証跡の引き継ぎ** | [#79](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/79)。#84でImplementerの検証が実行できる状態になった後に、Run中の証跡受け渡しを確かめる。 | 証跡が固定成果物に紐づき、安全にReviewer要求へ渡り、欠落・不正を検出することをFakeTests等の決定論テストで確認する。実AI IntegrationTestは実Codex接続・応答到達のみを確認し、Reviewerの自由記述や判断品質をIssue合否にしない。 |
-| 5 | **IssueからTaskContractを作り、実行を依頼する最小手順を定型化する** | 今回はWorkが契約作成を補助した。既存Issue本文とTaskContract Guide/Schemaを使い、必要なら既存Issueへの追記範囲を判断する。現時点でこの項目の新規Issueは作らない。 | 人間が対象Issueと作業範囲を指定し、Guide/Schemaに適合するTaskContractを作成・検証し、合意された操作範囲でRunを開始できる手順を記録する。契約に必要な情報、未確定事項、停止条件が明確で、過剰な自律的Issue解釈を避ける。 |
-| 6 | **Issue #36に沿ったSlack通知の内容・スレッド化** | [#36](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/36)はOpen。通常通知の内容とスレッド要件を扱う。MCP通知モード指定の責務は後述の検討事項として切り分ける。 | 実行単位のスレッドに通知がまとまり、Bot名義・通常/テスト通知先の要件を保つ。開始・終了通知から目的、Issue/対象、成果、検証状態、失敗理由、次の人間の操作が分かる。テストチャンネルE2Eで通常チャンネルへの誤送信がない。Slack無効・設定不足・API障害でもコア処理が続く。 |
-| 7 | **自己改善E2Eと一連の証跡を確保する** | #84、#80、#79、#36とTaskContract手順に依存。既存Issueを使うか、小規模な対象Issueを別途選ぶ。 | オーケストレーター自身の安全な改善Issueを指定し、Contract作成、実Implementer、独立Reviewer、証跡確認、検証、PR作成、コメント証跡、品質ゲート、マージ、Slack報告までを1 Runとして追跡する。Run ID、対象SHA/差分、検証結果、PRリンク、コメント証跡、失敗や停止理由を確認可能にする。停止条件に該当しない場合はAIがマージする。 |
+| 1（最終段階） | [#109 最終Testbed E2E](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/109) | Open・タイトルP1。M1最終ゲート、実装未着手。 | 他の開発を先行。要件をFake/Unitで検証後、最後に一度だけ実E2Eを実施し、実Codex/Reviewer証跡、Release build・5 checks、testChannel API成功、隔離ブランチ/PR、SHA整合、main不変を確認する。 |
+| 独立追跡 | [#105 testhost接続問題](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/105) | Open・タイトルP2。M1完了条件外。 | Work環境の制約をCI/別Windows環境の結果と分けて調査。解消を他開発の前提にしない。 |
+| 後続候補 | [#36 Slackライフサイクル通知](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/36) | Open・Milestone/priorityなし。現計画では機能拡張。 | #109はtestChannelへの最小API成功だけを確認。スレッド/broadcast/複数Bot設計は#36の個別範囲。 |
+| 後続候補 | [#77 MCP実行環境パス](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/77) | Open・Milestone/priorityなし。今回の対象外。 | 既存の固定CLIパスで不足が再発・拡大した場合に再優先付けする。 |
 
-**進め方の依存関係:** まず#84の実Codexビルド環境と#80のPR必須経路を安定させ、clean checkout/worktreeの扱いを確立する。その上で#79の証跡引き継ぎとIssue→TaskContract手順を整え、#36の通知内容・スレッド要件を実装・確認する。最後に一連の自己改善E2Eで各要素を確認する。#36の情報設計やTaskContract手順は並行して検討できる。Milestone 1の開始順と受け入れ条件は未確定である。
+完了済み前提は[#84](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/84)、[#79](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/79)、[#80](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/80)、[#107](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/107)、[#108](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/108)。checkout/worktreeと実Git回帰はClosedの#51/#54等を再利用し、重複実装しない。
 
-### Milestone 1の要検討事項（必須か未確定）
+### 3.3 Milestone 1の最小完了条件（提案）
 
-以下2点は現時点で判断を保留する。**この計画更新で新規Issueは作成しない。**
+1. #84/#79/#80/#107/#108はそれぞれの受入条件・証跡により完了済み。#80の元Run原因未確定は残存リスクとして保ち、原因特定を遡及的な必須条件にしない。
+2. 通常PRでは対象Windows・Ubuntu必須CI（UnitTests/FakeTests）と独立レビューを確認する。変更範囲が要求しない実外部IntegrationTestsやAI判断品質を重複ゲート化しない。
+3. #109を一度実施し、Run ID/対象SHA、Implementerと独立Reviewerの工程・コメント証跡、Release build・Testbed 5 checks、専用testChannelへのSlack API成功、専用一時ブランチのPRと証跡のhead/base SHA一致を記録する。
+4. Testbed mainは不変、既存ブランチ/PRは無変更、force push・自動mergeなし、成功PRはOPENで人間レビュー待ちとする。失敗時は外部状態を自動削除/クローズせず、Codex未開始と開始後失敗を区別する。
+5. Run ID、対象SHA、PR、CI/Reviewerコメント、Slack API応答、最終状態を相互に追跡可能にする。Reviewerの自然言語判断品質、Slack画面到達確認、#36全体はこのゲートに含めない。
+6. #109はTestbed PR作成までを確認し、そのPRでAIの自律マージ能力は受け入れない。M1全体に自律マージを含めるかは過去のMVP方針と現在の委譲ルールを照合して未確定とする。
 
-| 検討事項 | 確認すること |
-| --- | --- |
-| Slackの `testChannelId` と通常通知先の重複 | 同じチャンネルを許容するか、テスト時は通常通知先との分離を要求するかを決める。現状は設定上重複が確認され、誤送信回避のためテスト通知を実行していない。 |
-| MCP経由でSlack通知モードを指定する方法 | `TaskContract` に持たせるか、MCPツール引数として指定するかを決め、#36のライフサイクル通知要件との責務分担を整理する。今回の `run_orchestration` は通知モードを指定できずdisabledだった。 |
-
-### 3.3 Milestone 1の完了条件（提案）
-
-下表で、Milestone 1の必須対応として扱うIssueと、必須候補・横断条件を受け入れ条件に対応づける。#84・#79は必須対応として合意済み。その他のIssueと横断条件は候補で、完了条件を含むMilestone 1の全体範囲は次チャットで確定する。
-
-| Issue / 条件 | 区分 | 対応する受け入れ条件 |
-| --- | --- | --- |
-| [#84](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/84) 実Codexの `DOTNET_CLI_HOME` 書き込み拒否 | 必須対応 | Implementer自身がRun中にRelease buildと対象チェックを成功させる。原因・再現条件を記録し、後追いの人手変更に依存しない。 |
-| [#79](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/79) Reviewerへの検証証跡引き継ぎ | 必須対応 | 固定成果物と結び付いた証跡が安全にReviewer要求へ渡り、欠落・不正を検出する。実Reviewerの判断品質はIssue合否と分ける。 |
-| [#80](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/80) PR必須Runのpush前チェック | 必須候補 | 修正後のPublisherチェックがCRLF差分を通し、末尾空白を拒否することを限定検証で確認する。元Run原因が未確定であることを保ち、Reviewer・push・PR作成は最終E2Eで確認する。 |
-| [#36](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/36) Slackライフサイクル通知 | 必須候補 | 実行単位の通知、役割別Bot、終端通知と人間の次アクションを確認する。テスト先の重複可否とMCP通知モード指定は別途決定する。 |
-| clean checkout/worktree・Issue→TaskContract・自己改善E2E | 横断候補 | 作業領域と証跡を保全し、Issueから実行契約を作成して、Run・検証・PRまでを追跡できる。 |
-
-以下は対応表の各項目を含むMilestone 1の計画案としての完了条件であり、次チャットで必須範囲を確定する。
-
-- #84の課題を解消し、実Codex ImplementerがRun中にRelease buildと対象チェックを実行できる。
-- #80では修正後PublisherのCRLF・末尾空白チェックを限定検証する。元Runの直接原因は未確定事項として記録する。
-- clean checkout/worktreeとログ・成果物の配置について、意図しないdirty化を防ぎ、失敗時も必要な証跡を追える。
-- #79の証跡引き継ぎ機構が検証証跡を固定成果物と結び付けてReviewer要求へ含め、不足を明示できる。
-- Issue→TaskContractの最小手順を再現可能な形で記録する。
-- #36に沿った通知で、実行単位の経緯・成果・失敗理由・人間の次の操作を確認できる。
-- Slackテスト送信とMCP経由の通知モード指定について、採用する方式を決定してテスト可能な状態にする。通知モード方式と通知先の重複可否は計画確定時の検討事項であり、決定前に実装方針を固定しない。
-- オーケストレーター自身のIssueを使ったE2Eで、Run ID、対象SHA、独立Reviewerの指摘・対応・マージ承認コメント、品質ゲート結果、マージ済みPRを引き継げる。停止条件に該当した場合はマージせず、理由と未完了事項を報告する。
-
-個別Issueのクローズは、それぞれの受入条件と証跡に基づいて判断する。Milestone最終E2E（[#109](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/109)）は独立したMilestone完了ゲートであり、Issue #79・#80のクローズ条件へ一律に含めない。
-
+この提案は#109の安全制約を維持し、決定論テストと一度の接続・公開E2Eを分担する。testChannel、権限、対象SHAを安全に確認できない場合は実E2Eを開始せず準備阻害として扱う。#105解決は他の開発やM1完了の前提にしない。
 
 ## 4. Milestone 1では必須にしない後続候補
 
@@ -166,22 +139,15 @@ Milestone 1の委譲Issueでは、上記の手順と停止条件に従うこと�
 
 ### 主なリスク
 
-- #80のpush前チェック停止の直接原因は未確定。記録されたdotnet/Gitアクセス問題との因果関係を決めつけず、再現と切り分けが必要。#84の `DOTNET_CLI_HOME` 書き込み拒否も直接原因・再現条件が未確定である。
-- 作業checkout内にログや生成物を置くとclean判定を妨げる可能性がある。診断ログの保全とclean状態の両立を設計する。
-- #79の証跡共有は、Reviewerの独立性や権限境界を弱めずに実現する必要がある。
-- Slack通知は複数Bot、実行順序、重複投稿、親投稿失敗、再起動時の状態などを含む。#36に記載されたSlack API/状態管理の技術検討を省略しない。
-- GitHubのIssue状態は2026-11-18に照合した。#36、#77、#79、#80、#84はOpen、#45、#47、#51、#54はClosed。#82とTestbed PR #2はマージ済み。Milestone 1着手時は本文・コメント・変更履歴を再確認し、完了済みIssueへの重複対応を避ける。
+- #80の元Run原因は未確定。CRLF/末尾空白の限定検証成功と、元Runの原因未特定を分けて保持する。
+- #105はWork環境のtesthost接続問題で、GitHub Actions Windows/Ubuntu必須CIとは別の事象。#109の実行場所と証跡は明記する。
+- #109はTestbed実Codex、testChannel、専用ブランチpush、PR作成を含む。事前条件・権限・対象SHAを副作用前に検査し、送信先や権限が安全に確認できなければ実行しない。
+- #36のスレッド化/broadcastは独立した将来要求であり、#109の最小通知API確認に混ぜない。
+- 2026-11-20時点で#79/#80/#84/#107/#108はClosed、#109/#105/#36/#77はOpen。Milestone紐付け・priority labelsは未設定。最新のIssue/PRを再確認する。
 
-## 6. 次チャットで最終承認する項目
+## 6. 現在の判断状況
 
-1. Milestone 1の必須候補と後続見送りの分類、および正式な優先順位。
-2. #84、#80、#79、#36およびclean checkout/worktreeの必須範囲と依存順序。Closedの#45/#47/#51/#54とは重複起票しない。
-3. Issue #36と完了済み#45/#47/#51/#54の成果をどう利用するか。
-4. 自己改善E2Eに使うIssue、対象リポジトリ、外部書き込み許可範囲、および証跡の保存先。
-5. SlackのtestChannelId重複を許容するか、MCP経由の通知モードをTaskContractとMCPツールのどちらで指定するか、および#36との責務分担。
-6. Milestone 1完了判定と、Run報告で確認する情報（PRコメント証跡、品質ゲート、マージまたは停止理由）。
-
-この文書だけではGitHub Milestone作成やIssue変更を行わない。これらは上記の計画を次チャットで確定した後に判断する。
+棚卸し結果と#109の最小受入案は本書および状況報告に記録した。GitHub Milestone登録、Issue状態・優先度変更、新規Issue作成は行っていない。#109の受入条件をIssue本文へ反映する場合は、実装開始前に提案差分を示して判断を得る。
 
 ## 7. 参照資料
 
