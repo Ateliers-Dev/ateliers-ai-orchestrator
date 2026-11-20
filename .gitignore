@@ -6,3 +6,8 @@ work-smoke-runs/
 /.test-workspaces/
 /config/slack.secrets.json
 /config/slack.json
+/config/agents.json
+/config/agents/*.json
+/config/agents/*.md
+/config/agents/instructions/*.md
+/config/agents/custom/*.md

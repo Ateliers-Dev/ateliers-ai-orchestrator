@@ -11,7 +11,7 @@ public sealed class SlackLifecycleNotificationDispatcherTests
     private const string TokenPrefix = "lifecycle-test-token-";
 
     [Fact]
-    public async Task TrySend_RoutesByRoleAndSendsOnlyFixedStructuredFields()
+    public async Task TrySend_UsesRoleBotInSharedRunChannelAndParentThread()
     {
         using var files = new LifecycleSettingsFiles();
         var handlers = new Dictionary<string, RecordingHandlerBase>(StringComparer.Ordinal);
@@ -30,9 +30,13 @@ public sealed class SlackLifecycleNotificationDispatcherTests
             Assert.Single(handler.Requests);
             Assert.Equal($"Bearer {TokenPrefix}{botId}", handler.Requests[0].Headers.Authorization!.ToString());
             using var payload = JsonDocument.Parse(handler.RequestBodies[0]!);
-            Assert.Equal($"C_{botId}", payload.RootElement.GetProperty("channel").GetString());
+            Assert.Equal("C_orchestrator", payload.RootElement.GetProperty("channel").GetString());
             var message = payload.RootElement.GetProperty("text").GetString()!;
-            Assert.Equal($"[Ateliers AI] run={RunId} role={role} event=started status=running state=Implementing at=2026-11-13T02:03:04.0000000+00:00", message);
+            Assert.Contains($"role={role} event=started status=running state=Implementing at=2026-11-13T02:03:04.0000000+00:00", message, StringComparison.Ordinal);
+            if (role == "Orchestrator") Assert.StartsWith($"Run開始: {RunId}\n", message, StringComparison.Ordinal);
+            else Assert.StartsWith("作業開始:", message, StringComparison.Ordinal);
+            if (role == "Orchestrator") Assert.False(payload.RootElement.TryGetProperty("thread_ts", out _));
+            else Assert.Equal("1700000000.000001", payload.RootElement.GetProperty("thread_ts").GetString());
             Assert.DoesNotContain(TokenPrefix, message, StringComparison.Ordinal);
             Assert.DoesNotContain("prompt", message, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("response", message, StringComparison.OrdinalIgnoreCase);
@@ -41,6 +45,36 @@ public sealed class SlackLifecycleNotificationDispatcherTests
             await dispatcher!.TrySendAsync(RunId, "Orchestrator", "completed", "needs_human_input", "NeedsHumanInput", DateTimeOffset.UtcNow));
         Assert.Equal(0, dispatcher.FailedSends);
         Assert.Single(handlers["orchestrator"].Requests);
+    }
+
+    [Fact]
+    public async Task TrySend_ThreadsAgentCompletionAndFinalResultAndUsesSafeFallback()
+    {
+        using var files = new LifecycleSettingsFiles();
+        var handlers = new Dictionary<string, RecordingHandlerBase>(StringComparer.Ordinal);
+        using var dispatcher = SlackLifecycleNotificationDispatcher.TryCreate(files.ConfigurationPath, files.SecretsPath,
+            botId => handlers[botId] = new SuccessRecordingHandler(_ => SuccessResponse(botId)));
+        Assert.NotNull(dispatcher);
+
+        Assert.Equal(SlackNotificationSendResult.Sent, await dispatcher!.TrySendAsync(RunId, "Orchestrator", "started", "running", "Prepared", DateTimeOffset.UtcNow));
+        Assert.Equal(SlackNotificationSendResult.Sent, await dispatcher.TrySendAsync(RunId, "Implementer", "completed", "succeeded", "Reviewing",
+            DateTimeOffset.UtcNow, "agent-one", "Builder", "implementer", "Done", "担当: 実装\n結果: 完了\n未完了・人間判断: なし"));
+        Assert.Equal(SlackNotificationSendResult.Sent, await dispatcher.TrySendAsync(RunId, "Orchestrator", "final_result", "succeeded", "ReadyForHumanReview",
+            DateTimeOffset.UtcNow, null, null, null, "完了しました", null));
+
+        using var completion = JsonDocument.Parse(handlers["implementer"].RequestBodies.Single()!);
+        Assert.Equal("C_orchestrator", completion.RootElement.GetProperty("channel").GetString());
+        Assert.Equal("1700000000.000001", completion.RootElement.GetProperty("thread_ts").GetString());
+        Assert.Contains("担当: 実装", completion.RootElement.GetProperty("text").GetString(), StringComparison.Ordinal);
+        using var finalResult = JsonDocument.Parse(handlers["orchestrator"].RequestBodies.Last()!);
+        Assert.False(finalResult.RootElement.TryGetProperty("thread_ts", out _));
+        Assert.StartsWith("完了しました\n", finalResult.RootElement.GetProperty("text").GetString(), StringComparison.Ordinal);
+
+        Assert.Equal(SlackNotificationSendResult.Sent, await dispatcher.TrySendAsync(RunId, "Reviewer", "completed", "succeeded", "ReadyForHumanReview",
+            DateTimeOffset.UtcNow, "agent-two", "Reviewer", "reviewer", "Done", "xoxb-1234567890-secret"));
+        using var fallback = JsonDocument.Parse(handlers["reviewer"].RequestBodies.Single()!);
+        Assert.Contains("作業が完了しました。詳細は実行記録を確認してください。", fallback.RootElement.GetProperty("text").GetString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("xoxb-", fallback.RootElement.GetProperty("text").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -64,7 +98,7 @@ public sealed class SlackLifecycleNotificationDispatcherTests
             using var payload = JsonDocument.Parse(handlers[botId].RequestBodies.Single()!);
             Assert.Equal("C_TEST", payload.RootElement.GetProperty("channel").GetString());
             Assert.Equal($"Bearer {TokenPrefix}{botId}", handlers[botId].Requests.Single().Headers.Authorization!.ToString());
-            Assert.StartsWith("[Ateliers AI TEST] ", payload.RootElement.GetProperty("text").GetString(), StringComparison.Ordinal);
+            Assert.Contains("[Ateliers AI TEST] ", payload.RootElement.GetProperty("text").GetString(), StringComparison.Ordinal);
         }
     }
 
@@ -252,7 +286,7 @@ public sealed class SlackLifecycleNotificationDispatcherTests
 
     private static HttpResponseMessage SuccessResponse(string botId) => new(HttpStatusCode.OK)
     {
-        Content = new StringContent($"{{\"ok\":true,\"channel\":\"C_{botId}\",\"ts\":\"1700000000.000001\"}}")
+        Content = new StringContent("{\"ok\":true,\"channel\":\"C_orchestrator\",\"ts\":\"1700000000.000001\"}")
     };
 
     private sealed class LifecycleSettingsFiles : IDisposable

@@ -75,11 +75,11 @@ Agent個別設定にある `slackBotId` は `slack.json` の `bots[].id` を参�
 この文書作成時にコードと設定例で確認した動作は次のとおりです。
 
 - CLIはSlack通知を無効化するか、テストチャンネル／通常チャンネル経由で使うモードを扱います。
-- `SlackLifecycleNotificationDispatcher` は `orchestrator`、`implementer`、`reviewer` のBot設定を読み込み、Role別に固定形式の通知を送ります。
-- 現行イベントは `started`、`completed`、`failed`、`needs_human_input` で、Run ID、Role、状態、時刻等の実行情報を本文に含みます。
-- Bot Tokenと `botUserId` の一致をSlack認証確認で検証する経路があり、テストチャンネルは通常チャンネルと異なることを要求します。
-- この確認時点では、Agentが生成した完了文をSlack本文に使う経路、RunごとのSlackスレッド作成・返信、最終結果専用のチャンネル投稿は確認できません。
-- このため、現行の固定ライフサイクル通知は、上記Milestone 1設計の5タイミングが完成していることを示しません。
+- `SlackLifecycleNotificationDispatcher` はAgent設定のRole→Slack Bot ID対応を使い、既存の `slack.json` と `slack.secrets.json` から各Botを解決します。Agent設定がない場合は既存3 Bot IDにフォールバックします。
+- Run開始のチャンネル投稿からSlackの投稿時刻（thread timestamp）を取得し、そのRunのメモリー内ルートとして保持します。Run中のAgent開始・完了・失敗、Orchestrator終了は同一チャンネルのスレッドへ返信し、最終結果は別のチャンネル投稿として送ります。
+- Agent完了報告はタスク応答と分離した必須ラベル付きブロックから取り出します。必須項目欠落、空文、長さ超過、または認証情報のパターンを検知した場合は、Orchestratorの短い安全な代替文を使います。Slack通知の失敗は実行状態を失敗扱いにせず、配送結果を本文なしの `slack_delivery_result` JSONLイベントへ記録します。終了時にキューへ残った通知もイベントごとに `abandoned` と記録します。
+- 実装済みの通知タイミングはRun開始、Agent開始、Agent完了、Orchestrator終了、最終結果です。送信は既存の有界キューで順番に行い、スレッドIDはプロセス内だけで保持します。
+- Bot Tokenと `botUserId` の一致をSlack認証確認で検証する経路は維持され、テストチャンネルは通常チャンネルと異なることを要求します。テストでは従来どおり専用の `testChannelId` を使います。
 
 ## 7. 将来構想・未確定事項
 

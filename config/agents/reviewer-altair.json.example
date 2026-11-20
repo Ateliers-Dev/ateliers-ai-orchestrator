@@ -1,0 +1,9 @@
+{
+  "id": "altair",
+  "name": "Altair",
+  "role": "Reviewer",
+  "slackBotId": "reviewer",
+  "defaultModel": null,
+  "defaultModelReasoningEffort": null,
+  "customs": []
+}

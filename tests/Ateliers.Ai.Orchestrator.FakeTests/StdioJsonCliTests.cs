@@ -80,9 +80,10 @@ public sealed class StdioJsonCliTests
             Console.SetIn(input);
             Console.SetOut(output);
             Console.SetError(error);
-            var exitCode = await OrchestratorCli.RunAsync(["run", "--stdin-json", "--agent", "fake", "--runs", runs]);
+            var exitCode = await OrchestratorCli.RunAsync(["run", "--stdin-json", "--agent", "fake", "--runs", runs,
+                "--slack-notifications", "disabled"]);
 
-            Assert.Equal(0, exitCode);
+            Assert.True(exitCode == 0, $"CLI returned {exitCode}. stderr: {error}");
             using var json = JsonDocument.Parse(output.ToString());
             Assert.True(json.RootElement.GetProperty("ok").GetBoolean());
             Assert.Equal("NeedsHumanInput", json.RootElement.GetProperty("state").GetString());

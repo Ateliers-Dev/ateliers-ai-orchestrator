@@ -151,6 +151,23 @@ internal static class OrchestratorCli
                 return 2;
             }
 
+            AgentConfigurationSnapshot agentConfiguration;
+            try
+            {
+                agentConfiguration = AgentConfigurationLoader.TryFindConfiguration(null, null, out var agentConfigurationPath)
+                    ? AgentConfigurationLoader.Load(agentConfigurationPath)
+                    : AgentConfigurationSnapshot.LegacyDefaults();
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or ArgumentException)
+            {
+                var safeError = "Agent設定または指示の読込に失敗したため、Run開始を中止しました。";
+                Console.Error.WriteLine(safeError);
+                if (structuredRun) WriteStructuredError("invalid_agent_configuration", safeError, 2);
+                return 2;
+            }
+            var agentBotRoutes = agentConfiguration.SlackBotRoutes.ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
+            agentBotRoutes["Orchestrator"] = "orchestrator";
+
             using var stopSource = new CancellationTokenSource();
             ConsoleCancelEventHandler? cancelHandler = null;
             if (agentKind == "codex")
@@ -167,14 +184,15 @@ internal static class OrchestratorCli
                 Directory.CreateDirectory(fakeRunDirectory);
                 using var eventStore = JsonlRunEventStore.CreateNew(Path.Combine(fakeRunDirectory, "events.jsonl"), fakeRunId);
                 using var lifecycleWriter = slackConfigurationPath is null
-                    ? new LifecycleNotificationEventWriter(lifecycleLogPath, notificationsDisabled, useSlackTestChannel)
-                    : new LifecycleNotificationEventWriter(lifecycleLogPath, notificationsDisabled, slackConfigurationPath, slackSecretsPath!, useSlackTestChannel);
+                    ? new LifecycleNotificationEventWriter(lifecycleLogPath, notificationsDisabled, useSlackTestChannel, agentBotRoutes)
+                    : new LifecycleNotificationEventWriter(lifecycleLogPath, notificationsDisabled, slackConfigurationPath, slackSecretsPath!, useSlackTestChannel, agentBotRoutes);
                 IAgentRunner runner = agentKind == "codex" ? new CodexCliAgentRunner(codexOptions!) : new FakeAgentRunner(scenario);
                 using var publisher = agentKind == "codex" && contract.Reporting.PullRequestExpected
                     ? new GitHubWorkflowPublisher() : null;
                 var result = new FakeAgentWorkflow().Run(contract, contractHash, fakeRunId, fakeRunDirectory,
                     runner, eventStore, evidence, stopToken: stopSource.Token,
-                    codexOneShot: agentKind == "codex", lifecycleEvents: lifecycleWriter, publisher: publisher);
+                    codexOneShot: agentKind == "codex", lifecycleEvents: lifecycleWriter, publisher: publisher,
+                    agentConfiguration: agentConfiguration);
                 await lifecycleWriter.FlushSlackNotificationsAsync(stopSource.Token);
                 if (lifecycleWriter.FailedWrites > 0)
                     Console.Error.WriteLine($"警告: ライフサイクルJSONLへの書き込みに{lifecycleWriter.FailedWrites}件失敗しました。実行結果は継続しています。");

@@ -36,9 +36,16 @@ public sealed class SlackBotClient : IDisposable
         httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", configuration.Token);
     }
 
+    public string ChannelId => configuration.ChannelId;
+
     public async Task<SlackPostMessageResult> SendMessageAsync(string message, CancellationToken cancellationToken = default)
+        => await SendMessageAsync(message, configuration.ChannelId, threadTs: null, cancellationToken).ConfigureAwait(false);
+
+    internal async Task<SlackPostMessageResult> SendMessageAsync(string message, string channelId, string? threadTs,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(message);
+        ArgumentException.ThrowIfNullOrWhiteSpace(channelId);
 
         using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutSource.CancelAfter(requestTimeout);
@@ -47,7 +54,7 @@ public sealed class SlackBotClient : IDisposable
         {
             using var response = await httpClient.PostAsJsonAsync(
                 PostMessageUri,
-                new SlackPostMessageRequest(configuration.ChannelId, message),
+                new SlackPostMessageRequest(channelId, message, threadTs),
                 JsonOptions,
                 timeoutSource.Token).ConfigureAwait(false);
 
@@ -69,7 +76,8 @@ public sealed class SlackBotClient : IDisposable
             if (body is null || !body.Ok)
                 throw SlackNotificationException.ApiFailure(response.StatusCode);
 
-            if (string.IsNullOrWhiteSpace(body.Channel) || string.IsNullOrWhiteSpace(body.Ts))
+            if (string.IsNullOrWhiteSpace(body.Channel) || !string.Equals(body.Channel, channelId, StringComparison.Ordinal) ||
+                string.IsNullOrWhiteSpace(body.Ts))
                 throw SlackNotificationException.InvalidResponse(response.StatusCode);
 
             return new SlackPostMessageResult(body.Channel, body.Ts);
@@ -133,7 +141,8 @@ public sealed class SlackBotClient : IDisposable
             int.TryParse(values.FirstOrDefault(), out var seconds) ? Math.Max(0, seconds) : null;
     }
 
-    private sealed record SlackPostMessageRequest(string Channel, string Text);
+    private sealed record SlackPostMessageRequest(string Channel, string Text,
+        [property: JsonPropertyName("thread_ts"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ThreadTs);
     private sealed record SlackPostMessageResponse(bool Ok, string? Channel, string? Ts);
     private sealed record SlackAuthTestResponse(bool Ok,
         [property: JsonPropertyName("user_id")] string? UserId,

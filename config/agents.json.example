@@ -1,0 +1,10 @@
+{
+  "assignments": {
+    "Implementer": [
+      { "agentId": "sirius" }
+    ],
+    "Reviewer": [
+      { "agentId": "altair", "specialty": "code" }
+    ]
+  }
+}

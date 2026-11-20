@@ -104,10 +104,11 @@ Slackの接続先と秘密情報は、既存の `config/slack.json` と `config/
 
 この文書の設計と現在の実装を混同しないよう、リポジトリで確認した範囲を記録します。
 
-- `config/slack.json.example` はSlack Bot ID、表示名、Slack Bot User ID、送信チャンネル、有効・無効を定義します。Tokenは別の `slack.secrets.json` にあります。
-- Slackライフサイクル配送は現在、`orchestrator`、`implementer`、`reviewer` のBot IDをRoleへ固定対応しています。
-- この確認時点では、`agents.json`、Agent個別JSON、Agent指示Markdownの読込機能は見つかりません。
-- Agent IDとSlack Bot IDを関連付ける設定も、一般化された複数Agent割当も、現行のSlack通知経路では利用されていません。
+- `config/agents.json.example` とAgent JSON例は、実装で読み込むRole割当・Agentプロフィールの形式を示します。Milestone 1では各Roleに1 Agentだけを指定できます。複数割当配列は将来互換のための形であり、2件以上を指定するとRun開始前に拒否します。
+- ユーザー設定の `config/agents.json` を優先し、見つからない場合は開発用のリポジトリ `config/agents.json` を探します。Agent設定がない場合は従来のRole別CodexプロファイルとSlack Bot IDへフォールバックします。
+- 設定と参照MarkdownはRun開始前に一度読み込み、Agent実行入力へAgent ID、表示名、Role、Reviewerのspecialty、Slack Bot ID、指示文、任意モデル設定を渡します。ファイルの途中変更は同Runへ反映しません。Runには設定値と指示本文のSHA-256を `agent-configuration.json` へ記録し、指示本文そのものは複製しません。
+- 指示ファイルはagentsフォルダー内の相対参照に限定し、フォルダー外参照、シンボリックリンク、64,000文字超の文書を拒否します。Agent設定ファイルと指示はGit管理対象外です。
+- Slack Bot IDは設定の `bots[].id` として解決し、Agent IDやSlackの `botUserId` と同一視しません。複数Agentから同じBot IDを参照する形式自体は禁止しません。
 
 ## 7. 将来の検討事項
 
@@ -115,7 +116,7 @@ Slackの接続先と秘密情報は、既存の `config/slack.json` と `config/
 - Agentが複数Roleを持つことを許すか、許す場合のRole記述方法。
 - JSONスキーマの統廃合、バージョン管理、互換性と検証方法。
 - 設定ファイルとMarkdownの配布場所、パス解決、改ざん・秘密情報の扱い。
-- 実行に用いたモデル、設定、指示の記録方法。
+- `agent-configuration.json` は識別情報と指示ハッシュを記録します。完全な再現のために指示本文を別の安全な保管先と結び付ける方法は今後の検討事項です。
 
 ## 関連資料
 

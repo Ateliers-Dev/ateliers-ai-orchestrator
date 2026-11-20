@@ -1,0 +1,9 @@
+{
+  "id": "sirius",
+  "name": "Sirius",
+  "role": "Implementer",
+  "slackBotId": "implementer",
+  "defaultModel": null,
+  "defaultModelReasoningEffort": null,
+  "customs": []
+}
