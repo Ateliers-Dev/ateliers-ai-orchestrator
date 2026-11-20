@@ -14,7 +14,7 @@ Issue上の[P1]/[P2]はタイトルの記載で、GitHub labels欄は空、Miles
 
 | Issue | 状態 / priority | Milestone | 実態と証跡 | 残る作業 / 依存 |
 | --- | --- | --- | --- | --- |
-| [#109 最終Testbed E2E](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/109) | Open / タイトルP1 | 未設定 | 実装・最終Run未着手。直近の準備実行はCodex起動前にCLI解決で停止し、実Codex・Slack・push・PRは発生していない。Issue本文は無人実行、安全境界、必須test通知、PR OPENを指定。 | M1の残る最終ゲート。実装後に決定論テスト、最後に一度のE2E。 |
+| [#109 最終Testbed E2E](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/109) | Open / タイトルP1 | 未設定 | [PR #114](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/pull/114)で非対話実行、Codex CLI解決、testChannel/API結果、起動段階・run ID記録を実装中。最新headのWindows/Ubuntu CIは実行中。最終E2Eは未実施。直近の実行済みE2EはCodex起動前にCLI解決で停止し、実Codex・Slack・push・PRは発生していない。 | M1最終ゲート。PR #114のCI/レビュー完了後、ユーザー本人が一度E2Eを行う。 |
 | [#105 Work testhost問題](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/105) | Open / タイトルP2 | 未設定 | WorkのWindowsでxUnit testhostがlocalhost接続待ちとなった記録。最小テストでも観測。PR #96 CIではWindows/UbuntuのFake-only Unitが成功。原因は未特定。 | 別追跡。Milestone受入条件ではない。#109の実行場所選定に関係する場合だけ依存を明記し、他開発を止めない。 |
 | [#36 Slackライフサイクル通知](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/36) | Open / priorityなし | 未設定 | スレッド集約、各Bot名義、終端broadcast等の将来機能要求。現計画では対象外。 | #109の最小testChannel API送信とは別範囲。後続候補として再優先付け。 |
 | [#77 MCPパス差](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/77) | Open / priorityなし | 未設定 | 固定CLIパスでの疎通を妨げない別課題。 | 今回のM1完了条件外。環境差の再発・拡大時に再検討。 |
@@ -46,9 +46,9 @@ Issue上の[P1]/[P2]はタイトルの記載で、GitHub labels欄は空、Miles
 
 **実装済み:** PR #88 (#84)、#96/#106 (#79)、#101/#110 (#80)、#111 (#107)、#112 (#108) はmainへ反映済み。CI/レビュー等の証跡は各PRとIssueに記録済み。
 
-**検証済み:** #79/#80の決定論Fake検証、Windows/Ubuntu必須CI、#107/#108のCI・独立レビュー。#108はbeta release生成と配布物のhash/manifest確認、さらにユーザー報告として実機インストールと-Verify成功。#80元Run原因と#105 testhost原因は未確認。
+**検証済み:** #79/#80の決定論Fake検証、Windows/Ubuntu必須CI、#107/#108のCI・独立レビュー。#108はbeta release生成と配布物のhash/manifest確認、さらにユーザー報告として実機インストールと-Verify成功。#109のPowerShell preflight決定論テストはローカルで成功し、最新headのCIは実行中。#80元Run原因と#105 testhost原因は未確認。
 
-**未着手:** #109を非対話CI/CD対応にする実装と、Milestone最終の実Codex/Reviewer・Slack testChannel・Testbed push/PR E2E。今回も実装・外部接続・pushはしていない。
+**未着手:** Milestone最終の実Codex/Reviewer・Slack testChannel・Testbed push/PR E2E。実行用のコード変更はPR #114でレビュー中で、マージ・実E2E・Slack API送信は行っていない。
 
 **独立追跡:** #105調査はOpenのまま。#109実行環境に影響するかは実行前に判定するが、調査完了自体をM1完了条件にしない。
 
@@ -59,7 +59,7 @@ Issue上の[P1]/[P2]はタイトルの記載で、GitHub labels欄は空、Miles
 - #84/#79は実装・個別受入済み。#80も必要十分な限定条件でClosed。#107/#108は後から追加され、CI・レビュー・配布確認まで完了。
 - #51/#54等の既存作業と#101/#110がcheckout/Git安全性を担い、#109や新Issueで重複させない。
 - #36全面実装、Slack通知モード設計、TaskContract手順の独立Issue化は現在の残IssueにもMilestone登録にもなく、現段階で必須にしない。
-- 主な未達は#109実装と一度の最終E2E。#105は別追跡の阻害要因候補であってM1達成条件ではない。
+- 主な未達は#109の実行準備PR #114の品質ゲートと一度の最終E2E。#105は別追跡の阻害要因候補であってM1達成条件ではない。
 - 当初計画の自己改善E2EにはPRマージまでの記載がある一方、#109はTestbed PRをOPENで人間レビューへ渡す。#109ではAIの自律マージ能力を受け入れず、M1全体にそれを残すかは未確定として扱う。以前のMVP決定記録は人間の最終確認・マージを置いていたため、計画の文言と現在の委譲ルールを合わせて判断する必要がある。
 
 ## #109 最小確認案
