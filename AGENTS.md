@@ -177,6 +177,8 @@ Milestone 1で委譲されたIssueの作業では、Issueの範囲と上位の�
 - TestbedはE2E専用ではありません。IntegrationTestではTestbedのシナリオ・教材をローカルの隔離Git fixtureに再利用し、検証後に外部GitHubへpushしません。
 - 開発用の実Codex IntegrationTestは専用の `Ateliers.Ai.Orchestrator.IntegrationTests` プロジェクトでのみ明示opt-inして実行します。実Codex CLI認証とモデル利用枠/費用が必要です。Codexが未起動、証跡不足、またはReviewerが未確認の場合は未検証として扱い、最終受入E2Eで代替しません。
 - Issue #79の実Codex IntegrationTestでは、実Codexの起動・通信・応答到達・終了だけを確認します。証跡の保存・Reviewerへの入力・状態遷移はFakeTestsで確認し、実Codexの自由記述や判定品質を合否条件にしません。
-- Slack通知は、Unit/FakeではFakeを使い、Slack実APIを検証対象とする場合だけ独立した明示opt-inのSlack IntegrationTestで送信します。Issue #79の開発用実Codex IntegrationTestは通知OFFを今回の承認済みシナリオとして実行します。別の実行でSlackがON指定されている場合にワーカーが独断でOFFへ変更してはいけません。
+- UnitTests/FakeTestsはSlack実APIへ接続しません。FakeTestsからCLIの `run` を起動する場合は `--slack-notifications disabled` を明記するか、共通ヘルパーのOFF設定を使います。通知の配送挙動はFake送信者で検証します。
+- Slack実APIへの通知検証は専用IntegrationTestだけで行います。単体Slack API疎通は `ATELIERS_RUN_SLACK_INTEGRATION_TESTS=1`、OrchestratorのFake Stop実行を含むライフサイクル通知は `ATELIERS_RUN_ORCHESTRATOR_SLACK_INTEGRATION_TESTS=1` の個別opt-inを必要とし、どちらも専用 `testChannelId` のみを使います。実送信を含むテストのopt-inは、そのテストを実行する担当者が明示した場合に限ります。
+- Issue #79の開発用実Codex IntegrationTestは通知OFFを今回の承認済みシナリオとして実行します。別の実行でSlackがON指定されている場合にワーカーが独断でOFFへ変更してはいけません。
 - Slack API送信成功の確認と、Slack画面上で人間が到達・見え方を確認することは別の受入条件です。画面確認はユーザーが最終受入で行います。
 

@@ -95,8 +95,15 @@ Agent個別設定にある `slackBotId` は `slack.json` の `bots[].id` を参�
 - 通知イベントのバージョン、通知文の構造化、長文処理、Slack表示規約。
 - タイムアウト、キャンセルなど、Milestone 1の5タイミング以外の独立通知。
 
+## 8. テスト時のSlack通知
+
+- UnitTestsとFakeTestsではSlack実APIへ接続しません。FakeTestsがCLI `run` を起動する場合は `--slack-notifications disabled` を指定し、通知配送の決定論的な挙動はFake送信者で検証します。
+- Slack実APIを使う検証は明示opt-inのIntegrationTestに限ります。Orchestratorのライフサイクル通知をSlackへ送るテストは `ATELIERS_RUN_ORCHESTRATOR_SLACK_INTEGRATION_TESTS=1` が必要で、全ての通知を専用 `testChannelId` に送ります。
+- このIntegrationTestはSlack Bot認証IDを送信前に確認し、Run ID返信を含む配送監査を検査します。明示opt-inを付けて実行した場合は複数の実Slack投稿が発生します。
+
 ## 関連資料
 
 - [Agent設定と指示管理](agent-configuration-and-instructions.md)
 - [AIエージェントのSlack通知機能](../Feature/ai-agent-slack-notifications.md)
 - [Slack E2Eの通知モード](e2e/README.md)
+- [開発用IntegrationTestの実行範囲](development-integration-tests.md)

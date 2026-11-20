@@ -30,6 +30,12 @@
 - 実AI IntegrationTestに、Fakeで決定論的に確認できる入力構築、パラメータ受け渡し、解析、状態遷移、証跡保存を重ねません。
 - 外部接続完了を示すために必要な最小限の検査に絞ります。応答内容の評価が必要になった場合はFakeTestsへの移行または別のモデル評価として整理します。
 
+## Slack通知のテスト境界
+
+- UnitTestsとFakeTestsはSlack実APIへ接続しません。FakeTestsからCLIの `run` を起動する場合は通知を `disabled` にし、配送処理を検証するときはFake送信者を使います。
+- Slack実APIへの送信を確認するテストは、専用の明示opt-in IntegrationTestに分けます。Orchestratorのライフサイクル通知テストは `ATELIERS_RUN_ORCHESTRATOR_SLACK_INTEGRATION_TESTS=1` が設定されたときだけFake Stopシナリオを実行し、設定された `testChannelId` へ送信します。
+- Slackテスト用opt-inは通常のUnit/Fakeテスト実行やCodex IntegrationTestを有効化せず、実送信対象のIntegrationTestだけに適用します。
+
 将来、自律マージ機能を実装する場合、その分岐は固定したFake応答・品質ゲート結果を使い、マージ要求の有無、最終状態、理由・証跡の記録をUnitTests/FakeTestsで決定論的に検証します。これはMilestone 1の必須受入条件ではありません。実Codexにモデル判断をさせて分岐を試験したり、実GitHubマージを行ったりすることは、分岐制御のテスト条件にしません。
 
 ## 境界の決め方

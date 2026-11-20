@@ -1,7 +1,7 @@
 # 開発用IntegrationTestの実行範囲
 
 > 作成日: 2026-11-19
-> 更新日: 2026-11-19
+> 更新日: 2026-11-21
 > 作成者: Codex
 
 ## 目的
@@ -33,7 +33,10 @@
 | UnitTests / FakeTests | 開発者・Windows/Ubuntu CI | 内部ロジック、証跡形式、パス、マスキング、Reviewerへの決定論的な証跡受け渡し |
 | 実Codex IntegrationTest | 開発者が明示opt-in | 実Codexプロセスの起動、通信、応答到達、終了 |
 | Slack IntegrationTest | Slack APIを明示的に検証する実行者 | テストチャンネルへの実送信とAPI応答 |
+| Orchestrator Slack IntegrationTest | `ATELIERS_RUN_ORCHESTRATOR_SLACK_INTEGRATION_TESTS=1` を明示した実行者 | Fake Stopワークフローのライフサイクル通知を `testChannelId` へ実送信し、配送監査とRun ID返信を確認 |
 | Testbed最終受入E2E | ユーザー本人 | 公開PRを含む受け入れフロー。通知を選んだ場合はAPI送信と人間による到達確認 |
 | CLI/MCP導入受入 | ユーザー本人 | インストール済み配布物とMCPの導入・接続 |
 
 Slack API応答と人間による画面上の到達・見え方の確認は別の条件です。Testbed E2Eが使うのもソースからRelease buildしたCLIであり、インストール済みCLI/MCP導入の確認は別途必要です。
+
+通常のUnitTests/FakeTestsはSlack実APIへ接続せず、FakeTestsがCLI `run` を使う場合も通知を無効にします。Orchestrator Slack IntegrationTestは通常実行とCIではSkipされ、単体Slack疎通用のopt-inとは別の環境変数で明示的に有効化した場合だけ投稿します。ユーザー設定またはリポジトリ設定のBot Tokenを使い、投稿先は `testChannelId` に限定します。送信前に全Botの `auth.test` を行い、設定済みBot User IDとの一致を確認します。失敗時はrunと配送監査の証跡を一時fixtureに保持します。

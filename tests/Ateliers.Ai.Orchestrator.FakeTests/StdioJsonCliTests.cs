@@ -116,7 +116,8 @@ public sealed class StdioJsonCliTests
             Console.SetIn(input);
             Console.SetOut(output);
             Console.SetError(error);
-            var exitCode = await OrchestratorCli.RunAsync(["run", "--stdin-json", "--agent", "fake"]);
+            var exitCode = await OrchestratorCli.RunAsync(["run", "--stdin-json", "--agent", "fake",
+                "--slack-notifications", "disabled"]);
 
             Assert.Equal(2, exitCode);
             using var json = JsonDocument.Parse(output.ToString());

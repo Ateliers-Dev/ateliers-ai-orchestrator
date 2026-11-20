@@ -3667,6 +3667,7 @@ static (int ExitCode, string Output, string Error) RunCli(params string[] argume
     };
     var cliArguments = new[] { "run", "--project", cliProject, "--configuration", configuration, "--no-build", "--" }.Concat(arguments);
     if (arguments.Length > 0 && arguments[0] == "run" && !arguments.Contains("--slack-notifications", StringComparer.Ordinal))
+        // FakeTests exercise notification formatting through injected fake senders; CLI runs never connect to Slack.
         cliArguments = cliArguments.Concat(["--slack-notifications", "disabled"]);
     foreach (var argument in cliArguments)
         start.ArgumentList.Add(argument);
