@@ -1,7 +1,7 @@
 # Ateliers AI Orchestrator 開発計画
 
 > 作成日: 2026-11-18
-> 更新日: 2026-11-19
+> 更新日: 2026-11-20
 > 作成者: yuu503
 
 > 状態: Milestone 0完了記録・Milestone 1計画案（委譲運用方針は合意済み、Issue範囲・受け入れ条件は未確定）  
@@ -96,9 +96,9 @@ Milestone 1の委譲Issueでは、上記の手順と停止条件に従うこと�
 | 順序 | 必須候補 | 既存課題との関係 | 提案する受け入れ条件 |
 | --- | --- | --- | --- |
 | 1 | **実Codex子プロセスの .NET ビルド環境を直す** | [#84](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/84)。[#79](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/79)の証跡確認の前提となる。 | `DOTNET_CLI_HOME` の設定元・実パス・生成時期・書込権限・子プロセスへの継承を診断し、直接原因と再現条件を記録する。MCP→CLI→実CodexのRun中にImplementer自身がRelease buildと対象チェックを成功させる。人間や別プロセスの後追い環境変更に依存しない。 |
-| 2 | **PR必須経路の停止原因を特定し、必要な修正を行う** | [#80](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/80)。関連する[#45](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/45)、[#47](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/47)はGitHub上でClosed。 | `push.secret-scan-and-whitespace-check` の直接原因と再現条件を記録する。dotnet復元先、`.git/index.lock`、隔離環境、ログ配置は別々に切り分け、未確認の因果を断定しない。安全な検証用リポジトリで同等のPR必須Runを行い、チェック通過後のReviewer・push・PR作成までを確認する。GitHubへの副作用を明示する。 |
+| 2 | **PR必須経路のpush前チェック** | [#80](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/80)。関連する[#45](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/45)、[#47](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/47)はGitHub上でClosed。 | 元Runの直接原因は未確定のまま保持する。修正後のPublisher push前チェックについて、通常のWindows CRLF差分が通り、意図した末尾空白が拒否されることを、隔離Git fixtureまたは同等の限定検証で記録する。Reviewer・実push・PR作成はこのIssueの受入条件と分け、Milestone最終E2Eで扱う。 |
 | 3 | **clean checkout/worktreeと生成ログ・成果物の配置を整理する** | #80のclean判定・clone内ログの観測に対応。[#51](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/51)と[#54](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/54)はClosed。必要なら完了済みIssueを仕様・経緯の参照として使い、重複作業を避ける。 | 作業用checkout/worktreeの作成・clean判定・後片付けの責務を定義する。生成ログ・成果物が対象checkoutを意図せずdirtyにしない配置とし、失敗時も診断と証跡を残す。実Git回帰確認でclean/dirtyと生成物の期待動作を示す。 |
-| 4 | **ImplementerからReviewerへの検証証跡の引き継ぎ** | [#79](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/79)。#84でImplementerの検証が実行できる状態になった後に、Run中の証跡受け渡しを確かめる。 | Reviewerが実行コマンド、終了コード、ログまたは安全な参照先、対象コミット/差分、成果物を確認できる。欠落時は不足を明示し、Implementerの自己申告だけで成功と扱わない。Testbed実エージェント回帰Runで、証跡をReviewerが確認して判定できることを確かめる。 |
+| 4 | **ImplementerからReviewerへの検証証跡の引き継ぎ** | [#79](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/79)。#84でImplementerの検証が実行できる状態になった後に、Run中の証跡受け渡しを確かめる。 | 証跡が固定成果物に紐づき、安全にReviewer要求へ渡り、欠落・不正を検出することをFakeTests等の決定論テストで確認する。実AI IntegrationTestは実Codex接続・応答到達のみを確認し、Reviewerの自由記述や判断品質をIssue合否にしない。 |
 | 5 | **IssueからTaskContractを作り、実行を依頼する最小手順を定型化する** | 今回はWorkが契約作成を補助した。既存Issue本文とTaskContract Guide/Schemaを使い、必要なら既存Issueへの追記範囲を判断する。現時点でこの項目の新規Issueは作らない。 | 人間が対象Issueと作業範囲を指定し、Guide/Schemaに適合するTaskContractを作成・検証し、合意された操作範囲でRunを開始できる手順を記録する。契約に必要な情報、未確定事項、停止条件が明確で、過剰な自律的Issue解釈を避ける。 |
 | 6 | **Issue #36に沿ったSlack通知の内容・スレッド化** | [#36](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/36)はOpen。通常通知の内容とスレッド要件を扱う。MCP通知モード指定の責務は後述の検討事項として切り分ける。 | 実行単位のスレッドに通知がまとまり、Bot名義・通常/テスト通知先の要件を保つ。開始・終了通知から目的、Issue/対象、成果、検証状態、失敗理由、次の人間の操作が分かる。テストチャンネルE2Eで通常チャンネルへの誤送信がない。Slack無効・設定不足・API障害でもコア処理が続く。 |
 | 7 | **自己改善E2Eと一連の証跡を確保する** | #84、#80、#79、#36とTaskContract手順に依存。既存Issueを使うか、小規模な対象Issueを別途選ぶ。 | オーケストレーター自身の安全な改善Issueを指定し、Contract作成、実Implementer、独立Reviewer、証跡確認、検証、PR作成、コメント証跡、品質ゲート、マージ、Slack報告までを1 Runとして追跡する。Run ID、対象SHA/差分、検証結果、PRリンク、コメント証跡、失敗や停止理由を確認可能にする。停止条件に該当しない場合はAIがマージする。 |
@@ -121,21 +121,23 @@ Milestone 1の委譲Issueでは、上記の手順と停止条件に従うこと�
 | Issue / 条件 | 区分 | 対応する受け入れ条件 |
 | --- | --- | --- |
 | [#84](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/84) 実Codexの `DOTNET_CLI_HOME` 書き込み拒否 | 必須対応 | Implementer自身がRun中にRelease buildと対象チェックを成功させる。原因・再現条件を記録し、後追いの人手変更に依存しない。 |
-| [#79](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/79) Reviewerへの検証証跡引き継ぎ | 必須対応 | Reviewerが検証証跡を確認し、不足・未実施を成功と誤認しない。 |
-| [#80](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/80) PR必須経路の停止調査 | 必須候補 | 停止原因・再現条件を説明し、安全な検証範囲でReviewer・push・PR作成までを確認する。 |
+| [#79](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/79) Reviewerへの検証証跡引き継ぎ | 必須対応 | 固定成果物と結び付いた証跡が安全にReviewer要求へ渡り、欠落・不正を検出する。実Reviewerの判断品質はIssue合否と分ける。 |
+| [#80](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/80) PR必須Runのpush前チェック | 必須候補 | 修正後のPublisherチェックがCRLF差分を通し、末尾空白を拒否することを限定検証で確認する。元Run原因が未確定であることを保ち、Reviewer・push・PR作成は最終E2Eで確認する。 |
 | [#36](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/36) Slackライフサイクル通知 | 必須候補 | 実行単位の通知、役割別Bot、終端通知と人間の次アクションを確認する。テスト先の重複可否とMCP通知モード指定は別途決定する。 |
 | clean checkout/worktree・Issue→TaskContract・自己改善E2E | 横断候補 | 作業領域と証跡を保全し、Issueから実行契約を作成して、Run・検証・PRまでを追跡できる。 |
 
 以下は対応表の各項目を含むMilestone 1の計画案としての完了条件であり、次チャットで必須範囲を確定する。
 
 - #84の課題を解消し、実Codex ImplementerがRun中にRelease buildと対象チェックを実行できる。
-- #80のPR必須経路で停止原因を説明でき、合意した安全な検証範囲でReviewer・push・PR作成までの証跡がある。
+- #80では修正後PublisherのCRLF・末尾空白チェックを限定検証する。元Runの直接原因は未確定事項として記録する。
 - clean checkout/worktreeとログ・成果物の配置について、意図しないdirty化を防ぎ、失敗時も必要な証跡を追える。
-- Reviewerが#79の検証証跡を確認でき、不足や未実施を成功と誤認しない。
+- #79の証跡引き継ぎ機構が検証証跡を固定成果物と結び付けてReviewer要求へ含め、不足を明示できる。
 - Issue→TaskContractの最小手順を再現可能な形で記録する。
 - #36に沿った通知で、実行単位の経緯・成果・失敗理由・人間の次の操作を確認できる。
 - Slackテスト送信とMCP経由の通知モード指定について、採用する方式を決定してテスト可能な状態にする。通知モード方式と通知先の重複可否は計画確定時の検討事項であり、決定前に実装方針を固定しない。
 - オーケストレーター自身のIssueを使ったE2Eで、Run ID、対象SHA、独立Reviewerの指摘・対応・マージ承認コメント、品質ゲート結果、マージ済みPRを引き継げる。停止条件に該当した場合はマージせず、理由と未完了事項を報告する。
+
+個別Issueのクローズは、それぞれの受入条件と証跡に基づいて判断する。Milestone最終E2E（[#109](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/109)）は独立したMilestone完了ゲートであり、Issue #79・#80のクローズ条件へ一律に含めない。
 
 
 ## 4. Milestone 1では必須にしない後続候補
