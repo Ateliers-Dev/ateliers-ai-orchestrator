@@ -146,7 +146,7 @@ JSONLには実行ID、連番、UTC時刻、役割、イベント種別、状態�
 
 ## テスト
 
-UnitTestsは内部ロジック、FakeTestsはFakeを使った決定論的な受け渡し・状態遷移・異常系・証跡処理を検証します。IntegrationTestsは実外部システムとの接続確認に限定します。通常PRの必須ゲートはUnitTestsとFakeTestsの両方で、片方の成功では代替できません。実外部接続IntegrationTestsは一律必須にせず、Issue・受入条件・変更リスクが求める場合に実行します。通常CIのUnit/FakeTestsでは実CodexやSlackへ接続しません。
+UnitTestsは内部ロジック、FakeTestsはFakeを使った決定論的な受け渡し・状態遷移・異常系・証跡処理を検証します。IntegrationTestsは実外部システムとの接続確認に限定します。通常PRの必須ゲートはUnitTestsとFakeTestsの両方で、片方の成功では代替できません。実外部接続IntegrationTestsは一律必須にせず、Issue・受入条件・変更リスクが求める場合に実行します。Unit/FakeTestsはSlack実APIへ接続せず、FakeTestsからCLIの `run` を起動する場合も通知は無効です。
 
 ```powershell
 dotnet test tests/Ateliers.Ai.Orchestrator.UnitTests/Ateliers.Ai.Orchestrator.UnitTests.csproj --configuration Release
@@ -226,3 +226,16 @@ dotnet test tests/Ateliers.Slack.IntegrationTests/Ateliers.Slack.IntegrationTest
 Slack IntegrationTestsは投稿前に `auth.test` の `user_id` と設定IDを照合します。設定不足時はSkipし、認証失敗やID不一致では投稿せず失敗します。Botテストの成功時はテストチャンネルにRun ID付きメッセージを投稿し、API成功応答と投稿先IDを検証します。これはSlack API送信の疎通確認であり、Codexとの連携や画面上の到達確認を証明しません。
 
 このBotテストは送信・識別の疎通確認だけを対象とし、AIオーケストレーション連携は行いません。既存のIncoming Webhook、`ATELIERS_SLACK_WEBHOOK_URL` と `ATELIERS_SLACK_TEST_WEBHOOK_URL` も維持します。
+
+### Orchestrator Slackライフサイクル IntegrationTest（実送信・専用opt-in）
+
+OrchestratorのFake Stopシナリオを1回実行し、開始から人間判断待ちまでの通知を実Slack API経由で確認するIntegrationTestです。通常のUnit/Fake/IntegrationTest一括実行ではSkipされます。単体Slack疎通テストとは別の環境変数を使い、明示opt-in時に限って実送信します。
+
+投稿先は設定済みの `testChannelId` だけです。ユーザー設定またはリポジトリ設定のSlack設定とsecretsを使い、実行前にOrchestrator・Implementer・ReviewerのBot認証IDを照合します。通常チャンネルとテストチャンネルが分かれていない設定は拒否します。テスト結果では各配送の監査記録を確認し、失敗時にはfixtureとrun証跡を一時ディレクトリへ保持します。
+
+このテストを実行すると、テストチャンネルへ複数の通知が実際に投稿されます。表示確認が不要な作業ではopt-inしないでください。
+
+```powershell
+$env:ATELIERS_RUN_ORCHESTRATOR_SLACK_INTEGRATION_TESTS = '1'
+dotnet test tests/Ateliers.Ai.Orchestrator.IntegrationTests/Ateliers.Ai.Orchestrator.IntegrationTests.csproj --configuration Release --filter FullyQualifiedName~Fake_stop_run_sends_lifecycle_notifications_to_the_test_channel
+```

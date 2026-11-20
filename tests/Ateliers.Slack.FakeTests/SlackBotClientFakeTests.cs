@@ -33,6 +33,22 @@ public sealed class SlackBotClientUnitTests
     }
 
     [Fact]
+    public async Task SendMessageAsync_CanPostIntoRequestedChannelAndThread()
+    {
+        using var files = new TestConfigurationFiles();
+        var configuration = files.Load();
+        using var handler = new RecordingHandler(_ => JsonResponse("{\"ok\":true,\"channel\":\"C_PARENT\",\"ts\":\"1700000000.000002\"}"));
+        using var client = new SlackBotClient(configuration, handler);
+
+        var result = await client.SendMessageAsync("thread reply", "C_PARENT", "1700000000.000001");
+
+        using var payload = JsonDocument.Parse(handler.RequestBodies.Single()!);
+        Assert.Equal("C_PARENT", payload.RootElement.GetProperty("channel").GetString());
+        Assert.Equal("1700000000.000001", payload.RootElement.GetProperty("thread_ts").GetString());
+        Assert.Equal("C_PARENT", result.ChannelId);
+    }
+
+    [Fact]
     public async Task VerifyBotIdentityAsync_MatchesAuthTestUserIdToConfiguredBot()
     {
         using var files = new TestConfigurationFiles();

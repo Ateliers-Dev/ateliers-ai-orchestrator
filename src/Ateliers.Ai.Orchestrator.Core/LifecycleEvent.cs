@@ -14,8 +14,16 @@ public sealed record LifecycleEvent
     public required string EventType { get; init; }
     public required string Status { get; init; }
     public required string State { get; init; }
+    public string? AgentId { get; init; }
+    public string? AgentName { get; init; }
+    public string? SlackBotId { get; init; }
     public string? RelatedId { get; init; }
     public string? Summary { get; init; }
+    public string? SlackCompletionMessage { get; init; }
+    public string? SlackMessageTimestamp { get; init; }
+    public string? SlackParentMessageTimestamp { get; init; }
+    public string? SlackRunIdReplyTimestamp { get; init; }
+    public string? SlackDeliveryFailureStage { get; init; }
 }
 
 /// <summary>安全なライフサイクルイベントを受け取る境界です。</summary>

@@ -1244,6 +1244,9 @@ static int FakeCodexFixture(string[] args)
         if (contractStart < 0) throw new InvalidOperationException("Fake Codexプロンプトに契約JSONがありません。");
         contractStart += contractMarker.Length;
         var contractEnd = prompt.IndexOf("\n\n固定成果物:", contractStart, StringComparison.Ordinal);
+        var completionStart = prompt.IndexOf("\nAfter the required task response", contractStart, StringComparison.Ordinal);
+        if (completionStart >= 0 && (contractEnd < 0 || completionStart < contractEnd))
+            contractEnd = completionStart;
         var reviewFindingStart = prompt.IndexOf("\n前回レビュー指摘:", contractStart, StringComparison.Ordinal);
         if (reviewFindingStart >= 0 && (contractEnd < 0 || reviewFindingStart < contractEnd))
             contractEnd = reviewFindingStart;
@@ -1500,7 +1503,8 @@ static void CodexProcessCapturesJsonlAndSeparatesStreams()
     using (root)
     {
         var response = runner.Implement(request);
-        Assert.True(response.Succeeded, response.ExecutionEvidence?.Error ?? "正常terminal eventと終了コード0を成功扱いしませんでした。");
+        Assert.True(response.Succeeded, $"{response.ExecutionEvidence?.Error ?? "正常terminal eventと終了コード0を成功扱いしませんでした。"}\n" +
+            File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "implementer-1", "codex.stderr.txt")));
         Assert.True(response.Content.Contains("fixture change", StringComparison.Ordinal), "Git作業領域の実差分が固定成果物に含まれていません。");
         Assert.False(response.Content.Contains("fixture response", StringComparison.Ordinal), "Implementerの自己申告がReviewer向け固定成果物へ混入しました。");
         Assert.Equal("fixture response", response.SelfAssessment);
@@ -2445,7 +2449,7 @@ static void LifecycleEventsArePersistedSafely()
         Assert.True(items.Any(item => item.GetProperty("role").GetString() == "Reviewer" && item.GetProperty("eventType").GetString() == "started"));
         Assert.True(items.Any(item => item.GetProperty("role").GetString() == "Reviewer" && item.GetProperty("eventType").GetString() == "completed"));
         Assert.True(items.Any(item => item.GetProperty("eventType").GetString() == "needs_human_input"));
-        Assert.Equal("completed", items[^1].GetProperty("eventType").GetString());
+        Assert.Equal("final_result", items[^1].GetProperty("eventType").GetString());
         foreach (var item in items)
         {
             Assert.Equal("lifecycle-success", item.GetProperty("runId").GetString());
@@ -2898,8 +2902,8 @@ static void SlowSlackNotificationsDoNotBlockWorkflowCancellation()
         elapsed.Stop();
         Assert.True(sendStarted.Task.Wait(TimeSpan.FromSeconds(2)), "Fake実行中に通知workerが開始しませんでした。");
         lifecycleWriter.FlushSlackNotificationsAsync(stopSource.Token).GetAwaiter().GetResult();
-        Assert.Equal(File.ReadAllLines(Path.Combine(temp.Path, "lifecycle.jsonl")).Length, lifecycleWriter.FailedSlackSends,
-            "停止時に未送信の通知がすべて失敗件数へ反映されませんでした。");
+        Assert.Equal(CountFailedDeliveries(Path.Combine(temp.Path, "lifecycle.jsonl")), lifecycleWriter.FailedSlackSends,
+            "停止時の配送失敗・中断件数と監査結果が一致しませんでした。");
     }
 
     Assert.Equal(RunState.NeedsHumanInput, result.State);
@@ -2931,14 +2935,27 @@ static void SlowSlackNotificationsDoNotBlockWorkflowCancellation()
         elapsed.Stop();
         Assert.True(timedSendStarted.Task.Wait(TimeSpan.FromSeconds(2)), "Fake実行中に遅延通知workerが開始しませんでした。");
         lifecycleWriter.FlushSlackNotificationsAsync().GetAwaiter().GetResult();
-        Assert.Equal(File.ReadAllLines(Path.Combine(temp.Path, "timed-lifecycle.jsonl")).Length, lifecycleWriter.FailedSlackSends,
-            "排出タイムアウト時に未送信通知数が正確に失敗件数へ反映されませんでした。");
+        Assert.Equal(CountFailedDeliveries(Path.Combine(temp.Path, "timed-lifecycle.jsonl")), lifecycleWriter.FailedSlackSends,
+            "排出タイムアウト時の配送失敗・中断件数と監査結果が一致しませんでした。");
     }
 
     Assert.Equal(RunState.NeedsHumanInput, timedResult.State);
     Assert.False(timedResult.Detail?.Contains("実行時間上限", StringComparison.Ordinal) ?? false,
         "Slack送信待ちによりワークフローの時間上限へ到達しました。");
     Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(2), $"Slack送信待ちがワークフロー実行時間へ加算されました: {elapsed.Elapsed}");
+
+    static int CountFailedDeliveries(string path)
+    {
+        var count = 0;
+        foreach (var line in File.ReadLines(path))
+        {
+            using var document = JsonDocument.Parse(line);
+            var item = document.RootElement;
+            if (item.GetProperty("eventType").GetString() == "slack_delivery_result" &&
+                item.GetProperty("status").GetString() is "failed" or "dropped" or "abandoned") count++;
+        }
+        return count;
+    }
 }
 
 static void IntentionalSlackSkipDoesNotWarn()
@@ -3035,9 +3052,15 @@ static void LifecycleEventsCoverFailureStopAndRevision()
         Assert.Equal("started", reviewerEvents[index].EventType);
         Assert.Equal("failed", reviewerEvents[index + 1].EventType);
     }
-    Assert.Equal("failed", reviewerFailure.Events[^1].EventType);
+    Assert.Equal("final_result", reviewerFailure.Events[^1].EventType);
     Assert.Equal("failed", reviewerFailure.Events[^1].Status);
     Assert.Equal("Failed", reviewerFailure.Events[^1].State);
+
+    var reviewerStop = RunWithLifecycle(new FakeAgentRunner(FakeScenario.Stop), "reviewer-stop");
+    Assert.Equal(RunState.NeedsHumanInput, reviewerStop.State);
+    Assert.True(reviewerStop.Events[^1].Summary!.Contains("既存成果物の変更範囲を特定できません", StringComparison.Ordinal),
+        $"Reviewerの停止理由が最終ライフサイクル通知に含まれません: {reviewerStop.Events[^1].Summary}");
+    Assert.True(reviewerStop.Events[^1].Summary!.Contains("次の対応を判断してください", StringComparison.Ordinal));
 
     using var cancellation = new CancellationTokenSource();
     var stopped = RunWithLifecycle(new CancellingAgentRunner(cancellation), "cancelled", cancellation.Token);
@@ -3046,6 +3069,9 @@ static void LifecycleEventsCoverFailureStopAndRevision()
         "停止要求時のImplementerイベント順が不正です。");
     Assert.True(stopped.Events.Any(item => item.EventType == "needs_human_input" && item.State == "NeedsHumanInput"));
     Assert.Equal("needs_human_input", stopped.Events[^1].Status);
+    Assert.True(stopped.Events[^1].Summary!.Contains("Implementerへの利用者停止要求を受け付けました", StringComparison.Ordinal),
+        $"停止理由が最終ライフサイクル通知に含まれません: {stopped.Events[^1].Summary}");
+    Assert.True(stopped.Events[^1].Summary!.Contains("次の対応を判断してください", StringComparison.Ordinal));
 
     var revised = RunWithLifecycle(new FakeAgentRunner(FakeScenario.RevisionThenSuccess), "revision");
     Assert.Equal(RunState.NeedsHumanInput, revised.State);
@@ -3053,8 +3079,10 @@ static void LifecycleEventsCoverFailureStopAndRevision()
         "Implementer:started", "Implementer:completed", "Reviewer:started", "Reviewer:completed" }
         .SequenceEqual(revised.Events.Where(item => item.Role is "Implementer" or "Reviewer")
             .Select(item => $"{item.Role}:{item.EventType}")), "再レビュー時の役割イベント順が不正です。");
-    Assert.Equal("completed", revised.Events[^1].EventType);
+    Assert.Equal("final_result", revised.Events[^1].EventType);
     Assert.Equal("needs_human_input", revised.Events[^1].Status);
+    Assert.True(revised.Events[^1].Summary!.Contains("独立レビュー記録・全受け入れ条件の検証・実PR作成記録が揃っていません", StringComparison.Ordinal),
+        $"人間判断の理由が最終ライフサイクル通知に含まれません: {revised.Events[^1].Summary}");
 
     (RunState State, LifecycleEvent[] Events) RunWithLifecycle(IAgentRunner runner, string runId, CancellationToken stopToken = default)
     {
@@ -3639,6 +3667,7 @@ static (int ExitCode, string Output, string Error) RunCli(params string[] argume
     };
     var cliArguments = new[] { "run", "--project", cliProject, "--configuration", configuration, "--no-build", "--" }.Concat(arguments);
     if (arguments.Length > 0 && arguments[0] == "run" && !arguments.Contains("--slack-notifications", StringComparer.Ordinal))
+        // FakeTests exercise notification formatting through injected fake senders; CLI runs never connect to Slack.
         cliArguments = cliArguments.Concat(["--slack-notifications", "disabled"]);
     foreach (var argument in cliArguments)
         start.ArgumentList.Add(argument);

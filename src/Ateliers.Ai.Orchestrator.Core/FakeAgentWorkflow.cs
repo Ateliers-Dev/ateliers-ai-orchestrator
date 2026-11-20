@@ -26,7 +26,14 @@ public sealed record AgentRequest(
     CancellationToken StopToken = default,
     string? ValidationEvidenceReference = null,
     string? TargetCommitSha = null,
-    bool ReviewFormatRetry = false);
+    bool ReviewFormatRetry = false,
+    string? AgentId = null,
+    string? AgentName = null,
+    string? Specialty = null,
+    string? SlackBotId = null,
+    string? Instructions = null,
+    string? DefaultModel = null,
+    string? DefaultModelReasoningEffort = null);
 
 /// <summary>Agent呼び出しの結果と、実行環境が観測できた範囲を表します。</summary>
 /// <param name="Content">Agentの応答本文です。</param>
@@ -37,7 +44,8 @@ public sealed record AgentRequest(
 public sealed record AgentResponse(string Content = "", bool Succeeded = true, bool TimedOut = false,
     string? SelfAssessment = null, AgentExecutionEvidence? ExecutionEvidence = null, bool StopRequested = false,
     IReadOnlyList<string>? ArtifactReferences = null, string? WorkspaceSnapshotReference = null,
-    string? WorkspaceSnapshotSha256 = null, string? ValidationEvidenceReference = null);
+    string? WorkspaceSnapshotSha256 = null, string? ValidationEvidenceReference = null,
+    string? SlackCompletionMessage = null);
 
 /// <summary>Agentプロセスから取得できた実行識別子と終了証跡です。</summary>
 /// <param name="ProcessId">起動したプロセスのIDです。</param>
@@ -151,8 +159,9 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
     public FakeWorkflowResult Run(TaskContract contract, string contractSha256, string runId, string runDirectory,
         IAgentRunner agentRunner, IRunEventWriter eventWriter, HumanReviewEvidence? reviewEvidence = null,
         CancellationToken stopToken = default, bool codexOneShot = false, ILifecycleEventWriter? lifecycleEvents = null,
-        IWorkflowPublisher? publisher = null)
+        IWorkflowPublisher? publisher = null, AgentConfigurationSnapshot? agentConfiguration = null)
     {
+        agentConfiguration ??= AgentConfigurationSnapshot.LegacyDefaults();
         Directory.CreateDirectory(runDirectory);
         var existingEntries = Directory.EnumerateFileSystemEntries(runDirectory).ToArray();
         var onlyNewEventLog = existingEntries.Length == 1 &&
@@ -162,6 +171,10 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
             throw new IOException($"実行保存先に既存ファイルがあるため、上書きを防いで停止しました: {runDirectory}");
         Directory.CreateDirectory(Path.Combine(runDirectory, "artifacts"));
         Directory.CreateDirectory(Path.Combine(runDirectory, "exchanges"));
+        const string agentConfigurationReference = "agent-configuration.json";
+        storage.WriteAllText(Path.Combine(runDirectory, agentConfigurationReference),
+            JsonSerializer.Serialize(agentConfiguration.ToAuditSnapshot(), new JsonSerializerOptions { WriteIndented = true }),
+            new UTF8Encoding(false));
         var run = new RunExecution(eventWriter, contract);
         var stopwatch = Stopwatch.StartNew();
         var revisionAttempts = 0;
@@ -186,11 +199,13 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
         WorkflowPublicationSnapshot? publicationSnapshot = null;
         WorkflowPullRequest? publishedPullRequest = null;
         WorkflowReviewComment? publishedReviewComment = null;
-        void EmitLifecycle(string role, string eventType, string status, string state, string? relatedId = null, string? summary = null)
+        void EmitLifecycle(string role, string eventType, string status, string state, string? relatedId = null,
+            string? summary = null, string? slackCompletionMessage = null)
         {
             if (lifecycleEvents is null) return;
             try
             {
+                var profile = role == "Orchestrator" ? null : agentConfiguration.ForRole(role);
                 lifecycleEvents.TryAppend(new LifecycleEvent
                 {
                     RunId = runId,
@@ -199,8 +214,12 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                     EventType = eventType,
                     Status = status,
                     State = state,
+                    AgentId = profile?.Id,
+                    AgentName = profile?.Name,
+                    SlackBotId = profile?.SlackBotId ?? (role == "Orchestrator" ? "orchestrator" : null),
                     RelatedId = relatedId,
-                    Summary = summary
+                    Summary = summary,
+                    SlackCompletionMessage = slackCompletionMessage
                 });
             }
             catch (Exception)
@@ -210,7 +229,11 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
         }
         try
         {
-            EmitLifecycle("Orchestrator", "started", "running", run.State.ToString(), summary: "Workflow started.");
+            EmitLifecycle("Orchestrator", "started", "running", run.State.ToString(),
+                summary: $"対象: {contract.Purpose}\nImplementerが作業を開始します。");
+            eventWriter.Append("agent_configuration_loaded", "accepted", from: run.State, to: run.State,
+                detail: "Run開始時に解決したAgent ID、Role、Slack Bot ID、モデル設定、指示ハッシュを記録しました。指示本文は監査JSONへ複製していません。",
+                outputReference: agentConfigurationReference, role: "Orchestrator");
             eventWriter.Append("run_started", "accepted", to: RunState.Prepared,
                 detail: isFake ? "Fake Agentシナリオを開始しました。実Agent・GitHub操作は行いません。" :
                     requiresPullRequest ? "GitHub PR必須の実Agentワークフローを開始しました。" : "実Agent実行を開始しました。GitHub操作は行いません。",
@@ -261,17 +284,22 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                 }
 
                 implementationAttempt++;
+                var implementProfile = agentConfiguration.ForRole("Implementer");
                 var implementRequest = new AgentRequest(runId, "Implementer", contract, implementationAttempt,
                     ReviewFinding: lastFinding, RunDirectory: runDirectory,
                     RemainingTime: TimeSpan.FromMinutes(contract.Limits.MaxDurationMinutes) - stopwatch.Elapsed,
-                    StopToken: stopToken);
+                    StopToken: stopToken, AgentId: implementProfile.Id, AgentName: implementProfile.Name,
+                    SlackBotId: implementProfile.SlackBotId, Instructions: implementProfile.Instructions,
+                    DefaultModel: implementProfile.DefaultModel,
+                    DefaultModelReasoningEffort: implementProfile.DefaultModelReasoningEffort);
                 if (StopWasRequested(stopToken))
                 {
                     failure = "Implementer起動前に停止要求を受け付けました。";
                     run.Transition(requiresPullRequest ? RunState.Failed : RunState.NeedsHumanInput);
                     break;
                 }
-                EmitLifecycle("Implementer", "started", "running", run.State.ToString(), $"attempt:{implementationAttempt}", "Implementer started.");
+                EmitLifecycle("Implementer", "started", "running", run.State.ToString(), $"attempt:{implementationAttempt}",
+                    "実装作業を開始しました。完了後、Reviewerによる確認へ進みます。");
                 var implementResponse = InvokeAgent(() => agentRunner.Implement(implementRequest));
                 if (StopWasRequested(stopToken))
                     implementResponse = implementResponse with { Succeeded = false, StopRequested = true };
@@ -279,7 +307,8 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                     !string.IsNullOrWhiteSpace(implementResponse.Content);
                 EmitLifecycle("Implementer", implementSucceeded ? "completed" : "failed",
                     implementSucceeded ? "succeeded" : "failed", run.State.ToString(), $"attempt:{implementationAttempt}",
-                    implementSucceeded ? "Implementer completed." : "Implementer did not complete successfully.");
+                    implementSucceeded ? "実装作業を完了しました。変更内容と確認結果を報告します。" : "実装作業を完了できませんでした。実行記録を確認してください。",
+                    implementSucceeded ? implementResponse.SlackCompletionMessage : null);
                 if (implementResponse.ExecutionEvidence is { } implementEvidence)
                     executionEvidence.Add(("Implementer", implementationAttempt, implementEvidence));
                 var implementRef = SaveExchange(runDirectory, "implementer", implementationAttempt, "request.json",
@@ -392,18 +421,24 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                     }
                     reviewAttempt++;
                     // 初回レビュー要求にImplementerの自己評価を含めない。
+                    var reviewerProfile = agentConfiguration.ForRole("Reviewer");
                     var reviewRequest = new AgentRequest(runId, "Reviewer", contract, reviewAttempt,
                         currentArtifact, currentHash, RunDirectory: runDirectory,
                         RemainingTime: TimeSpan.FromMinutes(contract.Limits.MaxDurationMinutes) - stopwatch.Elapsed,
                         StopToken: stopToken, ValidationEvidenceReference: implementResponse.ValidationEvidenceReference,
-                        TargetCommitSha: publicationSnapshot?.CommitSha, ReviewFormatRetry: reviewFormatRetry);
+                        TargetCommitSha: publicationSnapshot?.CommitSha, ReviewFormatRetry: reviewFormatRetry,
+                        AgentId: reviewerProfile.Id, AgentName: reviewerProfile.Name, Specialty: reviewerProfile.Specialty,
+                        SlackBotId: reviewerProfile.SlackBotId,
+                        Instructions: reviewerProfile.Instructions, DefaultModel: reviewerProfile.DefaultModel,
+                        DefaultModelReasoningEffort: reviewerProfile.DefaultModelReasoningEffort);
                     if (StopWasRequested(stopToken))
                     {
                         failure = "Reviewer起動前に停止要求を受け付けました。成果物をhandoffしません。";
                         run.Transition(requiresPullRequest ? RunState.Failed : RunState.NeedsHumanInput);
                         break;
                     }
-                    EmitLifecycle("Reviewer", "started", "running", run.State.ToString(), $"attempt:{reviewAttempt}", "Reviewer started.");
+                    EmitLifecycle("Reviewer", "started", "running", run.State.ToString(), $"attempt:{reviewAttempt}",
+                        "成果物の確認を開始しました。指摘の有無を確認し、次の対応を報告します。");
                     var reviewResponse = InvokeAgent(() => agentRunner.Review(reviewRequest));
                     if (implementResponse.ValidationEvidenceReference is { } evidenceReference)
                         validationEvidenceHandoffs.Add((implementationAttempt, reviewAttempt, evidenceReference,
@@ -417,7 +452,8 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
                     var reviewSucceeded = reviewResponse.Succeeded && !reviewResponse.StopRequested && !reviewResponse.TimedOut && !missingReviewerOutput;
                     EmitLifecycle("Reviewer", reviewSucceeded ? "completed" : "failed",
                         reviewSucceeded ? "succeeded" : "failed", run.State.ToString(), $"attempt:{reviewAttempt}",
-                        reviewSucceeded ? "Reviewer completed." : "Reviewer did not complete successfully.");
+                        reviewSucceeded ? "レビューを完了しました。指摘内容と判断を報告します。" : "レビューを完了できませんでした。実行記録を確認してください。",
+                        reviewSucceeded ? reviewResponse.SlackCompletionMessage : null);
                     oneShotReviewOutcome = !reviewResponse.Succeeded || reviewResponse.StopRequested || reviewResponse.TimedOut
                         ? Outcome(reviewResponse)
                         : workflowOneShot && reviewResponse.ArtifactReferences is { Count: > 0 } ? "任意成果物あり"
@@ -755,13 +791,28 @@ public sealed class FakeAgentWorkflow(IFakeWorkflowStorage? storage = null)
             failure = AppendFailure(failure, "状態は人間判断待ちですが、実行記録が不完全です。");
             run.StopInMemoryAfterPersistenceFailure();
         }
+        var humanDecisionReason = failure;
+        if (!string.IsNullOrWhiteSpace(lastFinding) && (string.IsNullOrWhiteSpace(failure) ||
+            !failure.Contains(lastFinding, StringComparison.Ordinal)))
+            humanDecisionReason = string.IsNullOrWhiteSpace(failure) ? lastFinding : $"{failure}\n最後に確認したレビュー指摘: {lastFinding}";
+        var lifecycleFinalSummary = run.State switch
+        {
+            RunState.ReadyForHumanReview => $"最終確認が必要です。{humanDecisionReason ?? "実装とレビューが完了しました。成果物とレビュー結果を確認してください。"}",
+            RunState.NeedsHumanInput when humanDecisionReason is not null => $"人の判断が必要な理由: {humanDecisionReason}\n実行記録と指摘内容を確認し、次の対応を判断してください。",
+            RunState.NeedsHumanInput => "停止理由を特定できる情報が記録されていません。実行記録を確認し、次の対応を判断してください。",
+            RunState.Failed => "作業を完了できませんでした。実行記録を確認し、原因と次の対応を判断してください。",
+            _ => "作業が完了しました。実行結果を確認してください。"
+        };
         if (run.State is RunState.NeedsHumanInput or RunState.ReadyForHumanReview)
             EmitLifecycle("Orchestrator", "needs_human_input", "needs_human_input", run.State.ToString(),
-                summary: "Workflow is waiting for human input.");
+                summary: lifecycleFinalSummary);
         EmitLifecycle("Orchestrator", run.State == RunState.Failed ? "failed" : "completed",
             run.State == RunState.Failed ? "failed" : run.State is RunState.NeedsHumanInput or RunState.ReadyForHumanReview ? "needs_human_input" : "succeeded",
             run.State.ToString(),
-            summary: run.State == RunState.Failed ? "Workflow failed." : run.State is RunState.NeedsHumanInput or RunState.ReadyForHumanReview ? "Workflow stopped for human input." : "Workflow completed.");
+            summary: lifecycleFinalSummary);
+        EmitLifecycle("Orchestrator", "final_result",
+            run.State == RunState.Failed ? "failed" : run.State is RunState.NeedsHumanInput or RunState.ReadyForHumanReview ? "needs_human_input" : "succeeded",
+            run.State.ToString(), summary: lifecycleFinalSummary);
         return new FakeWorkflowResult(run.State, currentArtifact, currentHash, implementationAttempt,
             reviewAttempt, revisionAttempts, retryAttempts, "report.md", failure, persistenceSucceeded);
     }
