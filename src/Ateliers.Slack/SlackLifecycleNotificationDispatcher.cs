@@ -118,14 +118,16 @@ public sealed class SlackLifecycleNotificationDispatcher : IDisposable
         var clients = new Dictionary<string, SlackBotClient>(StringComparer.Ordinal);
         try
         {
-            var botUserIds = new HashSet<string>(StringComparer.Ordinal);
+            var botUserIds = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var (role, botId) in botRoutes)
             {
                 var configuration = SlackBotConfiguration.Load(configurationPath, secretsPath, botId, useTestChannel);
                 if (useTestChannel && string.Equals(configuration.ChannelId, configuration.Bot.ChannelId, StringComparison.Ordinal))
                     throw new InvalidOperationException();
-                if (useTestChannel && !botUserIds.Add(configuration.Bot.BotUserId))
+                if (useTestChannel && botUserIds.TryGetValue(configuration.Bot.BotUserId, out var existingBotId) &&
+                    !string.Equals(existingBotId, botId, StringComparison.Ordinal))
                     throw new InvalidOperationException();
+                if (useTestChannel) botUserIds[configuration.Bot.BotUserId] = botId;
                 clients.Add(role, handlerFactory is null
                     ? new SlackBotClient(configuration)
                     : new SlackBotClient(configuration, handlerFactory(botId), requestTimeout));
@@ -244,7 +246,8 @@ public sealed class SlackLifecycleNotificationDispatcher : IDisposable
             Regex.IsMatch(message, @"(?i)(?:api[_-]?key|access[_-]?token|client[_-]?secret|password|authorization)\s*[:=]\s*\S+") ||
             Regex.IsMatch(message, @"(?i)\bhttps?://[^/@:\s]+:[^/@\s]+@")) return null;
         return Regex.Replace(message, @"(?i)@(channel|here|everyone)", "＠$1", RegexOptions.CultureInvariant)
-            .Replace("<!", "‹!", StringComparison.Ordinal).Trim();
+            .Replace("<!", "‹!", StringComparison.Ordinal)
+            .Replace("<@", "‹@", StringComparison.Ordinal).Trim();
     }
 
     private static bool IsValidEventStatus(string role, string eventType, string status) => eventType switch

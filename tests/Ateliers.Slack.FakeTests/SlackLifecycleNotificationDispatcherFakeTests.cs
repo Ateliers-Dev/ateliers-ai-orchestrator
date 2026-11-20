@@ -78,6 +78,43 @@ public sealed class SlackLifecycleNotificationDispatcherTests
     }
 
     [Fact]
+    public async Task TrySend_NeutralizesAgentGeneratedUserMentionMarkup()
+    {
+        using var files = new LifecycleSettingsFiles();
+        var handlers = new Dictionary<string, RecordingHandlerBase>(StringComparer.Ordinal);
+        using var dispatcher = SlackLifecycleNotificationDispatcher.TryCreate(files.ConfigurationPath, files.SecretsPath,
+            botId => handlers[botId] = new SuccessRecordingHandler(_ => SuccessResponse(botId)));
+        Assert.NotNull(dispatcher);
+
+        Assert.Equal(SlackNotificationSendResult.Sent, await dispatcher!.TrySendAsync(RunId, "Reviewer", "completed", "succeeded", "ReadyForHumanReview",
+            DateTimeOffset.UtcNow, "agent-two", "Reviewer", "reviewer", "Done",
+            "担当: Reviewer (Reviewer)\n結果: 完了\n変更・所見: 確認\n確認: 完了\n未完了・人間判断: なし <@U12345678>"));
+
+        using var payload = JsonDocument.Parse(handlers["reviewer"].RequestBodies.Single()!);
+        var message = payload.RootElement.GetProperty("text").GetString()!;
+        Assert.DoesNotContain("<@U12345678>", message, StringComparison.Ordinal);
+        Assert.Contains("‹@U12345678>", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TryCreate_TestModeAllowsOneBotIdToServeMultipleRoles()
+    {
+        using var files = new LifecycleSettingsFiles();
+        var routes = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["Orchestrator"] = "orchestrator",
+            ["Implementer"] = "implementer",
+            ["Reviewer"] = "implementer"
+        };
+
+        using var dispatcher = SlackLifecycleNotificationDispatcher.TryCreate(
+            files.ConfigurationPath, files.SecretsPath, useTestChannel: true, routes, out var warning);
+
+        Assert.NotNull(dispatcher);
+        Assert.Null(warning);
+    }
+
+    [Fact]
     public async Task TryCreate_TestModeRoutesEveryRoleToDedicatedTestChannel()
     {
         using var files = new LifecycleSettingsFiles();
