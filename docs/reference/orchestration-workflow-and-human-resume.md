@@ -10,7 +10,7 @@
 
 ## 1. 現行状態の確認
 
-PR #120はmainへマージ済みで、Coreに5段階の順序と固定再試行カウンターがある。続く実装でPhase 3の変更範囲、同一対象SHAのRelease build、必須Unit/Fake結果を判定するゲートを追加した。ただし現行runは引き続き既存のImplementer/Reviewerサイクルであり、このゲートや5段階の遷移はまだ接続されていない。RunStateではReadyForHumanReview、NeedsHumanInput、Failedが終端。MCPにrun_orchestrationとGuide/Schema/runtime診断はあるが、既存Runを指定するresume Toolはない。PRの最終承認・マージはMilestone 1計画に従って人間が行う。
+PR #120はmainへマージ済みで、Coreに5段階の順序と固定再試行カウンターがある。続く実装でPhase 3の変更範囲（`tests/`配下の`.cs`/`.ps1`）、同一対象SHAのRelease build、必須Unit/Fake結果を判定するゲートを追加した。ただし現行runは引き続き既存のImplementer/Reviewerサイクルであり、このゲートや5段階の遷移はまだ接続されていない。RunStateではReadyForHumanReview、NeedsHumanInput、Failedが終端。MCPにrun_orchestrationとGuide/Schema/runtime診断はあるが、既存Runを指定するresume Toolはない。PRの最終承認・マージはMilestone 1計画に従って人間が行う。
 
 ## 2. 5 Phaseと証跡
 
