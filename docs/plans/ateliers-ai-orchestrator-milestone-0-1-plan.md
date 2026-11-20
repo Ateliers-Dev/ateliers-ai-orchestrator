@@ -95,7 +95,7 @@ Milestone 0の目的は、MCP→CLI→Coreの実行経路、契約に基づくFa
 
 | 順序 | Issue / 項目 | 状態・位置づけ | 次に必要な検証 |
 | --- | --- | --- | --- |
-| 1（最終段階） | [#109 最終Testbed E2E](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/109) | Open・タイトルP1。M1最終ゲート。[PR #114](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/pull/114)で非対話実行準備をレビュー中。最終E2Eは未実施。 | PR #114のCI/レビューを完了後、ユーザー本人が一度だけ実E2Eを実施し、実Codex/Reviewer証跡、Release build・5 checks、testChannel API成功、隔離ブランチ/PR、SHA整合、main不変を確認する。 |
+| 1（最終段階） | [#109 最終Testbed E2E](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/109) | Open・タイトルP1。M1最終ゲート。[PR #114](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/pull/114)はOPEN。head `988674d` のWindows/Ubuntu CI成功、独立レビューの追加指摘なし。マージ条件となるPRレビュー記録は未完了。最終E2E未実施。 | PRレビュー記録を整え、ユーザーの最終承認を得てからPRをマージ。その後、ユーザー本人が一度だけ実E2Eを実施し、実Codex/Reviewer証跡、Release build・5 checks、testChannel API成功、隔離ブランチ/PR、SHA整合、main不変を確認する。 |
 | 独立追跡 | [#105 testhost接続問題](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/105) | Open・タイトルP2。M1完了条件外。 | Work環境の制約をCI/別Windows環境の結果と分けて調査。解消を他開発の前提にしない。 |
 | 後続候補 | [#36 Slackライフサイクル通知](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/36) | Open・Milestone/priorityなし。現計画では機能拡張。 | #109はtestChannelへの最小API成功だけを確認。スレッド/broadcast/複数Bot設計は#36の個別範囲。 |
 | 後続候補 | [#77 MCP実行環境パス](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/77) | Open・Milestone/priorityなし。今回の対象外。 | 既存の固定CLIパスで不足が再発・拡大した場合に再優先付けする。 |
