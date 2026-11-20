@@ -128,7 +128,7 @@ Milestone 1では自律マージを実装せず、FakeTestsを含む自律マー
 
 完了済み前提は[#84](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/84)、[#79](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/79)、[#80](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/80)、[#107](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/107)、[#108](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/108)。checkout/worktreeと実Git回帰はClosedの#51/#54等を再利用し、重複実装しない。
 
-### 3.3 Milestone 1の最小完了条件（提案）
+### 3.3 Milestone 1の最小完了条件（合意済み）
 
 文書PRを人間が確認するまで本体コード実装と#109最終E2Eを開始しない。5段階と再開機能のUnitTests/FakeTests受入を事前ゲートとして完了し、既存の#109受入条件を維持したうえで、5段階の実行証跡を#109で確認する。判断待ちが自然発生しない場合にE2Eで無理に発生させず、再開機能はUnit/Fakeで決定論的に検証する。文書確認後は、次の順序で機能を実装・受け入れる。
 
