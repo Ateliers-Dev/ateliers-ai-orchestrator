@@ -50,19 +50,19 @@ NeedsHumanInputを非終端にするためCLI/MCP protocol versionをv2へ更新
 
 新規MCP Tool resume_orchestrationと読み取り専用get_run_statusを追加し、対応CLI契約を加える。これらは現行Toolではない。run_orchestrationは変更しない。CLI/MCP protocol versionをv2へ更新し、get_run_status応答にcanResumeを含める。checkpointのない旧Runは原則再開不可。WorkはRun状態と保留質問を取得し、人間の回答を同じRun IDでMCPへ渡す。Slack経路は提供しない。
 
-resume_orchestrationのprotocol v2要求field: runId, decisionId, expectedStateRevision, expectedPhase, expectedHeadSha, expectedDiffDigest, answer.choice/answer.text。これらを必須とする。get_run_statusはrunIdを受け、state, canResume, pending question/phase, stateRevision, checkpoint SHAを返す。認可済みローカルMCP接続の実行権限/操作経路を信頼境界とし、その情報を監査に記録する。Work側で明示的な人間回答を得てからresume要求を送る。自己申告actorIdは信頼せず、ローカルMCP接続を人間本人性の証明とはみなさない。本人認証基盤はMilestone 1に追加しない。
+resume_orchestrationのprotocol v2要求field: runId, decisionId, expectedStateRevision, expectedPhase, expectedHeadSha, expectedDiffDigest, answer.choice/answer.text。これらを必須とする。get_run_statusはrunIdを受け、state, canResume, pending question/phase, stateRevision, branch, baseSha, expectedHeadSha, expectedDiffDigestを返す。expectedHeadShaとexpectedDiffDigestはRunの永続checkpointから取得し、resume要求の値はその取得値をそのまま渡す。Orchestratorは同じ値をcheckpointと現在の作業状態に照合し、Workから新しい期待値を作らせない。認可済みローカルMCP接続の実行権限/操作経路を信頼境界とし、その情報を監査に記録する。Work側で明示的な人間回答を得てからresume要求を送る。自己申告actorIdは信頼せず、ローカルMCP接続を人間本人性の証明とはみなさない。本人認証基盤はMilestone 1に追加しない。
 
 protocol v2の応答にはaccepted、duplicate、runId、decisionId、state、stateRevisionを含める。受理時はresumedPhaseを含める。拒否時はerror.code、currentRevision、理由を含めるが、状態/成果物は変更しない。同じdecisionIdの再送はduplicate=trueで以前の結果を返し、Run IDは維持する。エラーコードは機械判定可能で安定させ、理由は秘密情報を含めず人が読める形にする。
 
 ### 再開順序
 
-1. 入力/回答/IDを検証し、認可済みローカルMCP接続の実行権限/操作経路を確認・記録したうえでRun単位の排他を取得する。caller由来のactorIdは認可証拠に使わない。
-2. NeedsHumanInput、保留質問、許可された判断、状態revisionとPhaseを確認する。
-3. contract/checkpoint integrity、branch/base/head SHA、worktree status/diff digestと全参照artifact digestを停止時記録と照合する。変更を自動resetしない。
-4. decisionId ledgerを確認する。同じID/内容は過去の結果を返す。同じID/異なる内容と競合revisionは拒否する。
-5. 回答受理とaudit記録を永続化してからagentを起動する。永続化が不確実なら開始しない。
-6. 保存済みsafe checkpointからだけ再開する。side effectはoperation ID/evidenceで照合し、結果が不明なら停止し重複実行しない。
-7. 受理/再開/完了/拒否をauditへ追記する。
+1. 入力形式を検証し、認可済みローカルMCP接続の実行権限/操作経路を確認して監査に記録する。Run IDを用いてRun単位の排他を取得する。caller由来のactorIdは認可証拠に使わない。
+2. 現在状態を検査する前に、Run IDとdecisionIdで永続decision ledgerを検索する。初回要求時に保存したrequest digest/結果と一致する再送は、RunがすでにNeedsHumanInputでなくても、保存済みの応答結果をduplicate=trueで返し、状態検査・Agent起動・外部副作用を再実行しない。同じdecisionIdでrequest digestが異なる場合は競合として拒否する。処理中の記録がある場合は既存処理の結果を返すか、同じ操作を重複起動せず復旧処理に委ねる。
+3. decisionIdが未登録の初回要求だけ、NeedsHumanInput、保留質問、許可された回答、expectedStateRevision、expectedPhaseを検証する。
+4. protocol v2要求のexpectedHeadShaとexpectedDiffDigestを、get_run_statusが返したcheckpoint値および保存済みのbranch/base SHA、worktree status、全artifact digestと照合する。値が一致しなければ変更せず拒否する。作業領域を自動resetしない。
+5. 回答、request digest、decisionId、受理応答、再開checkpointを耐久性のあるledger/auditへ書き込んでからAgentを起動する。記録の成功を確認できなければ再開しない。
+6. 保存済み安全checkpointからだけ再開する。外部操作はoperation ID/evidenceと予定/結果の記録で照合し、結果が不明なら再実行せず停止する。
+7. 受理・進行・完了・停止/拒否の結果を同じdecision ledgerとJSONL監査に追記する。再送は保存済みの同一decision結果を返す。
 
 FilesystemとGitHubの外部副作用は単一transactionにできない。pending/confirmed effect journalでreconcileする。保証は二重回答受理を防ぎ、盲目的な副作用再送を防ぐことであり、外部系のexactly-onceを主張しない。
 
