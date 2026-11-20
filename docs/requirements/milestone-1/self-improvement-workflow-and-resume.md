@@ -21,16 +21,16 @@
 1. **本体機能実装**: 本体コードだけを変更し、テスト変更なし。テストビルド失敗は許容。変更範囲と開始/終了SHAを記録する。
 2. **本体コードの独立レビュー**: 実装者と異なるReviewer Agentを明示起動し、Agent ID、実行ID、対象コミット/差分、結果を保存する。
 3. **テスト追加・修正**: テストコードだけを変更し、本体コードの変更を禁止する。
-4. **設計・本体・テストの独立全体レビュー**: Phase 2とは別のReviewer Agentを明示起動し、設計と全差分を確認する。
-5. **PR作成・最終独立レビュー**: PR作成後のhead/base SHAを対象に別Reviewer Agentが確認する。修正は担当Phaseへ戻す。完了後はReadyForHumanReviewで人間の最終確認を待ち、マージは人間が判断する。
+4. **設計・本体・テストの独立全体レビュー**: Reviewer Agentの新しい独立実行を明示起動し、設計と全差分を確認する。
+5. **PR作成・最終独立レビュー**: PR作成後のhead/base SHAを対象に新しいReviewer実行を起動する。修正は担当Phaseへ戻す。完了後はReadyForHumanReviewで人間の最終確認を待ち、マージは人間が判断する。
 
-Phase 2/4/5は自己レビューを禁止する。ロール名が異なるだけでは独立性を満たさない。Reviewer Agent ID、別実行、対象SHA/差分、結果を検証可能なRun証跡にする。
+Phase 2/4/5は自己レビューを禁止する。OrchestratorはAgent ID（例: altair）とAgent実行ID（例: review-0004）を分け、実行IDを発行して実際のReviewer起動結果に結び付ける。起動結果を伴わないID発行はレビューと認めない。各Phaseで新しい独立実行が必要だが、Reviewer個体はPhase間で同一でもよい。常にImplementerとは異なるAgentであること、対象SHA/差分、結果をRun証跡で検証する。
 
 ## 4. 品質ゲート
 
 Phase遷移はレビュー文だけでなく、Phase番号/試行数、変更ファイルと許可範囲、対象コミット/branch/SHA、diff/artifact digest、必要なビルド/テストの終了コード・件数、レビュー実行記録等の客観証跡で判定する。証跡が不明なら成功として進めない。問題は担当Phaseへ差し戻す。
 
-既存方針にはPR修正/再レビュー最大3回、品質ゲート再試行最大1回がある。Phase横断の上限の数え方・追加上限は提案と未決事項を分け、実装前に確認する。上限超過または判断が必要ならNeedsHumanInputで停止する。
+修正回数はPhase 2・4・5ごとに最大3回とし、最初のレビューを数えず、指摘による修正・再レビューを1回と数える。同一Phase内の一時的な品質ゲート失敗は最大1回再実行する。コード修正を伴うゲート再試行は修正回数にも算入する。Run全体の自動差し戻しは初期値6回までとし、各Phase/Runの回数をcheckpointに保存してリセットしない。Milestone 1では固定値を使い、将来の設定可能化は対象外。上限到達時はNeedsHumanInputで上限延長・方針変更・中止を判断する。上限超過または判断が必要ならNeedsHumanInputで停止する。
 
 ## 5. 状態と再開
 
@@ -61,19 +61,20 @@ ChatGPT WorkからMCPへ渡す判断には、Run ID、decision ID（冪等性キ
 
 Unit/FakeTestsでPhase順・範囲、別Agent ID/実行/対象SHA、証跡に基づくゲート、差戻しと上限、合法な状態遷移、再開と旧Run拒否、branch/SHA/artifact mismatch拒否、同一/相反decision ID、並行回答、監査失敗/中断復旧、重複push/PR/comment防止を決定論的に確認する。MCP→CLI→Core契約と秘匿もFakeで確認する。最終E2Eは文書確認と実装の後に別実施し、PRはマージしない。
 
-## 8. 実装前の未決事項
+## 8. 決定済み設計事項
 
-- Phase/Run全体に対する再試行上限と数え方。
-- Phase 1でテストビルド失敗を許容しつつ、後段で必要なbuild/test gateをいつ必須にするか。
-- Reviewer Agent IDの発行元、安定性、独立性の保証方法。
-- 再開Tool/CLI名、引数/応答、state revisionとprotocol version。
-- Workから届く判断の信頼主体、呼出元/人間の実行者識別と監査 provenance を何で確立するか。callerが自己申告する値を認証証拠にしない。認証機構を追加するかは現行stdio/MCP trust boundaryを確認してから決める。
-- JSONL監査と既存run artifactsにcheckpointを追加する方法、原子性/lock/復旧方式。
-- #109の最終受入条件に5段階・resume確認を加えるか、別のゲートにするか。
+1. **再試行上限**: Phase 2/4/5ごとに修正・再レビュー各最大3回。初回レビューは数えず、指摘への修正・再レビューを1回とする。同一Phaseの一時的な品質ゲート失敗の再実行は最大1回。コード変更を伴えば修正回数にも加算する。Run全体の自動差し戻しは合計6回まで。回数はPhase別・Run全体でcheckpointに保存しリセットしない。Milestone 1では固定値、将来の設定可能化は対象外。
+2. **Reviewer識別**: OrchestratorがAgent ID（例: altair）とAgent実行ID（例: review-0004）を分け、実行IDを発行して実際のReviewer起動結果に関連付ける。Phase 2/4/5ごとに新しい実行が必要だが、Reviewer個体は同じでもよい。Agent IDがImplementerと同じ、起動を伴わないID、対象SHA/証跡不一致はレビュー失敗。
+3. **判断の信頼境界**: 認可済みローカルMCP接続の実行権限と操作経路を信頼境界とし、その設定と経路を監査に記録する。Work側は明示的な人間の回答を得てから要求を送る。任意のactorIdは信用せず、ローカルMCP接続のみで人間本人性を保証したとは扱わない。本人認証基盤はMilestone 1に追加しない。
+4. **再開API/互換性**: 新規MCP Tool `resume_orchestration` と読み取り専用の状態取得Tool `get_run_status` を設ける。既存の`run_orchestration`は変更しない。NeedsHumanInputの意味変更とcanResume等の能力情報を示すためCLI/MCPのプロトコルをv2へ更新する。checkpointのない旧Runは原則再開不可。
+5. **checkpoint**: Run単位の排他制御下で、Run directory内の版付きmanifestをPhase完了時およびNeedsHumanInput移行時に原子的に更新する。外部操作は直前の予定と直後の結果を記録する。
+6. **監査**: 既存JSONLを追記型の監査履歴として継続し、checkpoint manifestは現在状態、既存成果物はレビュー/テスト/PR証跡、外部操作記録はpush/PR/comment等の重複防止を担う。新DBは導入しない。監査とcheckpointの整合性が崩れた場合は自動復旧しない。
+7. **#109**: 既存の最終Testbed E2E受入条件を維持する。5段階/再開機能のUnit/FakeTests受入を実施前ゲートとして通し、#109で5段階実行証跡を確認する。判断待ちが自然に発生しない場合は強制しない。再開動作はUnit/FakeTestsで決定論的に検証する。Slack Run IDはスレッド内専用返信に1回だけ表示する条件へ明確化する。
+8. **Phase 1のbuild/test**: Phase 1ではテストビルド失敗を許容する。Phase 3の完了時に必要なRelease buildおよびテスト成功を必須とし、Phase 4以降はその結果の保存済み証跡をゲートで確認する。
 
 ## 9. 関連Issue/PR
 
-- #109は現行Milestone 1最終Testbed E2E。本文はこのPRでは変更しない。設計承認後、要求追加の要否を判断する。
+- #109は現行Milestone 1最終Testbed E2E。受入条件は維持し、5段階/再開Unit/FakeTestsを事前ゲートにする。Slack Run ID条件の表示位置だけをスレッド内専用返信1回へ明確化する。
 - #79のImplementer検証証跡を再利用し、別証跡機構の重複を避ける。
 - #80のpush前検査を再利用し、過去の原因未確定を改変しない。
 - #84の子プロセス環境は解決済み前提。再開時の環境継承を受入で確認する。
