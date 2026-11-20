@@ -14,10 +14,10 @@
   - [Agent設定と指示管理](reference/agent-configuration-and-instructions.md): Agentの識別、Role割り当て、指示ファイルの設計
   - [Slack通知設計](reference/slack-notifications.md): 通知イベント、Agent報告、Slack配送の設計と現状
   - [ワークフロー・品質ゲート・Run再開](reference/orchestration-workflow-and-human-resume.md): Milestone 1の将来設計と現行状態の差分
-- [requirements/milestone-1/](requirements/milestone-1/): Milestone 1自己改善ワークフローとRun再開の要求
   - [テスト種別と責務](reference/testing-classification.md): UnitTests・FakeTests・IntegrationTestsの境界とAI接続テストの原則
   - [ImplementerからReviewerへの検証証跡](reference/implementer-reviewer-validation-evidence.md): 実装担当のビルド・テスト記録とレビューへの引き渡し
   - [開発用IntegrationTest](reference/development-integration-tests.md): Testbed再利用、実Codex opt-in、最終受入E2Eとの責務分担
+- [requirements/milestone-1/](requirements/milestone-1/): Milestone 1自己改善ワークフローとRun再開の要求
 - [reports/](reports/): 作業・検証の結果と証跡。Milestone 1は[reports/milestone-1/](reports/milestone-1/)を参照
 - このフォルダ直下: 複数の分類に関わる共通方針・ゲート
 - [guidelines/](guidelines/README.md): 運用・開発におけるガイドライン
