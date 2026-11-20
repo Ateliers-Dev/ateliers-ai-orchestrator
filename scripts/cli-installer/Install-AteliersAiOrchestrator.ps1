@@ -12,8 +12,8 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $repository = 'Ateliers-Dev/ateliers-ai-orchestrator'
-$assetNamePrefix = 'Ateliers.Ai.Orchestrator-win-x64'
 $installRootName = 'Ateliers-Dev\Ai-Orchestrator'
+Import-Module (Join-Path $PSScriptRoot 'CliRelease.psm1') -Force
 
 function Get-InstalledVersion {
     param([Parameter(Mandatory = $true)][string]$BinaryDirectory)
@@ -68,7 +68,8 @@ try {
 
     $normalizedVersion = $Version.TrimStart('v')
     $tag = "v$normalizedVersion"
-    $assetName = "$assetNamePrefix-v$normalizedVersion.zip"
+    $releaseInfo = Get-CliReleaseTagInfo -Tag $tag
+    $assetName = $releaseInfo.ZipName
     $releaseUrl = "https://github.com/$repository/releases/download/$tag"
     $workDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("ateliers-orchestrator-install-" + [Guid]::NewGuid().ToString('N'))
     $stageDirectory = Join-Path $installRoot ('.staging-' + [Guid]::NewGuid().ToString('N'))
@@ -77,12 +78,46 @@ try {
     $switched = $false
 
     try {
+        $releaseApiUrl = "https://api.github.com/repos/$repository/releases/tags/$tag"
+        try {
+            $release = Invoke-RestMethod -Uri $releaseApiUrl -Headers @{
+                Accept = 'application/vnd.github+json'
+                'User-Agent' = 'Ateliers-Ai-Orchestrator-Installer'
+            } -ErrorAction Stop
+        }
+        catch {
+            $statusCode = $null
+            if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+                $statusCode = [int]$_.Exception.Response.StatusCode
+            }
+            if ($statusCode -eq 404) {
+                throw "指定バージョンのGitHub Releaseが見つかりません: $tag。ベータ版を含め、Releaseが公開済みか確認してください。"
+            }
+            throw "GitHub Release情報の取得に失敗しました ($tag): $($_.Exception.Message)"
+        }
+        try {
+            $releaseInfo = Assert-CliReleaseMetadata -Release $release -Tag $tag
+        }
+        catch {
+            throw "GitHub Releaseの公開資産を確認できません ($tag): $($_.Exception.Message)"
+        }
+
         New-Item -ItemType Directory -Path $workDirectory -Force | Out-Null
         New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
         $archivePath = Join-Path $workDirectory $assetName
         $checksumPath = "$archivePath.sha256"
-        Invoke-WebRequest -Uri "$releaseUrl/$assetName" -OutFile $archivePath -UseBasicParsing
-        Invoke-WebRequest -Uri "$releaseUrl/$assetName.sha256" -OutFile $checksumPath -UseBasicParsing
+        try {
+            Invoke-WebRequest -Uri "$releaseUrl/$assetName" -OutFile $archivePath -UseBasicParsing -ErrorAction Stop
+        }
+        catch {
+            throw "GitHub Release ZIPを取得できません ($assetName): $($_.Exception.Message)"
+        }
+        try {
+            Invoke-WebRequest -Uri "$releaseUrl/$assetName.sha256" -OutFile $checksumPath -UseBasicParsing -ErrorAction Stop
+        }
+        catch {
+            throw "GitHub Release SHA-256ファイルを取得できません ($($releaseInfo.ChecksumName)): $($_.Exception.Message)"
+        }
 
         $checksumText = (Get-Content -LiteralPath $checksumPath -Raw).Trim()
         if ($checksumText -notmatch '^([0-9a-fA-F]{64})(?:\s+\*?.+)?$') {

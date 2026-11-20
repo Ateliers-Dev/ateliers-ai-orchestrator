@@ -10,8 +10,6 @@ permissions:
 
 jobs:
   publish-windows-cli:
-    # Beta tags identify merged but unverified CLI builds; they must not publish a GitHub Release.
-    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: windows-latest
     steps:
       - name: Check out source
@@ -63,20 +61,15 @@ jobs:
       - name: Package and checksum
         shell: pwsh
         run: |
-          $version = $env:GITHUB_REF_NAME.TrimStart('v')
-          $name = "Ateliers.Ai.Orchestrator-win-x64-v$version.zip"
-          Compress-Archive -Path artifacts/publish/* -DestinationPath "artifacts/$name"
-          $hash = (Get-FileHash "artifacts/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $name" | Set-Content "artifacts/$name.sha256" -Encoding ascii
+          Import-Module ./scripts/cli-installer/CliRelease.psm1 -Force
+          New-CliReleaseAssets -Tag $env:GITHUB_REF_NAME -PublishDirectory artifacts/publish -ArtifactDirectory artifacts
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          $version = $env:GITHUB_REF_NAME.TrimStart('v')
-          $name = "Ateliers.Ai.Orchestrator-win-x64-v$version.zip"
-          gh release create $env:GITHUB_REF_NAME "artifacts/$name" "artifacts/$name.sha256" `
-            --title $env:GITHUB_REF_NAME `
-            --generate-notes
+          Import-Module ./scripts/cli-installer/CliRelease.psm1 -Force
+          $releaseArguments = Get-CliReleaseCreateArguments -Tag $env:GITHUB_REF_NAME -ArtifactDirectory artifacts
+          & gh @releaseArguments
           if ($LASTEXITCODE -ne 0) { throw "gh release create failed: $LASTEXITCODE" }
