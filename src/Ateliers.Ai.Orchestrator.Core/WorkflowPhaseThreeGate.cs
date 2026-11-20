@@ -105,7 +105,9 @@ public static class WorkflowPhaseThreeGate
         !path.Contains('\\') &&
         !path.StartsWith("/", StringComparison.Ordinal) &&
         !path.Split('/').Any(segment => segment is "" or "." or "..") &&
-        path.StartsWith("tests/", StringComparison.OrdinalIgnoreCase);
+        path.StartsWith("tests/", StringComparison.OrdinalIgnoreCase) &&
+        (path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase));
 
     private static bool IsSha(string? value) => value is { Length: 40 } && value.All(Uri.IsHexDigit);
 }
