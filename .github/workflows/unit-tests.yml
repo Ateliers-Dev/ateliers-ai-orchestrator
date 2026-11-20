@@ -29,6 +29,11 @@ jobs:
         shell: powershell
         run: .\tests\cli-installer\Test-CliRelease.ps1
 
+      - name: Run E2E preflight deterministic tests
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\tests\e2e\Test-E2EPreflight.ps1
+
       - name: Set up .NET 10
         uses: actions/setup-dotnet@v4
         with:
