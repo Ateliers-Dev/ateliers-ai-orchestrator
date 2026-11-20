@@ -50,7 +50,7 @@ Milestone 1の最終E2EではSlack通知は必須で、`testChannelId` 固定で
 
 通知は `%LOCALAPPDATA%\Ateliers-Dev\Ai-Orchestrator\config\slack.json` の `testChannelId` へ送ります。必要なら `-SlackConfigurationPath` と `-SlackSecretsPath` の両方でローカル設定の場所を指定できます。Bot認証と送信先を実Codex起動前に確認し、Token値は表示・記録しません。
 
-Slack API成功件数が機械可読なCLI結果で1件以上、失敗0件であることを確認します。結果は一時実行領域の `e2e-result.json` に段階・run IDとともに記録されます。Slack画面での受信確認はこのE2Eゲートに含めません。
+Slack API成功件数が機械可読なCLI結果で1件以上、失敗0件であることを確認します。結果は一時実行領域の `e2e-result.json` に段階、Orchestrator呼び出し状態、Codex子プロセス起動状態、run IDとともに記録されます。子プロセス起動証跡がない場合は未起動または未確認を分けて記録します。Slack画面での受信確認はこのE2Eゲートに含めません。
 
 Slack設定やBot認証が不足している場合は準備段階で停止し、通知を無効化したり通常通知先へ切り替えたりしません。
 

@@ -8,7 +8,7 @@ $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count -gt 0) { throw "E2Eスクリプトの構文エラー: $($parseErrors[0].Message)" }
 
-foreach ($functionName in @('Resolve-CodexExecutable', 'Get-StructuredRunResult', 'Resolve-E2ESlackSettings', 'Get-CodexProcessStartEvidence', 'Write-E2ERunStatus')) {
+foreach ($functionName in @('Resolve-CodexExecutable', 'Get-StructuredRunResult', 'Resolve-E2ESlackSettings', 'Get-CodexProcessStartEvidence', 'Get-E2EFailurePhase', 'Write-E2ERunStatus')) {
     $functionAst = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq $functionName }, $true)
     if ($null -eq $functionAst) { throw "必要な関数がありません: $functionName" }
     Invoke-Expression $functionAst.Extent.Text
@@ -23,6 +23,10 @@ if ($source.IndexOf("'verify-slack'", [StringComparison]::Ordinal) -gt $source.I
     $source.IndexOf("'GitHub push権限の事前確認'", [StringComparison]::Ordinal) -gt $source.IndexOf('$runStarted = $true', [StringComparison]::Ordinal)) {
     throw 'SlackまたはGitHub push権限を確認する前にCodexを起動します。'
 }
+$startInvocation = $source.IndexOf('$runStarted = $true', [StringComparison]::Ordinal)
+$unknownStartState = $source.IndexOf('$codexStarted = $null', $startInvocation, [StringComparison]::Ordinal)
+$cliInvocation = $source.IndexOf('$runOutput = @($contractJson | & $cliExecutable', [StringComparison]::Ordinal)
+if ($unknownStartState -lt $startInvocation -or $unknownStartState -gt $cliInvocation) { throw 'Orchestrator呼び出し直前にCodex起動状態を不明へ戻していません。' }
 
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('AteliersE2EPreflightTest-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tempRoot | Out-Null
@@ -88,9 +92,16 @@ try {
     $evidencePath = Join-Path $evidenceDirectory 'execution-evidence.json'
     [System.IO.File]::WriteAllText($evidencePath, '{"ProcessId":1234}')
     if ((Get-CodexProcessStartEvidence -RunRoot $runRoot -RunId 'run-started') -ne $true) { throw 'Codexプロセス起動証跡を検出できません。' }
+    if ((Get-CodexProcessStartEvidence -RunRoot $runRoot -RunId '') -ne $true) { throw 'run ID未取得時に一意な起動証跡を検出できません。' }
     [System.IO.File]::WriteAllText($evidencePath, '{"ProcessId":null}')
     if ((Get-CodexProcessStartEvidence -RunRoot $runRoot -RunId 'run-started') -ne $false) { throw 'Codex未起動を示す証跡を検出できません。' }
     if ($null -ne (Get-CodexProcessStartEvidence -RunRoot $runRoot -RunId 'missing')) { throw '証跡のないrunを起動済み/未起動と断定しました。' }
+    if ((Get-E2EFailurePhase -OrchestratorStarted $false -CodexStarted $false) -cne 'failed_before_start' -or
+        (Get-E2EFailurePhase -OrchestratorStarted $true -CodexStarted $false) -cne 'failed_before_codex_start' -or
+        (Get-E2EFailurePhase -OrchestratorStarted $true -CodexStarted $true) -cne 'failed_after_codex_start' -or
+        (Get-E2EFailurePhase -OrchestratorStarted $true -CodexStarted $null) -cne 'codex_start_unconfirmed') {
+        throw '実行前・Codex起動前・起動後・起動未確認の状態分類に失敗しました。'
+    }
     $statusPath = Join-Path $tempRoot 'e2e-result.json'
     Write-E2ERunStatus -Path $statusPath -Phase 'failed_after_codex_start' -OrchestratorStarted $true -CodexStarted $true -RunId 'run-started' -Message 'test'
     $savedStatus = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json

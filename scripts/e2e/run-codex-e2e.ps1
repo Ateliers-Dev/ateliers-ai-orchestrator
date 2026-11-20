@@ -31,8 +31,13 @@ function Write-E2ERunStatus {
 
 function Get-CodexProcessStartEvidence {
     param([string]$RunRoot, [string]$RunId)
-    if ([string]::IsNullOrWhiteSpace($RunId)) { return $null }
-    $runDirectory = Join-Path $RunRoot $RunId
+    if (-not (Test-Path -LiteralPath $RunRoot -PathType Container)) { return $null }
+    if ([string]::IsNullOrWhiteSpace($RunId)) {
+        $runDirectories = @(Get-ChildItem -LiteralPath $RunRoot -Directory -ErrorAction SilentlyContinue)
+        if ($runDirectories.Count -ne 1) { return $null }
+        $runDirectory = $runDirectories[0].FullName
+    }
+    else { $runDirectory = Join-Path $RunRoot $RunId }
     if (-not (Test-Path -LiteralPath $runDirectory -PathType Container)) { return $null }
     $evidenceFiles = @(Get-ChildItem -LiteralPath $runDirectory -Filter 'execution-evidence.json' -File -Recurse -ErrorAction SilentlyContinue)
     if ($evidenceFiles.Count -eq 0) { return $null }
@@ -44,6 +49,14 @@ function Get-CodexProcessStartEvidence {
         catch { return $null }
     }
     return $false
+}
+
+function Get-E2EFailurePhase {
+    param([bool]$OrchestratorStarted, [object]$CodexStarted)
+    if (-not $OrchestratorStarted) { return 'failed_before_start' }
+    if ($CodexStarted -eq $true) { return 'failed_after_codex_start' }
+    if ($CodexStarted -eq $false) { return 'failed_before_codex_start' }
+    return 'codex_start_unconfirmed'
 }
 
 function Resolve-CodexExecutable {
@@ -438,6 +451,7 @@ try {
     $null = Save-GitStatusBoundary -GitExecutable $gitCommand.Source -Checkout $checkoutPath -Stage 'immediately-before-publisher-invocation' -SummaryPath $gitStatusSummaryPath
     Write-Host 'Codex E2Eを開始します。cleanな一時cloneを対象にします。'
     $runStarted = $true
+    $codexStarted = $null
     Write-E2ERunStatus -Path $runStatusPath -Phase 'orchestrator_invoked' -OrchestratorStarted $true -CodexStarted $null -Message 'Orchestrator CLI呼び出し中。Codex子プロセス起動は未確認。'
     $savedErrorActionPreference = $ErrorActionPreference
     try {
@@ -550,13 +564,10 @@ try {
 }
 catch {
     if (-not $runStarted) { $codexStarted = $false }
-    if ($runStarted -and $codexStarted -isnot [bool] -and -not [string]::IsNullOrWhiteSpace($currentRunId)) {
+    if ($runStarted -and $codexStarted -isnot [bool]) {
         $codexStarted = Get-CodexProcessStartEvidence -RunRoot $runRoot -RunId $currentRunId
     }
-    if (-not $runStarted) { $failedPhase = 'failed_before_start' }
-    elseif ($codexStarted -eq $true) { $failedPhase = 'failed_after_codex_start' }
-    elseif ($codexStarted -eq $false) { $failedPhase = 'failed_before_codex_start' }
-    else { $failedPhase = 'codex_start_unconfirmed' }
+    $failedPhase = Get-E2EFailurePhase -OrchestratorStarted $runStarted -CodexStarted $codexStarted
     $safeFailureMessage = if ($codexStarted -eq $true) { 'Codex開始後に失敗。診断と外部状態を確認してください。' } elseif ($codexStarted -eq $false) { 'Codex開始前に停止。診断を確認してください。' } else { 'Codexプロセス開始を確認できません。診断と外部状態を確認してください。' }
     try {
         Write-E2ERunStatus -Path $runStatusPath -Phase $failedPhase -OrchestratorStarted $runStarted -CodexStarted $codexStarted -RunId $currentRunId -Message $safeFailureMessage
