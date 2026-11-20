@@ -66,28 +66,34 @@ Milestone 0の目的は、MCP→CLI→Coreの実行経路、契約に基づくFa
 
 ## 3. Milestone 1 — 自己改善基盤
 
-### 3.1 中心目標と委譲運用方針（運用方針は合意済み）
+### 3.1 中心目標と委譲運用方針（合意済み）
 
-オーケストレーター自身の改善IssueをAIへ委譲し、Issueの範囲内で実装、独立レビュー、指摘修正、再レビュー、品質ゲート、PR作成までを実行する。マージは当該作業への明示的な委譲と上位の権限・承認・安全制約の範囲で行う。#109のTestbed最終E2Eが作るPRはIssueの受入条件どおりOPENのまま人間レビューへ渡す。
+オーケストレーター自身の改善IssueをAIへ委譲し、Issueと上位の指示で許可された範囲内では、実装、独立レビュー、指摘修正、再レビュー、品質ゲート、PR作成、マージまでを原則自律実行する。マージ可否を合意済みの要求・証跡・品質ゲートから判断できない場合、または必要条件が未達の場合は、マージせず、理由と証跡を添えて人間へ返す。人間の承認を一律の工程にはしない。明示された承認要件や権限・安全制約は引き続き優先する。
 
 #### PRレビューとマージの手順
 
 1. 実装後、独立ReviewerがPRの差分を確認する。指摘事項はPRにコメントする。コード行へのコメントが操作上難しい場合は、PR全体へのコメントでよい。
 2. 指摘がある場合、実装・修正者は対応後にその旨をPRコメントで報告する。独立Reviewerが修正後の差分を再確認する。修正・再レビューは最大3回まで行い、上限到達後も指摘が未解決なら停止して報告する。
 3. Reviewerは指摘が解決し、変更を承認できると判断したとき、マージを承認する旨をPRコメントに明記する。GitHubの正式なApprove操作は不要。
-4. PRコメントに指摘事項（指摘がない場合はその旨）、対応報告（指摘があった場合）、Reviewerのマージ承認が揃い、テスト・CI等の品質ゲートが通過した後にマージする。これらのコメント証跡はマージ条件とする。
+4. PRコメントに指摘事項（指摘がない場合はその旨）、対応報告（指摘があった場合）、Reviewerのマージ承認が揃い、テスト・CI等の品質ゲートが通過したことを確認する。委譲範囲と上位制約に反しない場合、追加の人間承認を待たずにマージする。
 5. 品質ゲートが失敗した場合は原因を確認して修正または再試行する。再試行は最大1回とする。コード等を修正した場合は修正・再レビューの最大3回に含め、独立Reviewerによる再確認と新たなマージ承認コメントを得る。修正後または再試行後も未達なら停止して報告し、失敗したゲートを無視してマージしない。
 
 #### 停止条件
 
-次の場合はPRをマージせず、判断できない点、未解決事項、実施結果を報告する。
+次の場合はPRをマージせず、判断できない点、未解決事項、実施結果と根拠となる証跡を報告する。
 
 - Issueの仕様または方針を根拠に基づいて判断できない。
 - Issueの範囲外に対応が必要な問題が見つかり、別Issueで扱う必要がある。
 - レビュー指摘が未解決である。
 - テスト・CI等の品質ゲートが、修正または再試行後も未達である。
 
-委譲範囲にPRマージが含まれる場合に限り、上記の手順と停止条件に従ってマージする。#109の最終Testbed E2EはPR作成後にOPENで停止する。
+#### 自律マージ分岐の決定論検証
+
+自律マージが可能な条件と人間判断へ返す条件は、FakeTestsで固定入力を使って分岐・副作用・最終状態を検証する。少なくとも、独立レビュー承認・指摘解消・必須ゲート成功・マージ許可が揃う場合のマージ要求と、判断不能または条件未達の場合の非マージ・理由/証跡返却を確認する。実Codexのモデル判断や実GitHubマージをこの分岐の試験条件にしない。
+
+#### #109 最終E2Eの別責務
+
+#109は、CLIから実Codexが起動すること、Implementer/Reviewerの接続とRun証跡、Slack `testChannelId` へのAPI通知、および必要な場合のGitHub公開経路を一度確認する接続E2Eとする。push/PRは元Issueの公開処理とPR証跡の受入条件を実証する範囲で維持し、成功したTestbed PRはOPENのままにする。E2Eの合否に、自律マージ、実マージ、AIモデルの判断品質や自律マージ分岐を含めない。分岐の決定論検証は上記FakeTestsに置く。
 
 ### 3.2 現在の残作業と提案する順序（2026-11-20棚卸し）
 
@@ -95,7 +101,7 @@ Milestone 0の目的は、MCP→CLI→Coreの実行経路、契約に基づくFa
 
 | 順序 | Issue / 項目 | 状態・位置づけ | 次に必要な検証 |
 | --- | --- | --- | --- |
-| 1（最終段階） | [#109 最終Testbed E2E](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/109) | Open・タイトルP1。M1最終ゲート。[PR #114](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/pull/114)はOPEN。head `988674d` のWindows/Ubuntu CI成功、独立レビューの追加指摘なし。マージ条件となるPRレビュー記録は未完了。最終E2E未実施。 | PRレビュー記録を整え、ユーザーの最終承認を得てからPRをマージ。その後、ユーザー本人が一度だけ実E2Eを実施し、実Codex/Reviewer証跡、Release build・5 checks、testChannel API成功、隔離ブランチ/PR、SHA整合、main不変を確認する。 |
+| 1（最終段階） | [#109 最終Testbed E2E](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/109) | Open・タイトルP1。M1最終ゲート。[PR #114](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/pull/114)はOPEN、head `b3f23ed` のWindows/Ubuntu必須CI成功。必要なPR上レビュー証跡は未完了。最終E2E未実施。 | PR #114はレビューコメント投稿の自動承認審査に拒否されており、迂回・マージをしない。別の文書PRで受入範囲を整理する。以降の#109最終E2Eでは実Codex/Reviewer接続・Run証跡、Release build・5 checks、testChannel API成功、必要なpush/PR経路、SHA整合、main不変を確認する。成功PRはOPENで終了し、マージ分岐はFakeTestsで検証する。 |
 | 独立追跡 | [#105 testhost接続問題](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/105) | Open・タイトルP2。M1完了条件外。 | Work環境の制約をCI/別Windows環境の結果と分けて調査。解消を他開発の前提にしない。 |
 | 後続候補 | [#36 Slackライフサイクル通知](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/36) | Open・Milestone/priorityなし。現計画では機能拡張。 | #109はtestChannelへの最小API成功だけを確認。スレッド/broadcast/複数Bot設計は#36の個別範囲。 |
 | 後続候補 | [#77 MCP実行環境パス](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/77) | Open・Milestone/priorityなし。今回の対象外。 | 既存の固定CLIパスで不足が再発・拡大した場合に再優先付けする。 |
@@ -106,12 +112,12 @@ Milestone 0の目的は、MCP→CLI→Coreの実行経路、契約に基づくFa
 
 1. #84/#79/#80/#107/#108はそれぞれの受入条件・証跡により完了済み。#80の元Run原因未確定は残存リスクとして保ち、原因特定を遡及的な必須条件にしない。
 2. 通常PRでは対象Windows・Ubuntu必須CI（UnitTests/FakeTests）と独立レビューを確認する。変更範囲が要求しない実外部IntegrationTestsやAI判断品質を重複ゲート化しない。
-3. #109を一度実施し、Run ID/対象SHA、Implementerと独立Reviewerの工程・コメント証跡、Release build・Testbed 5 checks、専用testChannelへのSlack API成功、専用一時ブランチのPRと証跡のhead/base SHA一致を記録する。
-4. Testbed mainは不変、既存ブランチ/PRは無変更、force push・自動mergeなし、成功PRはOPENで人間レビュー待ちとする。失敗時は外部状態を自動削除/クローズせず、Codex未開始と開始後失敗を区別する。
-5. Run ID、対象SHA、PR、CI/Reviewerコメント、Slack API応答、最終状態を相互に追跡可能にする。Reviewerの自然言語判断品質、Slack画面到達確認、#36全体はこのゲートに含めない。
-6. #109はTestbed PR作成までを確認し、そのPRでAIの自律マージ能力は受け入れない。M1全体に自律マージを含めるかは過去のMVP方針と現在の委譲ルールを照合して未確定とする。
+3. 自律マージ可否と人間へ返す分岐をFakeTestsで決定論的に検証し、許可条件、非マージ条件、報告する理由・証跡を確認する。実Codexのモデル判断品質と実マージは検証対象にしない。
+4. #109を一度実施し、CLI経由の実Codex起動、Implementer/Reviewer接続、Run ID/対象SHA、Release build・Testbed 5 checks、専用testChannelへのSlack API成功、必要な専用一時ブランチのpush/PRと証跡のhead/base SHA一致を記録する。GitHub公開経路はIssue本文の元の要求を満たすのに必要な範囲を保ち、実施前にその必要十分性を明記する。
+5. Testbed mainは不変、既存ブランチ/PRは無変更、force pushなし、成功PRはOPENで終了とする。E2Eで自律マージや実マージを試験しない。失敗時は外部状態を自動削除/クローズせず、Codex未開始と開始後失敗を区別する。
+6. Run ID、対象SHA、PR、CI/Reviewerコメント、Slack API応答、最終状態を相互に追跡可能にする。Reviewerの自然言語判断品質、Slack画面到達確認、#36全体はこのゲートに含めない。
 
-この提案は#109の安全制約を維持し、決定論テストと一度の接続・公開E2Eを分担する。testChannel、権限、対象SHAを安全に確認できない場合は実E2Eを開始せず準備阻害として扱う。#105解決は他の開発やM1完了の前提にしない。
+この提案は#109の安全制約を維持し、自律マージ判断をFakeTests、接続と公開経路を一度のE2Eに分担する。Issue #109を更新する場合の現行受入条件・提案条件・変更根拠は[状況報告](../reports/milestone-1/current-status.md)に記録する。testChannel、権限、対象SHAを安全に確認できない場合は実E2Eを開始せず準備阻害として扱う。#105解決は他の開発やM1完了の前提にしない。
 
 ## 4. Milestone 1では必須にしない後続候補
 
@@ -147,7 +153,7 @@ Milestone 0の目的は、MCP→CLI→Coreの実行経路、契約に基づくFa
 
 ## 6. 現在の判断状況
 
-棚卸し結果と#109の最小受入案は本書および状況報告に記録した。GitHub Milestone登録、Issue状態・優先度変更、新規Issue作成は行っていない。#109の受入条件をIssue本文へ反映する場合は、実装開始前に提案差分を示して判断を得る。
+今回の合意に基づく計画変更を本書および状況報告に記録する。#109 Issue本文は本変更では編集しない。Issue本文を更新する次工程では、現行条件と提案条件、元要求を満たすための必要十分性、および変更理由を差分で示す。GitHub Milestone登録、Issue状態・優先度変更、新規Issue作成は行わない。
 
 ## 7. 参照資料
 
