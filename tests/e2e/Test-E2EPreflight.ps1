@@ -38,8 +38,8 @@ try {
     $cmdPath = Join-Path $tempRoot 'codex.cmd'
     foreach ($path in @($exePath, $ps1Path, $cmdPath)) { [System.IO.File]::WriteAllText($path, '') }
 
-    if ((Resolve-CodexExecutable -ExplicitPath $ps1Path) -cne $ps1Path) { throw '明示したcodex.ps1の優先解決に失敗しました。' }
     $env:ATELIERS_CODEX_CLI_PATH = $cmdPath
+    if ((Resolve-CodexExecutable -ExplicitPath $ps1Path) -cne $ps1Path) { throw '環境変数より明示したcodex.ps1を優先できません。' }
     if ((Resolve-CodexExecutable -ExplicitPath '') -cne $cmdPath) { throw '環境変数codex.cmdの解決に失敗しました。' }
     Remove-Item Env:\ATELIERS_CODEX_CLI_PATH -ErrorAction SilentlyContinue
 
