@@ -21,6 +21,9 @@ public sealed class WorkflowPhaseThreeGateTests
     [Theory]
     [InlineData("src/Ateliers.Ai.Orchestrator.Core/RunEvent.cs")]
     [InlineData("tests/../src/Ateliers.Ai.Orchestrator.Core/RunEvent.cs")]
+    [InlineData("tests/README.md")]
+    [InlineData("tests/fixtures/sample.json")]
+    [InlineData("tests/Ateliers.Ai.Orchestrator.UnitTests/Ateliers.Ai.Orchestrator.UnitTests.csproj")]
     [InlineData("/tests/Ateliers.Ai.Orchestrator.UnitTests/NewTests.cs")]
     [InlineData("tests\\Ateliers.Ai.Orchestrator.UnitTests\\NewTests.cs")]
     public void Evaluate_rejects_paths_outside_the_test_tree_or_noncanonical_paths(string path)
