@@ -83,6 +83,15 @@ public sealed class WorkflowPhaseThreeGateTests
         Assert.Contains(result.Reasons, reason => reason.Contains("SHA-256", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void Evaluate_rejects_a_40_character_commit_sha_as_a_diff_sha256()
+    {
+        var result = WorkflowPhaseThreeGate.Evaluate(ValidEvidence() with { DiffSha256 = BaseSha });
+
+        Assert.False(result.Passed);
+        Assert.Contains(result.Reasons, reason => reason.Contains("SHA-256", StringComparison.Ordinal));
+    }
+
     private static WorkflowPhaseThreeEvidence ValidEvidence() => new(
         "run-123",
         WorkflowPhase.Phase3TestChanges,
