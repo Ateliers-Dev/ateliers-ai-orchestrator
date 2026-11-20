@@ -1,10 +1,10 @@
 # Ateliers AI Orchestrator 開発計画
 
 > 作成日: 2026-11-18
-> 更新日: 2026-11-20
+> 更新日: 2026-11-21
 > 作成者: yuu503
 
-> 状態: Milestone 0完了記録・Milestone 1残作業案（#109が最終受入ゲート、#105は独立追跡、自律マージは将来候補）
+> 状態: Milestone 0完了記録・Milestone 1計画（5段階標準と再開設計を追加。文書PR確認後に実装着手）
 
 > 対象: Ateliers-Dev/ateliers-ai-orchestrator
 
@@ -68,7 +68,17 @@ Milestone 0の目的は、MCP→CLI→Coreの実行経路、契約に基づくFa
 
 ### 3.1 中心目標と委譲運用方針（合意済み）
 
-Milestone 1の目標は、オーケストレーションの仕組みをオーケストレーション自身によって改善できることを実証することである。Issueと上位の指示で許可された範囲内で、実装の委譲、独立レビュー、指摘修正と再レビュー、品質ゲート、PR作成、成果物と証跡の記録までを行う。PRの最終的な承認とマージ判断・操作は人間が担当する。自律マージ機能はMilestone 1の必須条件ではなく、実装・受入テストを行わない。
+Milestone 1の目標は、従来のワークフローでは「Orchestratorが自身の改善を完遂する」という目標について機能的成功は可能でも、要求する品質基準に達しない可能性があるという課題を解消し、Orchestrator自身の改善を品質証跡とともにPR作成まで完遂できることを実証することである。Issueと上位の指示で許可された範囲で、5段階標準ワークフロー、再開可能な人間判断待ち、品質ゲートと証跡記録までを扱う。PRの最終承認とマージ判断・操作は人間が担当する。自律マージはMilestone 1の必須条件ではなく、実装・受入テストを行わない。設計文書は[Milestone 1自己改善ワークフローとRun再開要求](../requirements/milestone-1/self-improvement-workflow-and-resume.md)、[ワークフロー・品質ゲート・Run再開の設計](../reference/orchestration-workflow-and-human-resume.md)を参照する。
+
+#### 標準の5段階ワークフロー
+
+1. **本体機能実装** — テストコードを変更しない。テストビルドの失敗は許容する。
+2. **本体コードの独立レビュー** — Implementerとは別のReviewer Agentを明示起動し、Reviewer Agent ID、実行ID、対象コミット/差分、結果を保存する。
+3. **テスト追加・修正** — テストコードだけを変更し、本体コードを変更しない。差分検査で範囲を確認する。
+4. **設計・本体コード・テストの独立全体レビュー** — Phase 2とは別のReviewer Agentを明示起動し、設計と全差分を確認する。
+5. **PR作成・最終独立レビュー** — PRのhead/base SHAに対し、さらに別Reviewerを起動する。指摘修正は担当Phaseへ戻す。完了後は人間の最終確認待ちとし、AIはマージしない。
+
+Phase間ゲートはレビュー結果に加えテスト結果、変更範囲、対象コミット/SHA、差分証跡で判定する。自己レビュー、対象SHA不一致、必須証跡欠落、Phase範囲違反、未解決指摘を成功扱いしない。既存運用ではレビュー修正は最大3回、品質ゲート再試行は最大1回とする。Phase横断での数え方は未確定として実装前に確認する。問題は担当Phaseへ差し戻し、上限超過または人間判断が必要なら再開可能なNeedsHumanInputに停止する。
 
 #### PRレビューと人間による最終マージ
 
@@ -120,6 +130,8 @@ Milestone 1では自律マージを実装せず、FakeTestsを含む自律マー
 
 ### 3.3 Milestone 1の最小完了条件（提案）
 
+文書PRを人間が確認するまで本体コード実装と#109最終E2Eを開始しない。
+
 1. #84/#79/#80/#107/#108はそれぞれの受入条件・証跡により完了済み。#80の元Run原因未確定は残存リスクとして保ち、原因特定を遡及的な必須条件にしない。
 2. 通常PRでは対象Windows・Ubuntu必須CI（UnitTests/FakeTests）と独立レビューを確認する。変更範囲が要求しない実外部IntegrationTestsやAI判断品質を重複ゲート化しない。
 3. #109を一度実施し、CLI経由の実Codex起動、Implementer/Reviewer接続、Run ID/対象SHA、Release build・Testbed 5 checks、専用testChannelへのSlack API成功、必要な専用一時ブランチのpush/PRと証跡のhead/base SHA一致を記録する。GitHub公開経路はIssue本文の元の要求を満たすのに必要な範囲を保ち、実施前にその必要十分性を明記する。
@@ -129,6 +141,8 @@ Milestone 1では自律マージを実装せず、FakeTestsを含む自律マー
 自律マージはMilestone 1の完了条件から除外する。Issue #109本文・受入条件は変更しない。testChannel、権限、対象SHAを安全に確認できない場合は実E2Eを開始せず準備阻害として扱う。#105解決は他の開発やM1完了の前提にしない。
 
 ## 4. Milestone 1では必須にしない後続候補
+
+軽量ワークフロー、5段階標準以外のワークフロー構成、Phase省略や選択は今回対象外とする。標準の実証後、品質/コストの証跡をもとに将来Issueで扱う。
 
 これらは自己改善の最小サイクルを成立させるための必須条件から外す提案である。価値がないという意味ではなく、基本経路の実証後に優先度を判断する。
 
@@ -163,7 +177,7 @@ Milestone 1では自律マージを実装せず、FakeTestsを含む自律マー
 
 ## 6. 現在の判断状況
 
-2026-11-20の方針変更を本書および状況報告に記録する。自律マージ機能の新規Issueは作成せず、Issue #109の本文・状態・受入条件、他の既存IssueおよびGitHub Milestoneは変更しない。Milestone 1では人間がPRの最終承認とマージを行う。
+2026-11-20の人間最終マージ方針と、2026-11-21に合意した5段階標準・再開設計を本書と関連文書に記録する。軽量/他ワークフローのIssueは今回作成しない。Issue #109等の既存IssueとGitHub Milestoneはこの文書変更では変更しない。#109に新設計の受入条件を追加するかは文書確認後に決める。Milestone 1では人間がPRの最終承認とマージを行う。
 
 ## 7. 参照資料
 
@@ -176,6 +190,8 @@ Milestone 1では自律マージを実装せず、FakeTestsを含む自律マー
 - [Testbed PR #2 — E2E通知モードとシナリオ文書](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator-testbed/pull/2)
 - [PR #73 — PowerShell 5.1文字コード修正](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/pull/73)
 - 関連確認対象: [#45](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/45)、[#47](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/47)、[#51](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/51)、[#54](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/54)
+- [Milestone 1自己改善ワークフローとRun再開要求](../requirements/milestone-1/self-improvement-workflow-and-resume.md)
+- [ワークフロー・品質ゲート・Run再開の設計](../reference/orchestration-workflow-and-human-resume.md)
 - [Ateliers ドキュメント作成ガイドライン](https://github.com/Ateliers-Dev/ateliers-website/blob/main/docs/development-guidelines/documentation-guidelines.md) — Feature/Referenceの目的と粒度、実装済みと計画中の区別、Docusaurus文書の構成方針を参照。本書はFeature/Reference仕様書ではなく、次の開発判断へ渡す計画・引継ぎ文書として作成した。
 
 
