@@ -4,13 +4,13 @@
 > 更新日: 2026-11-21
 > 作成者: Codex
 
-> 設計状態: 将来設計。現行実装の説明ではない。人間が文書を確認するまで本体コード実装と最終E2Eを開始しない。
+> 設計状態: 合意済み設計と段階実装の対応を記録。最終E2EはMilestone 1計画の完了ゲートまで実施しない。
 
 要求元は[Milestone 1自己改善ワークフローとRun再開要求](../requirements/milestone-1/self-improvement-workflow-and-resume.md)。この文書は契約案・互換性・失敗時挙動を定める。
 
 ## 1. 現行状態の確認
 
-2026-11-21のmain確認では、RunStateにPrepared/Implementing/Reviewing/Revising/ReadyForHumanReview/NeedsHumanInput/Failedがある。ReadyForHumanReview、NeedsHumanInput、Failedはいずれも状態遷移先がなく終端。MCPはrun_orchestrationとGuide/Schema/runtime診断を持つが、既存Runを指定するresume Toolはない。現行runは固定Implementer/Reviewerサイクルで、5段階設計は未実装。PR最終承認・マージは人間が行う。
+PR #120はmainへマージ済みで、Coreに5段階の順序と固定再試行カウンターがある。続く実装でPhase 3の変更範囲（`tests/`配下の`.cs`/`.ps1`）、同一対象SHAのRelease build、必須Unit/Fake結果を判定するゲートを追加した。ただし現行runは引き続き既存のImplementer/Reviewerサイクルであり、このゲートや5段階の遷移はまだ接続されていない。RunStateではReadyForHumanReview、NeedsHumanInput、Failedが終端。MCPにrun_orchestrationとGuide/Schema/runtime診断はあるが、既存Runを指定するresume Toolはない。PRの最終承認・マージはMilestone 1計画に従って人間が行う。
 
 ## 2. 5 Phaseと証跡
 
@@ -88,3 +88,4 @@ FilesystemとGitHubの外部副作用は単一transactionにできない。pendi
 - #36: Slack通知とresume操作を区別。Slack resumeは対象外。
 - PR #116: 最終レビュー後のマージ判断・操作は人間。
 - PR #118: Slack通知変更はresume経路を提供しない。
+

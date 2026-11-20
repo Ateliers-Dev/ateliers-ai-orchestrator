@@ -4,7 +4,7 @@
 > 更新日: 2026-11-21
 > 作成者: yuu503
 
-> 状態: Milestone 0完了記録・Milestone 1計画（5段階標準と再開設計を追加。文書PR確認後に実装着手）
+> 状態: Milestone 0完了記録・Milestone 1計画（5段階標準と再開設計は確認済み。実装を段階的に進行中）
 
 > 対象: Ateliers-Dev/ateliers-ai-orchestrator
 
@@ -130,7 +130,7 @@ Milestone 1では自律マージを実装せず、FakeTestsを含む自律マー
 
 ### 3.3 Milestone 1の最小完了条件（合意済み）
 
-文書PRを人間が確認するまで本体コード実装と#109最終E2Eを開始しない。5段階と再開機能のUnitTests/FakeTests受入を事前ゲートとして完了し、既存の#109受入条件を維持したうえで、5段階の実行証跡を#109で確認する。判断待ちが自然発生しない場合にE2Eで無理に発生させず、再開機能はUnit/Fakeで決定論的に検証する。文書確認後は、次の順序で機能を実装・受け入れる。
+設計文書は人間確認済み。5段階と再開機能のUnitTests/FakeTests受入を事前ゲートとして完了し、既存の#109受入条件を維持したうえで、5段階の実行証跡を#109で確認する。判断待ちが自然発生しない場合にE2Eで無理に発生させず、再開機能はUnit/Fakeで決定論的に検証する。機能を次の順序で実装・受け入れる。
 
 1. 5段階標準を実装し、Phase 1/3の差分制約、Phase 2/4/5のImplementerとは異なるAgent ID、Phaseごとの新規実行ID、対象SHA/差分証跡をUnit/FakeTestsで検証する。
 2. テスト結果、変更範囲、対象コミット/SHAなどの客観証跡から各ゲートを判定し、担当Phaseへの差し戻し、上限到達時のNeedsHumanInputをUnit/FakeTestsで確認する。
@@ -182,6 +182,12 @@ Milestone 1では自律マージを実装せず、FakeTestsを含む自律マー
 
 2026-11-20の人間最終マージ方針と、2026-11-21に合意した5段階標準・再開設計を本書と関連文書に記録する。Issue #109の既存最終E2E受入条件は維持し、5段階/再開のUnit/FakeTestsを実行前ゲートとして追加した。最終E2Eでは5段階の実行証跡を確認し、NeedsHumanInputが自然に発生しない場合は強制しない。Slack Run IDの表示条件はスレッド内専用返信1回に明確化した。Issue #109の変更は再開設計の判断を反映したものであり、#109の既存受入条件やGitHub Milestoneの範囲は変更していない。軽量/他ワークフローのIssueは今回作成しない。Milestone 1では人間がPRの最終承認とマージを行う。
 
+### 6.1 改善履歴と実装の進捗
+
+- PR #120は人間がマージし、5段階の順序と固定再試行カウンターをCoreへ追加した。これは実ワークフロー接続や品質ゲートの実装完了を意味しない。
+- AGENTS.mdにMilestone 1限定の人間マージ制約が共通ルールと混在していたため、2026-11-21に共通ルールから除去した。AIマージはタスクで明示委譲され、適用計画・権限・承認条件が認める場合に限る。Milestone 1では本計画・要求に従い、今回を含む実装PRの最終承認とマージを引き続き人間が行う。新Issueは作成せず、本改善はMilestone 1の最終結果へ履歴として残す。
+- 次の実装単位としてPhase 3のテストコード専用変更範囲（`tests/`配下の`.cs`/`.ps1`）、同一対象SHAのRelease build、必須Unit/Fake結果の証跡判定を追加した。このゲートはまだ既存ワークフローに接続していない。ワークフロー接続、Phase 2/4/5のレビュー証跡、checkpoint/JSONL、protocol v2再開API、冪等性・外部副作用の重複防止は後続単位とする。
+
 ## 7. 参照資料
 
 - [Issue #36 — Slackライフサイクル通知](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/issues/36)
@@ -196,6 +202,7 @@ Milestone 1では自律マージを実装せず、FakeTestsを含む自律マー
 - [Milestone 1自己改善ワークフローとRun再開要求](../requirements/milestone-1/self-improvement-workflow-and-resume.md)
 - [ワークフロー・品質ゲート・Run再開の設計](../reference/orchestration-workflow-and-human-resume.md)
 - [Ateliers ドキュメント作成ガイドライン](https://github.com/Ateliers-Dev/ateliers-website/blob/main/docs/development-guidelines/documentation-guidelines.md) — Feature/Referenceの目的と粒度、実装済みと計画中の区別、Docusaurus文書の構成方針を参照。本書はFeature/Reference仕様書ではなく、次の開発判断へ渡す計画・引継ぎ文書として作成した。
+
 
 
 
