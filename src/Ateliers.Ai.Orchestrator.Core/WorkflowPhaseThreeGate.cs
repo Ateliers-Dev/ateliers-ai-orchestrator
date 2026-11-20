@@ -59,10 +59,10 @@ public static class WorkflowPhaseThreeGate
             reasons.Add("Run IDがありません。");
         if (evidence.Phase != WorkflowPhase.Phase3TestChanges)
             reasons.Add("Phase 3以外の証跡はこのゲートで受け付けません。");
-        if (!IsSha(evidence.BaseCommitSha) || !IsSha(evidence.HeadCommitSha) ||
+        if (!IsCommitSha(evidence.BaseCommitSha) || !IsCommitSha(evidence.HeadCommitSha) ||
             string.Equals(evidence.BaseCommitSha, evidence.HeadCommitSha, StringComparison.OrdinalIgnoreCase))
             reasons.Add("有効な開始SHAと異なる終了SHAが必要です。");
-        if (!IsSha(evidence.DiffSha256))
+        if (!IsSha256(evidence.DiffSha256))
             reasons.Add("変更差分のSHA-256がありません。");
 
         if (evidence.ChangedPaths is null || evidence.ChangedPaths.Count == 0)
@@ -109,6 +109,8 @@ public static class WorkflowPhaseThreeGate
         (path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) ||
             path.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase));
 
-    private static bool IsSha(string? value) => value is { Length: 40 } && value.All(Uri.IsHexDigit);
+    private static bool IsCommitSha(string? value) => value is { Length: 40 } && value.All(Uri.IsHexDigit);
+
+    private static bool IsSha256(string? value) => value is { Length: 64 } && value.All(Uri.IsHexDigit);
 }
 
