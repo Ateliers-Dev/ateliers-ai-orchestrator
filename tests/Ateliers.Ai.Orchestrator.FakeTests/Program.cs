@@ -11,12 +11,12 @@ internal static class FixtureHost
     public static int Main(string[] args)
     {
         Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
-        if (args.Length >= 1 && args[0] == "--fake-codex-fixture") return UnitTestCatalog.RunFakeCodexFixture(args);
-        if (args.Length >= 1 && args[0] == "--external-process-fixture") return UnitTestCatalog.RunExternalProcessFixture(args);
-        if (args.Length >= 1 && args[0] == "--lifecycle-writer-fixture") return UnitTestCatalog.RunLifecycleWriterFixture(args);
+        if (args.Length >= 1 && args[0] == "--fake-codex-fixture") return OrchestratorTestCatalog.RunFakeCodexFixture(args);
+        if (args.Length >= 1 && args[0] == "--external-process-fixture") return OrchestratorTestCatalog.RunExternalProcessFixture(args);
+        if (args.Length >= 1 && args[0] == "--lifecycle-writer-fixture") return OrchestratorTestCatalog.RunLifecycleWriterFixture(args);
         if (args.Length == 1 && args[0] == "--mcp-cli-adapter-fixture")
         {
-            var tests = new Ateliers.Ai.Orchestrator.UnitTests.McpCliAdapterTests();
+            var tests = new Ateliers.Ai.Orchestrator.FakeTests.McpCliAdapterTests();
             tests.Adapter_passes_contract_to_cli_stdin_and_returns_cli_json().GetAwaiter().GetResult();
             tests.Adapter_forwards_contract_schema_and_guide_from_installed_cli().GetAwaiter().GetResult();
             tests.Adapter_returns_structured_error_when_cli_is_missing().GetAwaiter().GetResult();
@@ -28,26 +28,26 @@ internal static class FixtureHost
             tests.Runtime_diagnostics_identify_a_non_absolute_explicit_cli_path();
             tests.Runtime_diagnostics_report_json_parse_location_without_manifest_contents().GetAwaiter().GetResult();
             tests.Runtime_diagnostics_does_not_parse_an_oversized_manifest().GetAwaiter().GetResult();
-            UnitTestCatalog.RunUnitTest("npm codex.cmdとcodex.ps1 shimで日本語プロンプトを渡す");
+            OrchestratorTestCatalog.RunFakeTest("npm codex.cmdとcodex.ps1 shimで日本語プロンプトを渡す");
             Console.WriteLine("MCP-to-CLI fixture passed.");
             return 0;
         }
         if (args.Length == 1 && args[0] == "--stdio-json-cli-fixture")
         {
-            var tests = new Ateliers.Ai.Orchestrator.UnitTests.StdioJsonCliTests();
+            var tests = new Ateliers.Ai.Orchestrator.FakeTests.StdioJsonCliTests();
             tests.Cli_publishes_contract_schema_guide_and_capability_flags().GetAwaiter().GetResult();
             tests.Run_stdin_json_writes_a_single_structured_success_response().GetAwaiter().GetResult();
             tests.Run_stdin_json_reports_invalid_contract_as_json_and_exit_two().GetAwaiter().GetResult();
             Console.WriteLine("CLI stdin JSON fixtures passed.");
             return 0;
         }
-        if (args.Length == 1 && args[0] == "--run-unit-cases-direct")
+        if (args.Length == 1 && args[0] == "--run-fake-cases-direct")
         {
-            var names = UnitTestCatalog.UnitTestCases.Select(testCase => (string)testCase[0]).ToArray();
+            var names = OrchestratorTestCatalog.FakeTestCases.Select(testCase => (string)testCase[0]).ToArray();
             var skipped = 0;
             foreach (var name in names)
             {
-                try { UnitTestCatalog.RunUnitTest(name); }
+                try { OrchestratorTestCatalog.RunFakeTest(name); }
                 catch (Xunit.Sdk.SkipException) { skipped++; }
                 catch (Exception exception)
                 {
@@ -55,14 +55,48 @@ internal static class FixtureHost
                     return 1;
                 }
             }
-            Console.WriteLine($"Existing Fake-only unit cases passed: {names.Length - skipped}; skipped: {skipped}.");
+            try
+            {
+                var cleanupTests = new Ateliers.Ai.Orchestrator.FakeTests.IsolatedFixtureCleanupFakeTests();
+                var localCleanupCases = new Action[]
+                {
+                    () => cleanupTests.Cleanup_removes_a_read_only_git_object().GetAwaiter().GetResult(),
+                    cleanupTests.Cleanup_rejects_a_reparse_point_ancestor,
+                    cleanupTests.Cleanup_removes_a_child_junction_without_following_it
+                };
+                foreach (var localCleanupCase in localCleanupCases)
+                {
+                    try { localCleanupCase(); }
+                    catch (Xunit.Sdk.SkipException) { skipped++; }
+                }
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine($"Unit case failed: isolated Git fixture cleanup: {exception}");
+                return 1;
+            }
+            Console.WriteLine($"Existing FakeTests passed: {names.Length + 3 - skipped}; skipped: {skipped}.");
             return 0;
+        }
+        if (args.Length == 2 && args[0] == "--run-fake-case-direct")
+        {
+            try
+            {
+                OrchestratorTestCatalog.RunFakeTest(args[1]);
+                Console.WriteLine($"Fake case passed: {args[1]}");
+                return 0;
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine($"Fake case failed: {args[1]}: {exception}");
+                return 1;
+            }
         }
         return 0;
     }
 }
 
-internal static class UnitTestCatalog
+public static class OrchestratorTestCatalog
 {
     private static string FixtureHostPath
     {
@@ -76,7 +110,7 @@ internal static class UnitTestCatalog
                 : throw new FileNotFoundException("UnitTests apphost が見つかりません。", fixtureHostPath);
         }
     }
-    private static string FixtureAssemblyPath => typeof(UnitTestCatalog).Assembly.Location;
+    private static string FixtureAssemblyPath => typeof(OrchestratorTestCatalog).Assembly.Location;
 
     private static string[] FixtureArguments(params string[] arguments) => arguments;
 
@@ -87,10 +121,9 @@ internal static class UnitTestCatalog
         return start;
     }
 
-    public static IEnumerable<object[]> UnitTestCases => GetTestCases(AddUnitTests);
-    public static IEnumerable<object[]> GitIntegrationTestCases => GetTestCases(AddGitIntegrationTests);
-    public static void RunUnitTest(string name) => RunTest(AddUnitTests, name);
-    public static void RunGitIntegrationTest(string name) => RunTest(AddGitIntegrationTests, name);
+    public static IEnumerable<object[]> FakeTestCases => GetTestCases(AddAllFakeTests);
+    public static void RunGitFakeTest(string name) => RunTest(AddGitFakeTests, name);
+    public static void RunFakeTest(string name) => RunTest(AddAllFakeTests, name);
     public static void RunUnixOnlyTest(string name) => RunTest(AddUnixOnlyTests, name);
 
     public static int RunFakeCodexFixture(string[] args) => FakeCodexFixture(args);
@@ -113,14 +146,23 @@ internal static class UnitTestCatalog
         catch (TestSkippedException exception) { throw Xunit.Sdk.SkipException.ForSkip(exception.Message); }
     }
 
-static void AddGitIntegrationTests(TestSuite suite)
+static void AddAllFakeTests(TestSuite suite)
 {
-    // These tests use real, isolated Git repositories and linked worktrees. They do not call GitHub or a real Codex CLI.
-    suite.Add("linked worktreeのconfig・clean/dirty判定を実Gitで確認する", PublisherChecksRealLinkedWorktreeConfigAndCleanliness);
-    suite.Add("linked worktree内の子プロセス生成差分をsnapshotへ固定する", CodexChildChangesAreSnapshottedFromLinkedWorktree);
+    AddFakeTests(suite);
+    AddGitFakeTests(suite);
 }
 
-static void AddUnitTests(TestSuite suite)
+static void AddGitFakeTests(TestSuite suite)
+{
+    // These tests use the local Git CLI and isolated repositories only; they do not connect to an external system.
+    suite.Add("linked worktreeのconfig・clean/dirty判定を実Gitで確認する", PublisherChecksRealLinkedWorktreeConfigAndCleanliness);
+    suite.Add("linked worktree内の子プロセス生成差分をsnapshotへ固定する", CodexChildChangesAreSnapshottedFromLinkedWorktree);
+    suite.Add("既定の管理ログはGit作業領域外へ保存されFake Codexのclean-checkを通過する", DefaultRunDataDoesNotDirtyGitWorkspace);
+    suite.Add("Codexのdirty clean-check診断は段階・コマンド・安全な差分パスを記録し起動を止める", CodexDirtyWorkspaceDiagnosticIsSafeAndStopsBeforeLaunch);
+    suite.Add("Git statusのrename診断はsource記録を重複計上せずdestinationを示す", CodexDirtyRenameWorkspaceDiagnosticUsesDestinationPath);
+}
+
+static void AddFakeTests(TestSuite suite)
 {
     // CI invokes this explicit Fake/fixture-only set. External-service and Docker tests do not belong here.
     suite.Add("テスト集の件数・ログ・終了コードがPass/Fail/未検証で一致する", TestSuiteOutcomeContractIsConsistent);
@@ -1991,6 +2033,9 @@ static void CodexFakeProcessesCompleteIndependentReviewSlice()
         var firstReviewRequest = File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "request.json"));
         Assert.True(firstReviewRequest.Contains(result.ArtifactSha256!, StringComparison.Ordinal), "レビュー要求に固定成果物ハッシュがありません。");
         Assert.False(firstReviewRequest.Contains("自己評価", StringComparison.Ordinal));
+        using (var requestDocument = JsonDocument.Parse(firstReviewRequest))
+            Assert.Equal("exchanges/implementer-1/validation/validation-evidence.json",
+                requestDocument.RootElement.GetProperty("validationEvidenceReference").GetString());
         var firstReviewEvidence = JsonDocument.Parse(File.ReadAllText(Path.Combine(request.RunDirectory!, "exchanges", "reviewer-1", "execution-evidence.json")));
         Assert.Equal("thread-fixture-reviewer-1", firstReviewEvidence.RootElement.GetProperty("ThreadId").GetString());
         Assert.Equal(result.ArtifactSha256, firstReviewEvidence.RootElement.GetProperty("ArtifactSha256").GetString());
@@ -2431,6 +2476,143 @@ static void LifecycleEventsArePersistedSafely()
     Assert.True(allLines.Any(line => line.Contains("\"runId\":\"lifecycle-failed\"", StringComparison.Ordinal) &&
         line.Contains("\"role\":\"Implementer\"", StringComparison.Ordinal) && line.Contains("\"eventType\":\"failed\"", StringComparison.Ordinal)),
         "失敗したImplementerのライフサイクルイベントがありません。");
+}
+
+static void DefaultRunDataDoesNotDirtyGitWorkspace()
+{
+    using var temp = new TemporaryDirectory();
+    var workspace = Path.Combine(temp.Path, "repository");
+    var dataDirectory = Path.Combine(temp.Path, "user-data");
+    temp.AdditionalPath = workspace;
+    Directory.CreateDirectory(workspace);
+    File.WriteAllText(Path.Combine(workspace, "baseline.txt"), "baseline\n");
+    RunGitFixture(workspace, "init", "--quiet");
+    RunGitFixture(workspace, "add", "baseline.txt");
+    RunGitFixture(workspace, "-c", "user.name=Orchestrator Test", "-c", "user.email=orchestrator-test@example.invalid", "commit", "-qm", "baseline");
+
+    var contractPath = Path.Combine(temp.Path, "contract.json");
+    var contract = SampleContract() with { WorkingDirectory = workspace };
+    File.WriteAllText(contractPath, JsonSerializer.Serialize(contract,
+        new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+
+    var productionDataDirectory = OrchestratorCli.GetDefaultDataDirectory(dataDirectory);
+    var expectedProductionDataDirectory = Path.Combine(dataDirectory, "Ateliers", "Orchestrator");
+    Assert.Equal(Path.GetFullPath(expectedProductionDataDirectory), Path.GetFullPath(productionDataDirectory),
+        "本番の既定データ保存先がユーザー用アプリケーションデータ領域から外れています。");
+    var startOutput = new StringWriter();
+    var originalStartOutput = Console.Out;
+    var originalDirectoryForStart = Environment.CurrentDirectory;
+    string? createdStartDirectory = null;
+    try
+    {
+        Environment.CurrentDirectory = workspace;
+        Console.SetOut(startOutput);
+        var startExitCode = OrchestratorCli.RunAsync(["start", contractPath], dataDirectory).GetAwaiter().GetResult();
+        Assert.Equal(0, startExitCode, startOutput.ToString());
+        var recordedPath = startOutput.ToString().Split(Environment.NewLine)
+            .First(line => line.StartsWith("記録先: ", StringComparison.Ordinal))["記録先: ".Length..];
+        createdStartDirectory = Path.GetFullPath(recordedPath);
+        var expectedRunsRoot = Path.GetFullPath(Path.Combine(productionDataDirectory, "runs")) + Path.DirectorySeparatorChar;
+        Assert.True(createdStartDirectory.StartsWith(expectedRunsRoot,
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal),
+            "startの既定保存先がユーザーデータ領域のruns配下ではありません。");
+        Assert.Equal(string.Empty, RunGitFixture(workspace, "status", "--porcelain", "--untracked-files=all"),
+            "startの既定記録がGit作業領域をdirtyにしました。");
+    }
+    finally
+    {
+        Console.SetOut(originalStartOutput);
+        Environment.CurrentDirectory = originalDirectoryForStart;
+        if (createdStartDirectory is not null && Directory.Exists(createdStartDirectory))
+        {
+            var expectedRunsRoot = Path.GetFullPath(Path.Combine(productionDataDirectory, "runs")) + Path.DirectorySeparatorChar;
+            if (createdStartDirectory.StartsWith(expectedRunsRoot,
+                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                Directory.Delete(createdStartDirectory, recursive: true);
+        }
+    }
+
+    var originalDirectory = Environment.CurrentDirectory;
+    var previousOutput = Console.Out;
+    var previousError = Console.Error;
+    using var output = new StringWriter();
+    using var error = new StringWriter();
+    try
+    {
+        Environment.CurrentDirectory = workspace;
+        Console.SetOut(output);
+        Console.SetError(error);
+        var exitCode = OrchestratorCli.RunAsync(["run", contractPath, "--slack-notifications", "disabled"], dataDirectory)
+            .GetAwaiter().GetResult();
+        Assert.Equal(0, exitCode, error.ToString());
+    }
+    finally
+    {
+        Console.SetOut(previousOutput);
+        Console.SetError(previousError);
+        Environment.CurrentDirectory = originalDirectory;
+    }
+
+    var runsDirectory = Path.Combine(productionDataDirectory, "runs");
+    var lifecyclePath = Path.Combine(productionDataDirectory, "lifecycle.jsonl");
+    Assert.True(Directory.GetFiles(runsDirectory, "events.jsonl", SearchOption.AllDirectories).Length == 1,
+        "既定の実行記録がユーザーデータ領域に作成されませんでした。");
+    Assert.True(File.Exists(lifecyclePath), "既定のライフサイクルログがユーザーデータ領域に作成されませんでした。");
+    Assert.Equal(string.Empty, RunGitFixture(workspace, "status", "--porcelain", "--untracked-files=all"),
+        "Orchestratorの既定記録がGit作業領域をdirtyにしました。");
+
+    // Keep the clean-check and child-process boundary in the same deterministic test without a real Codex connection.
+    var runDirectory = Path.Combine(runsDirectory, "fake-codex-boundary");
+    Directory.CreateDirectory(runDirectory);
+    var profile = Path.Combine(temp.Path, "codex-profile");
+    Directory.CreateDirectory(profile);
+    var runner = new CodexCliAgentRunner(new CodexCliRunnerOptions(FixtureHostPath, profile, profile,
+        FixtureArguments("--fake-codex-fixture", "success")));
+    var response = runner.Implement(new AgentRequest("default-log-clean-check", "Implementer", contract, 1,
+        RunDirectory: runDirectory, RemainingTime: TimeSpan.FromSeconds(5)));
+    Assert.True(response.Succeeded, response.ExecutionEvidence?.Error ?? "Fake Codex子プロセスがclean-check後に完了しませんでした。");
+    Assert.True(File.Exists(Path.Combine(workspace, "example.txt")), "Fake Codex子プロセスがclean-check後に起動しませんでした。");
+}
+
+static void CodexDirtyWorkspaceDiagnosticIsSafeAndStopsBeforeLaunch()
+{
+    var (runner, request, root) = CreateCodexFixture("success");
+    using (root)
+    {
+        var generatedDirectory = Path.Combine(request.Contract.WorkingDirectory, ".ateliers-orchestrator");
+        Directory.CreateDirectory(generatedDirectory);
+        File.WriteAllText(Path.Combine(request.Contract.WorkingDirectory, ".ateliers-orchestrator", "lifecycle.jsonl"), "fixture secret content");
+        File.WriteAllText(Path.Combine(request.Contract.WorkingDirectory, ".env"), "token=fixture-secret");
+        File.WriteAllText(Path.Combine(request.Contract.WorkingDirectory, "password.txt"), "fixture password content");
+
+        var response = runner.Implement(request);
+        Assert.False(response.Succeeded, "dirty checkoutからFake Codexを起動しました。");
+        Assert.True(response.Content.Contains("stage=pre-agent-clean-check", StringComparison.Ordinal), response.Content);
+        Assert.True(response.Content.Contains("git status --porcelain=v1 -z --untracked-files=all", StringComparison.Ordinal), response.Content);
+        Assert.True(response.Content.Contains("exitCode=0", StringComparison.Ordinal), response.Content);
+        Assert.True(response.Content.Contains(".ateliers-orchestrator/lifecycle.jsonl", StringComparison.Ordinal), response.Content);
+        Assert.True(response.Content.Contains("<redacted-path:", StringComparison.Ordinal), response.Content);
+        Assert.False(response.Content.Contains("fixture secret content", StringComparison.Ordinal));
+        Assert.False(response.Content.Contains("fixture-secret", StringComparison.Ordinal));
+        Assert.False(response.Content.Contains("password.txt", StringComparison.Ordinal));
+        Assert.False(response.Content.Contains("fixture password content", StringComparison.Ordinal));
+        Assert.Equal("baseline\n", File.ReadAllText(Path.Combine(request.Contract.WorkingDirectory, "example.txt")),
+            "clean-check停止前にFake Codex子プロセスがworkspaceを変更しました。");
+    }
+}
+
+static void CodexDirtyRenameWorkspaceDiagnosticUsesDestinationPath()
+{
+    var (runner, request, root) = CreateCodexFixture("success");
+    using (root)
+    {
+        RunGitFixture(request.Contract.WorkingDirectory, "mv", "example.txt", "renamed.txt");
+        var response = runner.Implement(request);
+        Assert.False(response.Succeeded, "staged renameのあるcheckoutからFake Codexを起動しました。");
+        Assert.True(response.Content.Contains("dirtyCount=1", StringComparison.Ordinal), response.Content);
+        Assert.True(response.Content.Contains("R  renamed.txt", StringComparison.Ordinal), response.Content);
+        Assert.False(response.Content.Contains("example.txt", StringComparison.Ordinal), response.Content);
+    }
 }
 
 static void LifecycleWriteFailureDoesNotHideWorkflowResult()

@@ -3,7 +3,7 @@ using System.Text.Json;
 using Ateliers.Slack;
 using Xunit;
 
-namespace Ateliers.Slack.UnitTests;
+namespace Ateliers.Slack.FakeTests;
 
 public sealed class SlackLifecycleNotificationDispatcherTests
 {

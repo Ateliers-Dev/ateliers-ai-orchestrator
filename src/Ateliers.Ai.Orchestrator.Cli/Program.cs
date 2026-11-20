@@ -24,8 +24,12 @@ internal static class OrchestratorCli
     /// <summary>引数を解析し、要求されたCLI操作を実行します。</summary>
     /// <param name="args">コマンド名とその引数です。</param>
     /// <returns>成功時は0、入力不備は2、実行記録の失敗は3です。</returns>
-    public static async Task<int> RunAsync(string[] args)
+    public static Task<int> RunAsync(string[] args) => RunAsync(args, localApplicationDataRootOverride: null);
+
+    /// <summary>OSのユーザーデータ領域のルートを差し替えてCLIを実行します（決定論的テスト用）。</summary>
+    internal static async Task<int> RunAsync(string[] args, string? localApplicationDataRootOverride)
     {
+        var defaultDataDirectory = Path.GetFullPath(GetDefaultDataDirectory(localApplicationDataRootOverride));
         var structuredRun = args.Length >= 2 && args[0] == "run" && args[1] == "--stdin-json";
         if (args.Length == 1 && (args[0] is "--version" or "version"))
         {
@@ -129,7 +133,7 @@ internal static class OrchestratorCli
 
         if (args[0] == "run")
         {
-            if (!TryParseRunOptions(args, structuredRun, contract.WorkingDirectory, out var scenario, out var runRoot, out var lifecycleLogPath, out var evidencePath, out var agentKind,
+            if (!TryParseRunOptions(args, defaultDataDirectory, out var scenario, out var runRoot, out var lifecycleLogPath, out var evidencePath, out var agentKind,
                 out var codexOptions, out var notificationsDisabled, out var useSlackTestChannel, out var slackConfigurationPath,
                 out var slackSecretsPath, out var optionError))
             {
@@ -227,7 +231,7 @@ internal static class OrchestratorCli
         }
 
         string runsDirectory;
-        if (!TryGetRunsDirectory(args, out runsDirectory, out var runsPathError))
+        if (!TryGetRunsDirectory(args, defaultDataDirectory, out runsDirectory, out var runsPathError))
         {
             Console.Error.WriteLine(runsPathError);
             PrintUsage(Console.Error, "start");
@@ -310,15 +314,24 @@ internal static class OrchestratorCli
     /// <param name="runsDirectory">実行記録の保存先となる絶対パスです。</param>
     /// <param name="error">引数またはパスが不正な場合の説明です。</param>
     /// <returns>引数とパスを使用できる場合はtrueです。</returns>
-    private static bool TryGetRunsDirectory(string[] args, out string runsDirectory, out string error)
+    private static bool TryGetRunsDirectory(string[] args, string defaultDataDirectory, out string runsDirectory, out string error)
     {
         if (args.Length == 2)
-            return TryResolveFullPath(Path.Combine(".ateliers-orchestrator", "runs"), "実行記録先", out runsDirectory, out error);
+            return TryResolveFullPath(Path.Combine(defaultDataDirectory, "runs"), "実行記録先", out runsDirectory, out error);
         if (args.Length == 4 && args[2] == "--runs")
             return TryResolveFullPath(args[3], "--runs", out runsDirectory, out error);
         runsDirectory = string.Empty;
         error = "start の任意引数は --runs <ディレクトリ> です。";
         return false;
+    }
+
+    internal static string GetDefaultDataDirectory(string? localApplicationDataRootOverride = null)
+    {
+        var localDataDirectory = localApplicationDataRootOverride ??
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(localDataDirectory))
+            throw new InvalidOperationException("ユーザーデータ保存先を解決できません。");
+        return Path.Combine(localDataDirectory, "Ateliers", "Orchestrator");
     }
 
     /// <summary>Fake実行のシナリオと保存先、外部証跡入力を解析します。</summary>
@@ -328,15 +341,14 @@ internal static class OrchestratorCli
     /// <param name="evidencePath">指定された人間確認証跡ファイルです。</param>
     /// <param name="error">解析失敗時の説明です。</param>
     /// <returns>すべての引数が認識できた場合はtrueです。</returns>
-    private static bool TryParseRunOptions(string[] args, bool structuredRun, string workingDirectory, out FakeScenario scenario, out string runsDirectory,
+    private static bool TryParseRunOptions(string[] args, string defaultDataDirectory, out FakeScenario scenario, out string runsDirectory,
         out string lifecycleLogPath, out string? evidencePath, out string agentKind, out CodexCliRunnerOptions? codexOptions,
         out bool notificationsDisabled, out bool useSlackTestChannel, out string? slackConfigurationPath,
         out string? slackSecretsPath, out string error)
     {
         scenario = FakeScenario.Success;
-        var runBaseDirectory = structuredRun ? workingDirectory : Environment.CurrentDirectory;
-        runsDirectory = Path.GetFullPath(Path.Combine(runBaseDirectory, ".ateliers-orchestrator", "runs"));
-        lifecycleLogPath = Path.GetFullPath(Path.Combine(runBaseDirectory, ".ateliers-orchestrator", "lifecycle.jsonl"));
+        runsDirectory = Path.GetFullPath(Path.Combine(defaultDataDirectory, "runs"));
+        lifecycleLogPath = Path.GetFullPath(Path.Combine(defaultDataDirectory, "lifecycle.jsonl"));
         evidencePath = null;
         agentKind = "fake";
         codexOptions = null;

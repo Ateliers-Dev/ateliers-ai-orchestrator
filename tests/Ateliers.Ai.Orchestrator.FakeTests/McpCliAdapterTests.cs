@@ -2,12 +2,12 @@ using System.Diagnostics;
 using System.Text.Json;
 using Xunit;
 
-namespace Ateliers.Ai.Orchestrator.UnitTests;
+namespace Ateliers.Ai.Orchestrator.FakeTests;
 
 public sealed class McpCliAdapterTests
 {
     [Fact]
-    [Trait("Category", "Unit")]
+    [Trait("Category", "Fake")]
     public void Adapter_requires_the_requested_capability_to_be_true_for_the_installed_cli_version()
     {
         using var missing = JsonDocument.Parse("""{"cliVersion":"1.2.3","protocolVersion":1,"commands":{}}""");
@@ -24,7 +24,7 @@ public sealed class McpCliAdapterTests
     }
 
     [Fact]
-    [Trait("Category", "Unit")]
+    [Trait("Category", "Fake")]
     public async Task Adapter_rejects_multibyte_cli_output_over_64_KiB()
     {
         const int maxBytes = 64 * 1024;
@@ -42,7 +42,7 @@ public sealed class McpCliAdapterTests
     }
 
     [Fact]
-    [Trait("Category", "Unit")]
+    [Trait("Category", "Fake")]
     public async Task Adapter_starts_npm_cmd_codex_shim_and_returns_structured_result_on_windows()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -100,7 +100,7 @@ public sealed class McpCliAdapterTests
     }
 
     [Fact]
-    [Trait("Category", "Unit")]
+    [Trait("Category", "Fake")]
     public async Task Adapter_passes_contract_to_cli_stdin_and_returns_cli_json()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -145,7 +145,7 @@ public sealed class McpCliAdapterTests
     }
 
     [Fact]
-    [Trait("Category", "Unit")]
+    [Trait("Category", "Fake")]
     public async Task Adapter_forwards_contract_schema_and_guide_from_installed_cli()
     {
         Adapter_requires_the_requested_capability_to_be_true_for_the_installed_cli_version();
@@ -190,7 +190,7 @@ public sealed class McpCliAdapterTests
     }
 
     [Fact]
-    [Trait("Category", "Unit")]
+    [Trait("Category", "Fake")]
     public async Task Adapter_returns_structured_error_when_cli_is_missing()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -212,7 +212,7 @@ public sealed class McpCliAdapterTests
     }
 
     [Fact]
-    [Trait("Category", "Unit")]
+    [Trait("Category", "Fake")]
     public async Task Adapter_reports_an_invalid_explicit_cli_path_without_falling_back_to_localappdata()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -239,7 +239,7 @@ public sealed class McpCliAdapterTests
     }
 
     [Fact]
-    [Trait("Category", "Unit")]
+    [Trait("Category", "Fake")]
     public async Task Runtime_diagnostics_report_fixed_paths_and_manifest_values_without_starting_the_cli()
     {
         var root = Path.Combine(Path.GetTempPath(), "ateliers-mcp-diagnostics-test-" + Guid.NewGuid().ToString("N"));
@@ -273,7 +273,7 @@ public sealed class McpCliAdapterTests
     }
 
     [Fact]
-    [Trait("Category", "Unit")]
+    [Trait("Category", "Fake")]
     public async Task Runtime_diagnostics_report_the_explicit_cli_path_and_accept_a_utf8_bom_manifest()
     {
         var root = Path.Combine(Path.GetTempPath(), "ateliers-mcp-explicit-diagnostics-test-" + Guid.NewGuid().ToString("N"));
@@ -303,7 +303,7 @@ public sealed class McpCliAdapterTests
     }
 
     [Fact]
-    [Trait("Category", "Unit")]
+    [Trait("Category", "Fake")]
     public void Runtime_diagnostics_identify_a_non_absolute_explicit_cli_path()
     {
         var response = CliExecutionService.CreateRuntimeDiagnostics("C:\\fixture", "relative\\cli.exe", null, null, null, null);
@@ -316,7 +316,7 @@ public sealed class McpCliAdapterTests
     }
 
     [Fact]
-    [Trait("Category", "Unit")]
+    [Trait("Category", "Fake")]
     public async Task Runtime_diagnostics_report_json_parse_location_without_manifest_contents()
     {
         var root = Path.Combine(Path.GetTempPath(), "ateliers-mcp-diagnostics-json-test-" + Guid.NewGuid().ToString("N"));
@@ -345,7 +345,7 @@ public sealed class McpCliAdapterTests
     }
 
     [Fact]
-    [Trait("Category", "Unit")]
+    [Trait("Category", "Fake")]
     public async Task Runtime_diagnostics_does_not_parse_an_oversized_manifest()
     {
         var root = Path.Combine(Path.GetTempPath(), "ateliers-mcp-diagnostics-large-test-" + Guid.NewGuid().ToString("N"));

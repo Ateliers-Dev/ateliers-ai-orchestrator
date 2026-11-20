@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Ateliers.Slack\Ateliers.Slack.csproj" />
+    <Compile Include="..\Ateliers.Slack.UnitTests\SlackBotSettingsLocator.cs" Link="SlackBotSettingsLocator.cs" />
   </ItemGroup>
 
 </Project>

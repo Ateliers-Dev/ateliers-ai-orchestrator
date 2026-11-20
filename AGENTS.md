@@ -1,7 +1,7 @@
 # AGENTS.md
 
 > 作成日: 2026-11-11
-> 更新日: 2026-11-19
+> 更新日: 2026-11-20
 > 作成者: yuu503
 
 このファイルは本リポジトリ固有の作業指示です。汎用的な作業手順は、適用される Skill に従ってください。
@@ -39,6 +39,15 @@ Milestone 1で委譲されたIssueの作業では、Issueの範囲と上位の�
 - 人間が要求・仕様・設計方針を判断し、AIは合意済み範囲の実装詳細を担当する。
 - 承認済み範囲から内容や方針が逸脱する場合は作業を止め、人間の判断を求める。
 - 内容・方針を扱うドキュメントも、委譲された範囲内ではコードと同じ独立レビュー・品質ゲート・マージフローに従う。承認済みの要求や設計方針から逸脱する場合は、従来どおり人間の判断を求める。
+
+### 作業プロセスの妥当性と改善責任
+
+- AIエージェントは合意済みの目的に向けて自律的に進めると同時に、要求・設計・検証方法・ワークフローの妥当性を確認し、問題を見つけたら指摘と改善提案を行う。
+- 軽微で安全に直せる問題は自律的に修正する。改善余地があるだけなら作業を続けながら記録する。
+- 検証の信頼性が損なわれる場合、重大な不確実性や方針の矛盾がある場合、または根拠不足で成功を証明できない場合は、問題を力技で通したり成功扱いにしたりせず、影響する作業を止めて判断を委譲する。独立して安全に進められる作業は継続してよい。
+- 停止・報告時は確認事実、仮説と未確認事項、影響、実施済み範囲、推奨する次の判断を記録する。原因が未確定なら未確定のまま明示し、原因と再発防止を追記する。
+- 適切な停止と報告は正常な作業成果として扱う。**問題を見つけて作業を止めたことも成果であり、原因を記録して次に起きにくくすることも成果である。** 作業の完遂より、妥当性・検証の信頼性・開発プロセスの成熟を優先する。
+- 詳細な判断基準と記録項目は[作業プロセスの妥当性と改善](docs/guidelines/work-process-validity-and-improvement.md)に従う。
 
 ### 承認済みE2EとSlack通知
 
@@ -113,18 +122,24 @@ Milestone 1で委譲されたIssueの作業では、Issueの範囲と上位の�
 ## 原因調査と品質保証
 
 - 原因調査と正式な品質保証を分ける。調査中はログ確認、小さな再現、局所的な診断など、原因を切り分けられる最小の検証を優先する。原因と修正方針が定まった後、PRで必要な品質保証を行う。
-- 通常のPRでは、既存の「テスト」節に定める単体テスト全件成功をマージ条件として維持する。フルE2Eは一律必須とせず、変更の影響範囲、Issueの受入条件、Milestone完了判定、リリース時など、必要性がある場合に実施する。Issueや上位の指示が特定の検証を要求する場合はそれに従う。
+- 通常のPRでは、既存の「テスト」節に定めるUnitTestsとFakeTestsの必須ゲート全件成功をマージ条件として維持する。フルE2Eと実外部接続IntegrationTestsは一律必須とせず、変更の影響範囲、Issueの受入条件、Milestone完了判定、リリース時など、必要性がある場合に実施する。Issueや上位の指示が特定の検証を要求する場合はそれに従う。
 - 同種の失敗が3回続いた場合は、次の再試行前に、それまでに得た情報、原因仮説、より小さい代替検証方法を見直す。3回という回数だけを理由に自動的に人間承認を求めず、エージェントが次の調査・検証方法を判断する。
 - これらの原則は、既存の独立レビュー、PRコメントによるレビュー・修正・承認の証跡、品質ゲート、停止条件を変更または緩和しない。
 
 ## テスト
 
+- テストの種別と合否条件は [テスト種別と責務](docs/reference/testing-classification.md) に従う。**マイルストーンの完遂より、Ateliers 開発プロセスの成熟を優先します。** テストを通すだけでなく、原因・判断・再発防止を記録する。
+- `UnitTests` は内部ロジック、`FakeTests` はFakeを使う決定論的なコンポーネント間受け渡し・状態遷移・異常系・証跡検証、`IntegrationTests` は実外部システムとの接続・通信・実行完了を検証する。外部プロセスや外部サービスとの実接続がないローカル決定論テストをIntegrationTestsへ置かない。
+- 実AI IntegrationTestでは、応答の到達や呼び出し完了など接続に必要な最小限を確認する。自然言語、判断の正しさ、モデル指示追従・回答品質を合否条件にせず、Fakeで検証できるプログラム上の挙動を重複して検証しない。性能評価は別責務とする。
+- テストが複数の責務を混在させる場合は、プロジェクト名だけで分類済みとせず、境界に合わせてテストを分割し、各プロジェクトとCIの実行方法を一致させる。
+- Git CLIと隔離fixtureだけを使い、GitHub・実Codex・Slackへ接続しない再現テストは `FakeTests` に分類する。Git安全性の振る舞いを変更・移動・削除するときは、[Git安全性の回帰対策](docs/reference/git-safety-regressions.md)の原因・保証・必須回帰テスト対応表を更新し、対応するFakeTestsをCI必須経路に残す。テスト分類の整理でも、対応表の保証を落とさない。
+
 - システムに影響しない文書のみの修正では、テストは実施しなくてよい。
 - テストの対象プロジェクト、起動方法、事前の restore/build は `.github/workflows/` の該当する GitHub Actions 定義を確認し、それに合わせる。
-- 単体テストが存在するプロジェクトでは、PR上で単体テストが全件成功していることをマージ条件とする。単体テストが存在しないプロジェクトには適用しない。
-- 単体テストが存在するのに未実行、または結果を確認できない場合は成功とみなさない。
+- `UnitTests` と `FakeTests` は通常PRの必須品質ゲートとする。該当プロジェクトに属するテストをすべて実行し、全件成功を確認する。どちらか一方だけの成功ではマージ条件を満たさない。
+- `UnitTests` または `FakeTests` が存在するのに未実行、または結果を確認できない場合は成功とみなさない。変更に関係する実外部接続 `IntegrationTests` は、Issue・受入条件・変更リスクが要求するときに別途実施し、通常のUnit/Fake必須ゲートの代替にはしない。
 
-### Fake-only Unit tests（xUnit）
+### UnitTests・FakeTests・IntegrationTests（xUnit）
 
 - CI と同じテストをローカルで実行する場合は、まずリポジトリルートで次の restore と Release build を行う。
 
@@ -133,14 +148,18 @@ Milestone 1で委譲されたIssueの作業では、Issueの範囲と上位の�
   dotnet build Ateliers.Ai.Orchestrator.sln --configuration Release --no-restore
   ```
 
-- Fake-only Unit tests の標準起動コマンドは次のとおり。対象プロジェクトは `tests/Ateliers.Ai.Orchestrator.UnitTests/Ateliers.Ai.Orchestrator.UnitTests.csproj`。
+- UnitTests と FakeTests は分類別のプロジェクトから実行する。CIと同じRelease build後に次を使う。
 
   ```powershell
-  dotnet test tests/Ateliers.Ai.Orchestrator.UnitTests/Ateliers.Ai.Orchestrator.UnitTests.csproj --configuration Release --no-build --no-restore --filter Category=Unit
+  dotnet test tests/Ateliers.Ai.Orchestrator.UnitTests/Ateliers.Ai.Orchestrator.UnitTests.csproj --configuration Release --no-build --no-restore
+  dotnet test tests/Ateliers.Ai.Orchestrator.FakeTests/Ateliers.Ai.Orchestrator.FakeTests.csproj --configuration Release --no-build --no-restore --filter Category=Fake
+  dotnet test tests/Ateliers.Ai.Orchestrator.IntegrationTests/Ateliers.Ai.Orchestrator.IntegrationTests.csproj --configuration Release --no-build --no-restore --filter Category=Integration
+  dotnet test tests/Ateliers.Slack.UnitTests/Ateliers.Slack.UnitTests.csproj --configuration Release --no-build --no-restore
+  dotnet test tests/Ateliers.Slack.FakeTests/Ateliers.Slack.FakeTests.csproj --configuration Release --no-build --no-restore
   ```
 
-- GitHub Actions は同じ Unit カテゴリだけを実行し、`Integration` カテゴリとCodex連携用IntegrationTestsプロジェクトは実行しない。
-- WindowsではUnix modeに依存する所定のテストがxUnitのSkipとして表示される。失敗とSkipを分けて報告する。
+- Unit/FakeのGitHub Actionsでは実Codex・Slackサービスへの接続を行わない。
+- WindowsではUnix modeに依存する所定のFakeTestsがxUnitのSkipとして表示される。失敗とSkipを分けて報告する。
 - 他のテストプロジェクトやテスト種別には、このコマンドを流用せず、該当する CI 定義を確認する。
 
 ### Testbed・IntegrationTest・最終受入E2Eの責務
@@ -149,7 +168,7 @@ Milestone 1で委譲されたIssueの作業では、Issueの範囲と上位の�
 - このスクリプトはソースからRelease構成のCLIをbuildして直接起動します。インストール済みCLIやMCPの導入・接続確認は別の受入対象です。
 - TestbedはE2E専用ではありません。IntegrationTestではTestbedのシナリオ・教材をローカルの隔離Git fixtureに再利用し、検証後に外部GitHubへpushしません。
 - 開発用の実Codex IntegrationTestは専用の `Ateliers.Ai.Orchestrator.IntegrationTests` プロジェクトでのみ明示opt-inして実行します。実Codex CLI認証とモデル利用枠/費用が必要です。Codexが未起動、証跡不足、またはReviewerが未確認の場合は未検証として扱い、最終受入E2Eで代替しません。
-- Issue #79の実Codex IntegrationTestでは、ImplementerのRelease buildと教材チェックのコマンド・自己申告終了コード・ログ参照をReviewerへ渡し、実在するログ内容とReviewer判定を確認します。CI Fake/契約テストはこの実Codex検証を代替しません。
+- Issue #79の実Codex IntegrationTestでは、実Codexの起動・通信・応答到達・終了だけを確認します。証跡の保存・Reviewerへの入力・状態遷移はFakeTestsで確認し、実Codexの自由記述や判定品質を合否条件にしません。
 - Slack通知は、Unit/FakeではFakeを使い、Slack実APIを検証対象とする場合だけ独立した明示opt-inのSlack IntegrationTestで送信します。Issue #79の開発用実Codex IntegrationTestは通知OFFを今回の承認済みシナリオとして実行します。別の実行でSlackがON指定されている場合にワーカーが独断でOFFへ変更してはいけません。
 - Slack API送信成功の確認と、Slack画面上で人間が到達・見え方を確認することは別の受入条件です。画面確認はユーザーが最終受入で行います。
 

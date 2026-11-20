@@ -2,129 +2,28 @@ using Microsoft.Win32.SafeHandles;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Ateliers.Slack;
 using Xunit;
 using Xunit.Sdk;
+using Ateliers.Ai.Orchestrator.TestFixtures;
 
 namespace Ateliers.Ai.Orchestrator.IntegrationTests;
 
+[Trait("Category", "Integration")]
 public sealed class CodexIntegrationTests
 {
     private const string OptInVariable = "ATELIERS_RUN_CODEX_INTEGRATION_TESTS";
     private const string CodexPathVariable = "ATELIERS_CODEX_CLI_PATH";
-    private const string SlackOptInVariable = "ATELIERS_RUN_SLACK_INTEGRATION_TESTS";
-
-    [Fact]
-    public async Task IsolatedFixture_DisposeRemovesReadOnlyGitObject()
-    {
-        var fixture = new IsolatedFixture();
-        fixture.CreateSeedRepository();
-
-        var objectId = (await RunGitAsync(fixture.RepositoryDirectory, "rev-parse", "HEAD")).Trim();
-        var gitObjectPath = Path.Combine(fixture.RepositoryDirectory, ".git", "objects", objectId[..2], objectId[2..]);
-        Assert.True(File.Exists(gitObjectPath), "seed commitのGit objectが見つかりません。");
-        File.SetAttributes(gitObjectPath, File.GetAttributes(gitObjectPath) | FileAttributes.ReadOnly);
-
-        fixture.Dispose();
-
-        Assert.False(Directory.Exists(fixture.RootDirectory), "ReadOnly Git objectを含むfixtureが残っています。");
-    }
-
-    [Fact]
-    public void IsolatedFixture_DisposeRejectsReparsePointAncestor()
-    {
-        var token = Guid.NewGuid().ToString("N");
-        var outsideDirectory = Path.Combine(Path.GetTempPath(), $"ateliers-codex-outside-{token}");
-        var linkedParent = Path.Combine(Path.GetTempPath(), $"ateliers-codex-fixture-link-{token}");
-        var fixture = new IsolatedFixture(linkedParent);
-        Directory.CreateDirectory(outsideDirectory);
-        var sentinelPath = Path.Combine(outsideDirectory, "keep.txt");
-        File.WriteAllText(sentinelPath, "outside fixture");
-
-        try
-        {
-            CreateDirectoryLink(linkedParent, outsideDirectory);
-            fixture.CreateSeedRepository();
-
-            var exception = Assert.Throws<IOException>(() => fixture.Dispose());
-
-            Assert.Contains("reparse", exception.Message, StringComparison.OrdinalIgnoreCase);
-            Assert.True(File.Exists(sentinelPath), "ancestor junctionのリンク先をcleanupが変更しました。");
-            Assert.True(Directory.Exists(fixture.RepositoryDirectory), "リンク先にfixtureデータが残っていません。");
-        }
-        finally
-        {
-            if (Directory.Exists(linkedParent)) Directory.Delete(linkedParent, recursive: false);
-            if (Directory.Exists(outsideDirectory))
-            {
-                var outsideFixture = new IsolatedFixture(outsideDirectory, Path.GetFileName(fixture.RootDirectory));
-                outsideFixture.Dispose();
-                File.Delete(sentinelPath);
-                Directory.Delete(outsideDirectory, recursive: false);
-            }
-        }
-    }
-
-    [Fact]
-    public void IsolatedFixture_DisposeRemovesChildJunctionWithoutFollowingIt()
-    {
-        var token = Guid.NewGuid().ToString("N");
-        var outsideDirectory = Path.Combine(Path.GetTempPath(), $"ateliers-codex-outside-{token}");
-        var fixture = new IsolatedFixture();
-        Directory.CreateDirectory(outsideDirectory);
-        var sentinelPath = Path.Combine(outsideDirectory, "keep.txt");
-        File.WriteAllText(sentinelPath, "outside fixture");
-
-        try
-        {
-            fixture.CreateSeedRepository();
-            CreateDirectoryLink(Path.Combine(fixture.RootDirectory, "outside-link"), outsideDirectory);
-
-            fixture.Dispose();
-
-            Assert.False(Directory.Exists(fixture.RootDirectory), "子junctionを含むfixtureが残っています。");
-            Assert.True(File.Exists(sentinelPath), "子junctionのリンク先をcleanupが変更しました。");
-        }
-        finally
-        {
-            if (Directory.Exists(fixture.RootDirectory)) fixture.Dispose();
-            if (Directory.Exists(outsideDirectory))
-            {
-                File.Delete(sentinelPath);
-                Directory.Delete(outsideDirectory, recursive: false);
-            }
-        }
-    }
-
-    private static void CreateDirectoryLink(string linkPath, string targetPath)
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            var start = new ProcessStartInfo("cmd.exe") { UseShellExecute = false, CreateNoWindow = true };
-            foreach (var argument in new[] { "/c", "mklink", "/J", linkPath, targetPath }) start.ArgumentList.Add(argument);
-            using var process = Process.Start(start) ?? throw new InvalidOperationException("junction作成プロセスを開始できませんでした。");
-            process.WaitForExit();
-            if (process.ExitCode != 0) throw new InvalidOperationException("テスト用junctionを作成できませんでした。");
-        }
-        else
-        {
-            Directory.CreateSymbolicLink(linkPath, targetPath);
-        }
-    }
 
     [CodexOptInFact]
     [Trait("Category", "ExternalIntegration")]
-    public async Task RunAsync_ShouldCompleteImplementerReviewerAndPersistNeedsHumanInput()
+    public async Task RunAsync_ShouldConnectToCodexAndReceiveResponse()
     {
         var fixture = new IsolatedFixture();
         var succeeded = false;
         ProcessResult? run = null;
         string? runDirectory = null;
-        var lifecycleLogPath = Path.Combine(Path.GetTempPath(), $"ateliers-lifecycle-{Guid.NewGuid():N}.jsonl");
-        var slackMode = "disabled";
 
         try
         {
@@ -134,185 +33,34 @@ public sealed class CodexIntegrationTests
             Assert.True(Path.IsPathFullyQualified(codexExecutable), $"{CodexPathVariable} は絶対パスで指定してください。");
             Assert.True(File.Exists(codexExecutable), $"Codex CLIが見つかりません: {codexExecutable}");
 
-            if (Environment.GetEnvironmentVariable(SlackOptInVariable) == "1")
-            {
-                if (TryValidateSlackTestSettings(out var settingsError))
-                    slackMode = "test";
-                else
-                    Console.WriteLine($"Slack通知部分をSkip: {settingsError}");
-            }
-            else
-            {
-                Console.WriteLine($"Slack通知部分をSkip: {SlackOptInVariable}=1 が指定されていません。");
-            }
-
-            if (slackMode == "test")
-            {
-                var repositoryRoot = FindRepositoryRoot()!;
-                var configurationPath = Path.Combine(repositoryRoot, "config", "slack.json");
-                var secretsPath = Path.Combine(repositoryRoot, "config", "slack.secrets.json");
-                using var dispatcher = SlackLifecycleNotificationDispatcher.TryCreate(
-                    configurationPath, secretsPath, useTestChannel: true);
-                Assert.NotNull(dispatcher);
-                Assert.True(await dispatcher!.VerifyBotIdentitiesAsync(),
-                    "Slack Tokenと設定した3役のBot User IDが一致しません。通知投稿前に停止しました。");
-            }
-
             fixture.CreateSeedRepository();
             fixture.WriteTaskContract();
             var cliAssembly = FindCliAssembly();
-            run = await InvokeOrchestratorAsync(cliAssembly, Path.GetFullPath(codexExecutable!), fixture, lifecycleLogPath, slackMode);
+            runDirectory = fixture.RunsDirectory;
+            run = await InvokeOrchestratorAsync(cliAssembly, Path.GetFullPath(codexExecutable!), fixture);
             Assert.True(run.ExitCode == 0,
                 $"Orchestrator終了コードが0ではありません: {run.ExitCode}");
-            if (slackMode == "test")
-            {
-                Assert.DoesNotContain("Slack通知に", run.StandardError, StringComparison.Ordinal);
-                Assert.Contains("Slack通知送信成功: 6件", run.StandardOutput, StringComparison.Ordinal);
-            }
+            var runDirectoryLine = run.StandardOutput.Split(Environment.NewLine)
+                .FirstOrDefault(line => line.StartsWith("記録先: ", StringComparison.Ordinal));
+            Assert.False(string.IsNullOrWhiteSpace(runDirectoryLine),
+                $"Orchestrator出力に実行記録先がありません。stdout:{Environment.NewLine}{run.StandardOutput}");
+            runDirectory = Path.GetFullPath(runDirectoryLine!["記録先: ".Length..].Trim());
+            var runsRoot = Path.GetFullPath(fixture.RunsDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                + Path.DirectorySeparatorChar;
+            Assert.True(runDirectory.StartsWith(runsRoot,
+                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal),
+                $"実行記録先がfixtureのruns配下ではありません: {runDirectory}");
 
-            var runDirectories = Directory.GetDirectories(fixture.RunsDirectory);
-            Assert.True(runDirectories.Length == 1, $"実行記録ディレクトリ数が1ではありません: {runDirectories.Length}");
-            runDirectory = runDirectories[0];
-
-            var reportPath = Path.Combine(runDirectory, "report.md");
-            Assert.True(File.Exists(reportPath), "report.mdがありません。");
-            var report = await File.ReadAllTextAsync(reportPath);
-            Assert.Contains("- 状態: `NeedsHumanInput`", report, StringComparison.Ordinal);
-            Assert.Contains("- 実装呼び出し: 1", report, StringComparison.Ordinal);
-            Assert.Contains("- レビュー呼び出し: 1", report, StringComparison.Ordinal);
-
-            var eventsPath = Path.Combine(runDirectory, "events.jsonl");
-            Assert.True(File.Exists(eventsPath), "events.jsonlがありません。");
-            var events = (await File.ReadAllLinesAsync(eventsPath)).Where(line => !string.IsNullOrWhiteSpace(line))
-                .Select(line => JsonDocument.Parse(line)).ToArray();
-            try
-            {
-                Assert.NotEmpty(events);
-                var runId = events[0].RootElement.GetProperty("runId").GetString();
-                for (var index = 0; index < events.Length; index++)
-                {
-                    var item = events[index].RootElement;
-                    Assert.Equal(runId, item.GetProperty("runId").GetString());
-                    Assert.Equal(index + 1, item.GetProperty("sequence").GetInt64());
-                }
-
-                var all = events.Select(item => item.RootElement).ToArray();
-                var calls = all.Where(item => item.GetProperty("eventType").GetString() == "agent_call").ToArray();
-                var implementerCalls = calls.Where(item => item.GetProperty("role").GetString() == "Implementer").ToArray();
-                var reviewerCalls = calls.Where(item => item.GetProperty("role").GetString() == "Reviewer").ToArray();
-                Assert.Single(implementerCalls);
-                Assert.Single(reviewerCalls);
-                Assert.Equal("completed", implementerCalls[0].GetProperty("result").GetString());
-                var reviewerResult = reviewerCalls[0].GetProperty("result").GetString();
-                Assert.True(reviewerResult is "completed" or "empty", "Reviewerのイベント記録が成功ではありません。");
-                var reviewerOutput = reviewerCalls[0].TryGetProperty("outputReference", out var reviewerOutputElement) && reviewerOutputElement.ValueKind == JsonValueKind.String;
-                var reviewerArtifacts = reviewerCalls[0].GetProperty("artifactReferences").GetArrayLength() > 0;
-                Assert.True(reviewerOutput || reviewerArtifacts, "Reviewer応答・成果物のどちらも記録されていません。");
-
-                var stopped = Assert.Single(all, item => item.GetProperty("eventType").GetString() == "codex_one_shot_stopped");
-                Assert.Equal("needs_human_input", stopped.GetProperty("result").GetString());
-                Assert.Contains(all, item => item.GetProperty("eventType").GetString() == "state_transition" &&
-                    item.GetProperty("toState").GetString() == "needsHumanInput");
-                Assert.Contains(all, item => item.GetProperty("eventType").GetString() == "report_written" &&
-                    item.GetProperty("result").GetString() == "accepted" && item.GetProperty("outputReference").GetString() == "report.md");
-
-                var lifecycle = (await File.ReadAllLinesAsync(lifecycleLogPath)).Select(line => JsonDocument.Parse(line)).ToArray();
-                try
-                {
-                    var lifecycleItems = lifecycle.Select(item => item.RootElement).ToArray();
-                    Assert.Contains(lifecycleItems, item => item.GetProperty("role").GetString() == "Orchestrator" && item.GetProperty("eventType").GetString() == "started");
-                    Assert.Contains(lifecycleItems, item => item.GetProperty("role").GetString() == "Implementer" && item.GetProperty("eventType").GetString() == "completed");
-                    Assert.Contains(lifecycleItems, item => item.GetProperty("role").GetString() == "Reviewer" && item.GetProperty("eventType").GetString() == "completed");
-                    Assert.Contains(lifecycleItems, item => item.GetProperty("eventType").GetString() == "needs_human_input");
-                    Assert.Equal(new[] { "Orchestrator:started", "Implementer:started", "Implementer:completed",
-                        "Reviewer:started", "Reviewer:completed", "Orchestrator:needs_human_input", "Orchestrator:completed" },
-                        lifecycleItems.Select(item => $"{item.GetProperty("role").GetString()}:{item.GetProperty("eventType").GetString()}").ToArray());
-                    Assert.Equal("needs_human_input", lifecycleItems[^1].GetProperty("status").GetString());
-                    Assert.Equal("NeedsHumanInput", lifecycleItems[^1].GetProperty("state").GetString());
-                    Assert.DoesNotContain(await File.ReadAllTextAsync(lifecycleLogPath), codexExecutable, StringComparison.OrdinalIgnoreCase);
-                }
-                finally
-                {
-                    foreach (var item in lifecycle) item.Dispose();
-                }
-
-                ValidateAgentEvidence(runDirectory, implementerCalls[0], "implementer", requireResponse: true);
-                ValidateAgentEvidence(runDirectory, reviewerCalls[0], "reviewer", requireResponse: false);
-                var reviewerEvidencePath = Path.Combine(runDirectory, "exchanges", "reviewer-1", "execution-evidence.json");
-                string? reviewerArtifactSha256;
-                using (var reviewerEvidence = JsonDocument.Parse(await File.ReadAllBytesAsync(reviewerEvidencePath)))
-                {
-                    var reviewerWorkingDirectory = reviewerEvidence.RootElement.GetProperty("WorkingDirectory").GetString();
-                    var expectedReviewerWorkspace = Path.Combine(runDirectory, "exchanges", "reviewer-1", "workspace");
-                    Assert.True(StringComparer.OrdinalIgnoreCase.Equals(
-                        Path.GetFullPath(expectedReviewerWorkspace), Path.GetFullPath(reviewerWorkingDirectory!)),
-                        "Reviewerの作業ディレクトリが実行記録内の専用workspaceではありません。");
-                    Assert.False(Path.GetFullPath(reviewerWorkingDirectory!).StartsWith(
-                        Path.GetFullPath(fixture.RepositoryDirectory) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase),
-                        "Reviewerの作業ディレクトリがImplementerのcheckout内です。");
-                    Assert.True(StringComparer.OrdinalIgnoreCase.Equals(Path.GetFullPath(reviewerWorkingDirectory!),
-                        Path.GetFullPath((await RunGitAsync(reviewerWorkingDirectory!, "rev-parse", "--show-toplevel")).Trim())),
-                        "Reviewerの作業ディレクトリが独立したGitルートではありません。");
-                    reviewerArtifactSha256 = reviewerEvidence.RootElement.GetProperty("ArtifactSha256").GetString();
-                }
-                ValidateReferences(runDirectory, implementerCalls[0]);
-                ValidateReferences(runDirectory, reviewerCalls[0]);
-
-                var fixedArtifact = Assert.Single(all, item => item.GetProperty("eventType").GetString() == "artifact_fixed");
-                var artifactReference = fixedArtifact.GetProperty("outputReference").GetString();
-                Assert.False(string.IsNullOrWhiteSpace(artifactReference), "固定成果物の参照がありません。");
-                var artifactPath = ResolveRunReference(runDirectory, artifactReference!);
-                Assert.True(File.Exists(artifactPath), $"固定成果物がありません: {artifactReference}");
-                var artifact = await File.ReadAllTextAsync(artifactPath);
-                var frozenDiff = ExtractUnifiedDiff(artifact);
-                Assert.Equal(fixedArtifact.GetProperty("diffSha256").GetString(), reviewerArtifactSha256);
-                var finalDiff = await RunGitAsync(fixture.RepositoryDirectory, "diff", "--binary", "--no-ext-diff", "HEAD", "--");
-                Assert.Equal(NormalizeNewlines(frozenDiff), NormalizeNewlines(finalDiff));
-                Assert.Equal(fixedArtifact.GetProperty("diffSha256").GetString(), HashSha256(await File.ReadAllBytesAsync(artifactPath)));
-
-                var changedPaths = ParsePorcelainPaths(await RunGitAsync(fixture.RepositoryDirectory, "status", "--porcelain", "-z", "--untracked-files=all"));
-                Assert.Equal([IsolatedFixture.TargetFile], changedPaths);
-                var targetContents = await File.ReadAllTextAsync(Path.Combine(fixture.RepositoryDirectory, IsolatedFixture.TargetFile));
-                Assert.Contains("CountWords", targetContents, StringComparison.Ordinal);
-                Assert.Equal(IsolatedFixture.SeedSentinel,
-                    await File.ReadAllTextAsync(Path.Combine(fixture.RepositoryDirectory, IsolatedFixture.SentinelFile)));
-
-                var validationPath = Path.Combine(runDirectory, "exchanges", "implementer-1", "validation", "validation-evidence.json");
-                using var validationDocument = JsonDocument.Parse(await File.ReadAllBytesAsync(validationPath));
-                var validationCommands = validationDocument.RootElement.GetProperty("commands").EnumerateArray().ToArray();
-                Assert.Equal(2, validationCommands.Length);
-                Assert.Contains(validationCommands, command => command.GetProperty("command").GetString()!.Contains("dotnet build", StringComparison.Ordinal));
-                Assert.Contains(validationCommands, command => command.GetProperty("command").GetString()!.Contains("dotnet run", StringComparison.Ordinal));
-                Assert.All(validationCommands, command => Assert.Equal(0, command.GetProperty("exitCode").GetInt32()));
-
-                var buildCommand = Assert.Single(validationCommands, command =>
-                    command.GetProperty("command").GetString()!.Contains("dotnet build", StringComparison.Ordinal));
-                var checksCommand = Assert.Single(validationCommands, command =>
-                    command.GetProperty("command").GetString()!.Contains("dotnet run", StringComparison.Ordinal));
-                var validationDirectory = Path.GetDirectoryName(validationPath)!;
-                var buildLogPath = ResolveValidationReference(validationDirectory, buildCommand.GetProperty("logReference").GetString()!);
-                var checksLogPath = ResolveValidationReference(validationDirectory, checksCommand.GetProperty("logReference").GetString()!);
-                var buildLog = await File.ReadAllTextAsync(buildLogPath);
-                var checksLog = await File.ReadAllTextAsync(checksLogPath);
-                Assert.True(buildLog.Contains("Build succeeded", StringComparison.OrdinalIgnoreCase) ||
-                    buildLog.Contains("ビルドに成功", StringComparison.Ordinal), "Release buildの成功をログで確認できません。");
-                Assert.Contains("All word-count checks passed.", checksLog, StringComparison.Ordinal);
-
-                var reviewerRequestPath = Path.Combine(runDirectory, "exchanges", "reviewer-1", "request.json");
-                using var reviewerRequestDocument = JsonDocument.Parse(await File.ReadAllBytesAsync(reviewerRequestPath));
-                Assert.Equal("exchanges/implementer-1/validation/validation-evidence.json",
-                    reviewerRequestDocument.RootElement.GetProperty("validationEvidenceReference").GetString());
-                var reviewerOutputPath = ResolveRunReference(runDirectory, reviewerCalls[0].GetProperty("outputReference").GetString()!);
-                var reviewerResponse = await File.ReadAllTextAsync(reviewerOutputPath);
-                Assert.Contains("build", reviewerResponse, StringComparison.OrdinalIgnoreCase);
-                Assert.Contains("test", reviewerResponse, StringComparison.OrdinalIgnoreCase);
-                Assert.Contains("All word-count checks passed.", reviewerResponse, StringComparison.Ordinal);
-            }
-            finally
-            {
-                foreach (var item in events) item.Dispose();
-            }
-
+            var exchangeDirectory = Path.Combine(runDirectory, "exchanges");
+            Assert.True(Directory.Exists(exchangeDirectory), $"Agent応答の保存先がありません: {exchangeDirectory}");
+            var implementerResponses = Directory.EnumerateDirectories(exchangeDirectory, "implementer-*")
+                .Select(directory => Path.Combine(directory, "response.md"))
+                .Where(File.Exists)
+                .ToArray();
+            Assert.True(implementerResponses.Length > 0,
+                $"Implementer応答ファイルが見つかりません: {exchangeDirectory}");
+            Assert.Contains(implementerResponses,
+                path => !string.IsNullOrWhiteSpace(File.ReadAllText(path)));
             succeeded = true;
         }
         catch (Exception exception) when (exception is not XunitException)
@@ -345,9 +93,6 @@ public sealed class CodexIntegrationTests
             }
         }
 
-        Assert.True(File.Exists(lifecycleLogPath), "fixture cleanup後も設定した永続JSONLが残っていません。");
-        Assert.Contains("\"role\":\"Orchestrator\"", await File.ReadAllTextAsync(lifecycleLogPath));
-        File.Delete(lifecycleLogPath);
     }
 
     private static string FormatFailure(Exception exception, string fixtureDirectory, string? runDirectory, ProcessResult? run)
@@ -375,55 +120,7 @@ public sealed class CodexIntegrationTests
         throw new FileNotFoundException("CLI assemblyが見つかりません。先にソリューションをビルドしてください。");
     }
 
-    private static bool TryValidateSlackTestSettings(out string reason)
-    {
-        reason = "config/slack.jsonまたはconfig/slack.secrets.jsonがありません。";
-        var root = FindRepositoryRoot();
-        if (root is null) return false;
-        var configPath = Path.Combine(root, "config", "slack.json");
-        var secretsPath = Path.Combine(root, "config", "slack.secrets.json");
-        if (!File.Exists(configPath) || !File.Exists(secretsPath)) return false;
-
-        try
-        {
-            var roles = new[] { "orchestrator", "implementer", "reviewer" };
-            var settings = roles.Select(role => SlackBotConfiguration.Load(configPath, secretsPath, role, useTestChannel: true)).ToArray();
-            var testChannel = settings[0].ChannelId;
-            if (settings.Any(item => !string.Equals(item.ChannelId, testChannel, StringComparison.Ordinal)))
-            {
-                reason = "3役のテストチャンネル設定が一致しません。";
-                return false;
-            }
-            if (settings.Any(item => string.Equals(item.Bot.ChannelId, testChannel, StringComparison.Ordinal)))
-            {
-                reason = "テストチャンネルが通常の通知先と同じです。";
-                return false;
-            }
-            if (settings.Select(item => item.Bot.BotUserId).Distinct(StringComparer.Ordinal).Count() != roles.Length)
-            {
-                reason = "3役のBot User IDが重複しています。";
-                return false;
-            }
-            reason = string.Empty;
-            return true;
-        }
-        catch (InvalidOperationException)
-        {
-            reason = "3役のBot設定、testChannelId、またはローカルTokenが不足・不正です。";
-            return false;
-        }
-    }
-
-    private static string? FindRepositoryRoot()
-    {
-        for (var current = new DirectoryInfo(AppContext.BaseDirectory); current is not null; current = current.Parent)
-            if (File.Exists(Path.Combine(current.FullName, "Ateliers.Ai.Orchestrator.sln")) &&
-                File.Exists(Path.Combine(current.FullName, "tests", "Ateliers.Ai.Orchestrator.IntegrationTests", "Ateliers.Ai.Orchestrator.IntegrationTests.csproj")))
-                return current.FullName;
-        return null;
-    }
-
-    private static async Task<ProcessResult> InvokeOrchestratorAsync(string cliAssembly, string codexExecutable, IsolatedFixture fixture, string lifecycleLogPath, string slackMode)
+    private static async Task<ProcessResult> InvokeOrchestratorAsync(string cliAssembly, string codexExecutable, IsolatedFixture fixture)
     {
         var start = new ProcessStartInfo("dotnet")
         {
@@ -436,7 +133,7 @@ public sealed class CodexIntegrationTests
         foreach (var argument in new[]
         {
             cliAssembly, "run", fixture.ContractPath, "--agent", "codex", "--codex-exe", codexExecutable,
-            "--runs", fixture.RunsDirectory, "--lifecycle-log", lifecycleLogPath, "--slack-notifications", slackMode
+            "--runs", fixture.RunsDirectory, "--slack-notifications", "disabled"
         }) start.ArgumentList.Add(argument);
 
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Orchestrator CLIを開始できませんでした。");
@@ -459,85 +156,6 @@ public sealed class CodexIntegrationTests
         return new ProcessResult(process.ExitCode, await stdout, await stderr);
     }
 
-    private static void ValidateAgentEvidence(string runDirectory, JsonElement call, string role, bool requireResponse)
-    {
-        var evidencePath = Path.Combine(runDirectory, "exchanges", $"{role}-1", "execution-evidence.json");
-        Assert.True(File.Exists(evidencePath), $"{role}の終了証跡ファイルがありません。");
-        using var evidenceDocument = JsonDocument.Parse(File.ReadAllBytes(evidencePath));
-        var evidence = evidenceDocument.RootElement;
-        Assert.True(evidence.GetProperty("ProcessExitObserved").GetBoolean(), $"{role}のプロセス終了を確認できませんでした。");
-        Assert.True(evidence.GetProperty("StreamsClosed").GetBoolean(), $"{role}の出力stream終了を確認できませんでした。");
-        Assert.Equal("turn.completed", evidence.GetProperty("TerminalEvent").GetString());
-        Assert.Equal(0, evidence.GetProperty("ExitCode").GetInt32());
-        Assert.True(evidence.GetProperty("ProcessId").GetInt32() > 0, $"{role}のプロセスIDがありません。");
-        Assert.False(evidence.GetProperty("StopRequested").GetBoolean() || evidence.GetProperty("TimedOut").GetBoolean(),
-            $"{role}が停止要求またはtimeoutで終了しました。");
-
-        var stdoutReference = evidence.GetProperty("StandardOutputReference").GetString();
-        var stderrReference = evidence.GetProperty("StandardErrorReference").GetString();
-        Assert.True(stdoutReference is not null && File.Exists(ResolveRunReference(runDirectory, stdoutReference)), $"{role}のJSONL応答ログ参照が不正です。");
-        Assert.True(stderrReference is not null && File.Exists(ResolveRunReference(runDirectory, stderrReference)), $"{role}のstderrログ参照が不正です。");
-        if (requireResponse)
-        {
-            var outputReference = call.GetProperty("outputReference").GetString();
-            Assert.True(outputReference is not null && File.Exists(ResolveRunReference(runDirectory, outputReference)), $"{role}応答参照が不正です。");
-            Assert.True(new FileInfo(ResolveRunReference(runDirectory, outputReference!)).Length > 0, $"{role}応答が空です。");
-        }
-    }
-
-    private static void ValidateReferences(string runDirectory, JsonElement call)
-    {
-        if (call.TryGetProperty("outputReference", out var output) && output.ValueKind == JsonValueKind.String)
-            Assert.True(File.Exists(ResolveRunReference(runDirectory, output.GetString()!)), "Agent応答のoutputReferenceが実在しません。");
-        if (!call.TryGetProperty("artifactReferences", out var references)) return;
-        foreach (var reference in references.EnumerateArray())
-            Assert.True(File.Exists(ResolveRunReference(runDirectory, reference.GetString()!)), $"任意成果物の参照先が不正です: {reference.GetString()}");
-    }
-
-    private static string ResolveRunReference(string runDirectory, string reference)
-    {
-        var path = Path.GetFullPath(Path.Combine(runDirectory, reference.Replace('/', Path.DirectorySeparatorChar)));
-        var root = Path.GetFullPath(runDirectory) + Path.DirectorySeparatorChar;
-        Assert.True(path.StartsWith(root, StringComparison.OrdinalIgnoreCase), $"実行記録の参照がrunディレクトリ外を指しています: {reference}");
-        return path;
-    }
-
-    private static string ResolveValidationReference(string validationDirectory, string reference)
-    {
-        var normalizedReference = reference.Replace('\\', '/');
-        var segments = normalizedReference.Split('/', StringSplitOptions.None);
-        Assert.False(Path.IsPathRooted(reference) || segments.Any(segment => segment is "" or "." or ".."),
-            $"検証証跡のログ参照が相対ファイル名ではありません: {reference}");
-        var path = Path.GetFullPath(Path.Combine(validationDirectory, normalizedReference.Replace('/', Path.DirectorySeparatorChar)));
-        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(validationDirectory)) + Path.DirectorySeparatorChar;
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        Assert.True(path.StartsWith(root, comparison), "検証証跡ログの参照がvalidation directory外です。");
-
-        var current = Path.GetFullPath(validationDirectory);
-        foreach (var segment in segments)
-        {
-            current = Path.Combine(current, segment);
-            Assert.False((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0,
-                "検証証跡ログの参照先にリンクを含められません。");
-        }
-        Assert.True(File.Exists(path), "検証証跡ログの参照先がありません。");
-        return path;
-    }
-
-    private static string ExtractUnifiedDiff(string artifact)
-    {
-        const string start = "```diff\n";
-        var index = artifact.IndexOf(start, StringComparison.Ordinal);
-        Assert.True(index >= 0, "固定成果物にunified diffがありません。");
-        index += start.Length;
-        var end = artifact.IndexOf("\n```", index, StringComparison.Ordinal);
-        Assert.True(end >= 0, "固定成果物のdiff囲みが閉じていません。");
-        return artifact[index..end];
-    }
-
-    private static string[] ParsePorcelainPaths(string status) => status.Split('\0', StringSplitOptions.RemoveEmptyEntries)
-        .Select(line => line.Length >= 4 ? line[3..] : line).Order(StringComparer.Ordinal).ToArray();
-
     private static async Task<string> RunGitAsync(string workingDirectory, params string[] arguments)
     {
         var start = new ProcessStartInfo("git")
@@ -558,402 +176,10 @@ public sealed class CodexIntegrationTests
         return output;
     }
 
-    private static string HashSha256(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
-    private static string NormalizeNewlines(string value) => value.Replace("\r\n", "\n", StringComparison.Ordinal);
 
     private sealed record ProcessResult(int ExitCode, string StandardOutput, string StandardError);
 
-    private sealed class IsolatedFixture : IDisposable
-    {
-        private const string FixtureParentName = "ateliers-codex-integration";
-        private const uint FileReadAttributes = 0x00000080;
-        private const uint FileWriteAttributes = 0x00000100;
-        private const uint DeleteAccess = 0x00010000;
-        private const uint ShareRead = 0x00000001;
-        private const uint ShareWrite = 0x00000002;
-        private const uint OpenExisting = 3;
-        private const uint BackupSemantics = 0x02000000;
-        private const uint OpenReparsePoint = 0x00200000;
-        private const int FileBasicInfoClass = 0;
-        private const int FileDispositionInfoClass = 4;
-        private const int FileAttributeTagInfoClass = 9;
 
-        public const string TargetFile = "src/WordCounter/TextMetrics.cs";
-        public const string SentinelFile = "sentinel.txt";
-        public const string SeedSentinel = "do not change\n";
-
-        private readonly string fixtureParentDirectory;
-
-        public IsolatedFixture() : this(Path.Combine(Path.GetTempPath(), FixtureParentName), Guid.NewGuid().ToString("N")) { }
-
-        public IsolatedFixture(string fixtureParentDirectory) : this(fixtureParentDirectory, Guid.NewGuid().ToString("N")) { }
-
-        public IsolatedFixture(string fixtureParentDirectory, string rootDirectoryName)
-        {
-            this.fixtureParentDirectory = Path.GetFullPath(fixtureParentDirectory);
-            RootDirectory = Path.Combine(this.fixtureParentDirectory, rootDirectoryName);
-        }
-
-        public string RootDirectory { get; }
-        public string RepositoryDirectory => Path.Combine(RootDirectory, "repository");
-        public string RunsDirectory => Path.Combine(RootDirectory, "runs");
-        public string ContractPath => Path.Combine(RootDirectory, "task-contract.json");
-
-        public void CreateSeedRepository()
-        {
-            Directory.CreateDirectory(RepositoryDirectory);
-            Directory.CreateDirectory(RunsDirectory);
-            WriteRepositoryFile(TargetFile, """
-                namespace WordCounter;
-
-                public static class TextMetrics
-                {
-                    public static int CountWords(string text)
-                    {
-                        ArgumentNullException.ThrowIfNull(text);
-                        return text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
-                    }
-                }
-                """);
-            WriteRepositoryFile("src/WordCounter/WordCounter.csproj", """
-                <Project Sdk="Microsoft.NET.Sdk">
-                  <PropertyGroup>
-                    <TargetFramework>net10.0</TargetFramework>
-                    <ImplicitUsings>enable</ImplicitUsings>
-                    <Nullable>enable</Nullable>
-                  </PropertyGroup>
-                </Project>
-                """);
-            WriteRepositoryFile("tests/WordCounter.Tests/WordCounter.Tests.csproj", """
-                <Project Sdk="Microsoft.NET.Sdk">
-                  <PropertyGroup>
-                    <OutputType>Exe</OutputType>
-                    <TargetFramework>net10.0</TargetFramework>
-                    <ImplicitUsings>enable</ImplicitUsings>
-                    <Nullable>enable</Nullable>
-                  </PropertyGroup>
-                  <ItemGroup>
-                    <ProjectReference Include="../../src/WordCounter/WordCounter.csproj" />
-                  </ItemGroup>
-                </Project>
-                """);
-            WriteRepositoryFile("tests/WordCounter.Tests/Program.cs", """
-                using WordCounter;
-
-                var failures = new List<string>();
-                Check("ordinary spaces", 3, TextMetrics.CountWords("one two three"));
-                Check("repeated spaces", 2, TextMetrics.CountWords("  one   two  "));
-                Check("tabs and newlines", 3, TextMetrics.CountWords("one\ttwo\nthree"));
-                Check("empty input", 0, TextMetrics.CountWords(""));
-                Check("whitespace only", 0, TextMetrics.CountWords(" \t\r\n "));
-                foreach (var failure in failures) Console.Error.WriteLine($"FAIL: {failure}");
-                if (failures.Count > 0) return 1;
-                Console.WriteLine("All word-count checks passed.");
-                return 0;
-
-                void Check(string name, int expected, int actual)
-                {
-                    if (expected != actual) failures.Add($"{name}: expected {expected}, got {actual}");
-                }
-                """);
-            WriteRepositoryFile(".gitignore", """
-                **/bin/
-                **/obj/
-                """);
-            File.WriteAllText(Path.Combine(RepositoryDirectory, SentinelFile), SeedSentinel, new UTF8Encoding(false));
-            RunGit("init", "--initial-branch=main");
-            RunGit("config", "user.name", "Codex Integration Test");
-            RunGit("config", "user.email", "integration@example.invalid");
-            RunGit("config", "core.autocrlf", "false");
-            RunGit("add", "-A");
-            RunGit("commit", "-m", "seed integration fixture");
-        }
-
-        public void WriteTaskContract()
-        {
-            var contract = new
-            {
-                schemaVersion = 1,
-                taskId = "codex-integration-test",
-                purpose = "TestbedのWordCounter空白区切りシナリオを隔離Git fixtureで修正し、ImplementerのRelease build・5チェック証跡を独立Reviewerへ引き継ぐ",
-                workingDirectory = RepositoryDirectory,
-                scope = new { included = new[] { TargetFile }, excluded = new[] { SentinelFile, "project/test files", "外部書込・commit・push・PR" } },
-                inputs = new[] { new { description = "Testbed由来のWordCounter教材と5チェック", reference = TargetFile, revision = "Testbed main e205cd40166b8e54fd7cb01eb98cc0a57a882426 のシナリオをローカルfixture化" } },
-                requirements = new[] { "CountWordsで空白、タブ、改行を区切りとして扱う", "指定のRelease buildと5チェックを実行し、実際のexit codeと各ログを検証ディレクトリのvalidation-evidence.jsonへ記録する", "指定ファイル以外は変更しない", "レビュー後も対象差分を変更しない" },
-                acceptanceCriteria = new[] { "Release buildが成功する", "ordinary spaces / repeated spaces / tabs and newlines / empty input / whitespace only の5チェックが成功する", "Reviewerがbuild/testの検証ログを確認し、応答でその結果を明示する", "指定ファイル以外が変更されていない" },
-                delegatedOperations = new[] { $"{TargetFile}だけを編集する", "dotnet build src/WordCounter/WordCounter.csproj --configuration Releaseを実行しログを保存する", "dotnet run --project tests/WordCounter.Tests/WordCounter.Tests.csproj --configuration Releaseを実行しログを保存する", "成果物と検証証跡をレビューする" },
-                limits = new { maxDurationMinutes = 10, maxRevisionAttempts = 0, maxRetries = 0 },
-                stopConditions = new[] { "指定ファイル以外への変更が必要な場合は停止する" },
-                reporting = new { pullRequestExpected = false, finalReportFormat = "markdown" }
-            };
-            File.WriteAllText(ContractPath, JsonSerializer.Serialize(contract, new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
-        }
-
-        private void WriteRepositoryFile(string relativePath, string contents)
-        {
-            var path = Path.Combine(RepositoryDirectory, relativePath.Replace('/', Path.DirectorySeparatorChar));
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, contents, new UTF8Encoding(false));
-        }
-
-        private void RunGit(params string[] arguments)
-        {
-            var start = new ProcessStartInfo("git") { WorkingDirectory = RepositoryDirectory, UseShellExecute = false, RedirectStandardError = true, CreateNoWindow = true };
-            foreach (var argument in arguments) start.ArgumentList.Add(argument);
-            using var process = Process.Start(start) ?? throw new InvalidOperationException("Git seed processを開始できませんでした。");
-            var error = process.StandardError.ReadToEnd();
-            process.WaitForExit();
-            if (process.ExitCode != 0) throw new InvalidOperationException($"git {arguments[0]} に失敗しました: {error}");
-        }
-
-        public void Dispose()
-        {
-            var fixtureRoot = Path.GetFullPath(RootDirectory);
-            if (!Directory.Exists(fixtureRoot)) return;
-
-            var expectedParent = fixtureParentDirectory;
-            if (!string.Equals(Path.GetDirectoryName(fixtureRoot), expectedParent, StringComparison.OrdinalIgnoreCase))
-                throw new IOException($"Fixture cleanup rootが専用一時ディレクトリ直下ではありません: {fixtureRoot}");
-
-            if (OperatingSystem.IsWindows())
-            {
-                DeleteFixtureTreeWindows(expectedParent, fixtureRoot);
-                return;
-            }
-
-            ValidateNoReparseAncestors(fixtureRoot);
-            var rootAttributes = File.GetAttributes(fixtureRoot);
-            if ((rootAttributes & FileAttributes.Directory) == 0 || (rootAttributes & FileAttributes.ReparsePoint) != 0)
-                throw new IOException($"Fixture cleanup rootが通常のディレクトリではありません: {fixtureRoot}");
-            DeleteFixtureContents(fixtureRoot, fixtureRoot);
-            Directory.Delete(fixtureRoot, recursive: false);
-        }
-
-        private static void DeleteFixtureTreeWindows(string expectedParent, string fixtureRoot)
-        {
-            var ancestorHandles = PinDirectoryAncestors(expectedParent);
-            try
-            {
-                using var rootHandle = OpenEntryHandle(fixtureRoot);
-                var rootInfo = GetAttributeTagInfo(rootHandle, fixtureRoot);
-                if ((rootInfo.FileAttributes & (uint)FileAttributes.Directory) == 0 ||
-                    (rootInfo.FileAttributes & (uint)FileAttributes.ReparsePoint) != 0)
-                    throw new IOException($"Fixture cleanup rootが通常のディレクトリではありません: {fixtureRoot}");
-
-                DeleteFixtureContentsWindows(fixtureRoot, rootHandle);
-                MarkForDeletion(rootHandle, fixtureRoot);
-            }
-            finally
-            {
-                for (var index = ancestorHandles.Count - 1; index >= 0; index--)
-                    ancestorHandles[index].Dispose();
-            }
-        }
-
-        private static List<SafeFileHandle> PinDirectoryAncestors(string directory)
-        {
-            var handles = new List<SafeFileHandle>();
-            var fullPath = Path.GetFullPath(directory);
-            var volumeRoot = Path.GetPathRoot(fullPath) ?? throw new IOException($"Fixture pathにvolume rootがありません: {fullPath}");
-            var relativePath = Path.GetRelativePath(volumeRoot, fullPath);
-            var currentPath = volumeRoot;
-
-            try
-            {
-                foreach (var segment in relativePath.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
-                {
-                    currentPath = Path.Combine(currentPath, segment);
-                    var handle = OpenDirectoryPin(currentPath);
-                    var info = GetAttributeTagInfo(handle, currentPath);
-                    if ((info.FileAttributes & (uint)FileAttributes.Directory) == 0 ||
-                        (info.FileAttributes & (uint)FileAttributes.ReparsePoint) != 0)
-                    {
-                        handle.Dispose();
-                        throw new IOException($"Fixture cleanup ancestorが通常ディレクトリではありません (reparse pointを含む): {currentPath}");
-                    }
-                    handles.Add(handle);
-                }
-                return handles;
-            }
-            catch
-            {
-                for (var index = handles.Count - 1; index >= 0; index--)
-                    handles[index].Dispose();
-                throw;
-            }
-        }
-
-        private static void DeleteFixtureContentsWindows(string directory, SafeFileHandle directoryHandle)
-        {
-            foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
-            {
-                var path = Path.GetFullPath(entry);
-                using var entryHandle = OpenEntryHandle(path);
-                var info = GetAttributeTagInfo(entryHandle, path);
-                var isDirectory = (info.FileAttributes & (uint)FileAttributes.Directory) != 0;
-                var isReparsePoint = (info.FileAttributes & (uint)FileAttributes.ReparsePoint) != 0;
-
-                // The directory handle pins this parent; each child is opened without following reparse points.
-                if (isDirectory && !isReparsePoint)
-                    DeleteFixtureContentsWindows(path, entryHandle);
-
-                if ((info.FileAttributes & (uint)FileAttributes.ReadOnly) != 0)
-                    ClearReadOnlyAttribute(entryHandle, path);
-
-                MarkForDeletion(entryHandle, path);
-            }
-            GC.KeepAlive(directoryHandle);
-        }
-
-        private static SafeFileHandle OpenDirectoryPin(string path)
-        {
-            return OpenHandle(path, FileReadAttributes);
-        }
-
-        private static SafeFileHandle OpenEntryHandle(string path)
-        {
-            return OpenHandle(path, DeleteAccess | FileReadAttributes | FileWriteAttributes);
-        }
-
-        private static SafeFileHandle OpenHandle(string path, uint desiredAccess)
-        {
-            var handle = CreateFileW(path, desiredAccess, ShareRead | ShareWrite, IntPtr.Zero, OpenExisting,
-                BackupSemantics | OpenReparsePoint, IntPtr.Zero);
-            if (handle.IsInvalid)
-            {
-                var error = Marshal.GetLastWin32Error();
-                handle.Dispose();
-                throw new IOException($"Fixture cleanupで安全なhandleを開けませんでした: {path}", new Win32Exception(error));
-            }
-            return handle;
-        }
-
-        private static FileAttributeTagInfo GetAttributeTagInfo(SafeFileHandle handle, string path)
-        {
-            if (!GetFileInformationByHandleEx(handle, FileAttributeTagInfoClass, out FileAttributeTagInfo info,
-                    (uint)Marshal.SizeOf<FileAttributeTagInfo>()))
-                throw new IOException($"Fixture cleanupでhandle属性を確認できませんでした: {path}", new Win32Exception(Marshal.GetLastWin32Error()));
-            return info;
-        }
-
-        private static void ClearReadOnlyAttribute(SafeFileHandle handle, string path)
-        {
-            if (!GetFileInformationByHandleEx(handle, FileBasicInfoClass, out FileBasicInfo info,
-                    (uint)Marshal.SizeOf<FileBasicInfo>()))
-                throw new IOException($"Fixture cleanupでhandle属性を読み取れませんでした: {path}", new Win32Exception(Marshal.GetLastWin32Error()));
-
-            info.FileAttributes &= ~(uint)FileAttributes.ReadOnly;
-            if (!SetFileInformationByHandle(handle, FileBasicInfoClass, ref info, (uint)Marshal.SizeOf<FileBasicInfo>()))
-                throw new IOException($"Fixture cleanupでReadOnly属性を解除できませんでした: {path}", new Win32Exception(Marshal.GetLastWin32Error()));
-        }
-
-        private static void MarkForDeletion(SafeFileHandle handle, string path)
-        {
-            var disposition = new FileDispositionInfo { DeleteFile = true };
-            if (!SetFileInformationByHandle(handle, FileDispositionInfoClass, ref disposition, (uint)Marshal.SizeOf<FileDispositionInfo>()))
-                throw new IOException($"Fixture cleanupでhandleを削除対象にできませんでした: {path}", new Win32Exception(Marshal.GetLastWin32Error()));
-        }
-
-        [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern SafeFileHandle CreateFileW(string fileName, uint desiredAccess, uint shareMode,
-            IntPtr securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool GetFileInformationByHandleEx(SafeFileHandle file, int fileInformationClass,
-            out FileAttributeTagInfo fileInformation, uint bufferSize);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool GetFileInformationByHandleEx(SafeFileHandle file, int fileInformationClass,
-            out FileBasicInfo fileInformation, uint bufferSize);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool SetFileInformationByHandle(SafeFileHandle file, int fileInformationClass,
-            ref FileBasicInfo fileInformation, uint bufferSize);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool SetFileInformationByHandle(SafeFileHandle file, int fileInformationClass,
-            ref FileDispositionInfo fileInformation, uint bufferSize);
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct FileAttributeTagInfo
-        {
-            public uint FileAttributes;
-            public uint ReparseTag;
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct FileBasicInfo
-        {
-            public long CreationTime;
-            public long LastAccessTime;
-            public long LastWriteTime;
-            public long ChangeTime;
-            public uint FileAttributes;
-            public uint Reserved;
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct FileDispositionInfo
-        {
-            [MarshalAs(UnmanagedType.U1)]
-            public bool DeleteFile;
-        }
-
-        private static void DeleteFixtureContents(string fixtureRoot, string directory)
-        {
-            foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
-            {
-                var path = Path.GetFullPath(entry);
-                EnsureInsideFixture(fixtureRoot, path);
-
-                var attributes = File.GetAttributes(path);
-                var isDirectory = (attributes & FileAttributes.Directory) != 0;
-                var isReparsePoint = (attributes & FileAttributes.ReparsePoint) != 0;
-
-                // Do not follow links out of the fixture; remove a link as an entry of the fixture.
-                if (isDirectory && !isReparsePoint)
-                {
-                    DeleteFixtureContents(fixtureRoot, path);
-                    Directory.Delete(path, recursive: false);
-                    continue;
-                }
-
-                if (!isReparsePoint && (attributes & FileAttributes.ReadOnly) != 0)
-                    File.SetAttributes(path, attributes & ~FileAttributes.ReadOnly);
-
-                if (isDirectory) Directory.Delete(path, recursive: false);
-                else File.Delete(path);
-            }
-        }
-
-        private static void EnsureInsideFixture(string fixtureRoot, string path)
-        {
-            var relativePath = Path.GetRelativePath(fixtureRoot, path);
-            if (Path.IsPathRooted(relativePath) || relativePath == "." || relativePath == ".." ||
-                relativePath.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ||
-                relativePath.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal))
-                throw new IOException($"Fixture cleanup pathがfixture rootの外です: {path}");
-        }
-
-        private static void ValidateNoReparseAncestors(string fixtureRoot)
-        {
-            var volumeRoot = Path.GetPathRoot(fixtureRoot) ?? throw new IOException($"Fixture pathにvolume rootがありません: {fixtureRoot}");
-            var relativePath = Path.GetRelativePath(volumeRoot, fixtureRoot);
-            var currentPath = volumeRoot;
-            foreach (var segment in relativePath.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
-            {
-                currentPath = Path.Combine(currentPath, segment);
-                if (!Directory.Exists(currentPath)) continue;
-                var attributes = File.GetAttributes(currentPath);
-                if ((attributes & FileAttributes.ReparsePoint) != 0)
-                    throw new IOException($"Fixture cleanup ancestorがreparse pointです: {currentPath}");
-            }
-        }
-    }
 }
 
 public sealed class CodexOptInFactAttribute : FactAttribute

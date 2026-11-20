@@ -2,12 +2,12 @@ using System.Text.Json;
 using Ateliers.Ai.Orchestrator.Core;
 using Xunit;
 
-namespace Ateliers.Ai.Orchestrator.UnitTests;
+namespace Ateliers.Ai.Orchestrator.FakeTests;
 
 public sealed class StdioJsonCliTests
 {
     [Fact]
-    [Trait("Category", "Unit")]
+    [Trait("Category", "Fake")]
     public async Task Cli_publishes_contract_schema_guide_and_capability_flags()
     {
         var originalOut = Console.Out;
@@ -61,7 +61,7 @@ public sealed class StdioJsonCliTests
     }
 
     [Fact]
-    [Trait("Category", "Unit")]
+    [Trait("Category", "Fake")]
     public async Task Run_stdin_json_writes_a_single_structured_success_response()
     {
         var root = Path.Combine(Path.GetTempPath(), "ateliers-stdio-cli-test-" + Guid.NewGuid().ToString("N"));
@@ -99,7 +99,7 @@ public sealed class StdioJsonCliTests
     }
 
     [Fact]
-    [Trait("Category", "Unit")]
+    [Trait("Category", "Fake")]
     public async Task Run_stdin_json_reports_invalid_contract_as_json_and_exit_two()
     {
         var originalIn = Console.In;

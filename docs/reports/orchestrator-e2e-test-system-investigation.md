@@ -1,7 +1,7 @@
 # Ateliers AI Orchestrator E2E・テスト体系の独立調査
 
 > 作成日: 2026-11-19  
-> 更新日: 2026-11-19  
+> 更新日: 2026-11-20
 > 作成者: Codex
 
 ## 1. 要約
@@ -38,6 +38,10 @@ Ateliers-Dev/ateliers-ai-orchestrator の現在の `main`、リポジトリの `
 | Slack IntegrationTests | `Ateliers.Slack.IntegrationTests`の明示opt-in | Slack API、Bot token、`testChannelId`。テスト用Webhookなら別opt-in/専用URL | Slack APIへの投稿と成功応答 | Slack連携そのものの実サービス確認 |
 | Testbed最終受入E2E | ユーザーが`run-codex-e2e.ps1 -RunCodex`を実行 | Testbed public repo、`gh`認証/push/PR/comment、実Codex、Release build・チェック。Slack ONならAPI通知と目視確認 | 実Codex実装→独立Reviewer→必要な修正→公開PR/コメント→GitHub/テスト結果照合→人間判断待ち | **ユーザー専用。ワーカーの開発検証には使用しない** |
 | MCP/配布物の最終受入 | インストール済みMCP/CLIを使うユーザーの別の受入作業 | 実際のインストール・MCP登録・環境設定 | 配布物とMCP経由の導入・接続・利用確認 | 既存Testbedスクリプトが現在保証している範囲とは別 |
+
+### 2026-11-20の分類追記
+
+この報告で「ローカルGit Integration」と記述した決定論的な一時repo/worktreeテストは、実外部接続を行わないため、現在の分類では`Ateliers.Ai.Orchestrator.FakeTests`（`Category=Fake`）に置きます。Windows/Ubuntuの必須CIでFakeTestsとして実行します。`Ateliers.Ai.Orchestrator.IntegrationTests`は明示opt-inの実Codex接続テストを保持します。現在の安全性回帰表は[Git安全性の回帰対策](../reference/git-safety-regressions.md)、分類の決定経緯は[Issue #79 テスト分類見直し記録](../issues/issue-79-test-classification-review.md)を参照してください。
 
 CI定義はWindows/Ubuntu matrixでrestore、Release build、Fake-only Unit、Slack Unitを実行し、実Codex/GitHub書込みを含みません。`AGENTS.md`も`Integration` categoryとCodex IntegrationTestsを通常CIから除外すると明記しています。([unit-tests.yml](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/blob/main/.github/workflows/unit-tests.yml#L8-L43), [AGENTS.md](https://github.com/Ateliers-Dev/ateliers-ai-orchestrator/blob/main/AGENTS.md#L135-L144))
 
