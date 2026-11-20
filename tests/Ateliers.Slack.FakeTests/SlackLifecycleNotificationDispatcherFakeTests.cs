@@ -102,11 +102,12 @@ public sealed class SlackLifecycleNotificationDispatcherTests
 
         Assert.Equal(SlackNotificationSendResult.Sent, await dispatcher!.TrySendAsync(RunId, "Orchestrator", "final_result",
             "needs_human_input", "NeedsHumanInput", DateTimeOffset.UtcNow, null, null, null, summary:
-            $"人の判断が必要な理由: ReviewerはAgent IDの扱いと配送監査に問題があると報告しました。\n指摘内容を確認し、修正を依頼するか判断してください。\nRun ID: {RunId}\nrun={RunId} role=Orchestrator event=final_result status=needs_human_input state=NeedsHumanInput at=2026-11-20T18:51:34.0000000+00:00\n2026-11-20T18:51:34.0000000+00:00", slackCompletionMessage: null));
+            $"人の判断が必要な理由: ReviewerはAgent IDの扱いと配送監査に問題があると報告しました。 status=needs_human_input\n指摘内容を確認し、修正を依頼するか判断してください。\nRun ID: {RunId}\nrun={RunId} role=Orchestrator event=final_result status=needs_human_input state=NeedsHumanInput at=2026-11-20T18:51:34.0000000+00:00\n2026-11-20T18:51:34.0000000+00:00", slackCompletionMessage: null));
 
         using var payload = JsonDocument.Parse(handlers["orchestrator"].RequestBodies.Single()!);
         var message = payload.RootElement.GetProperty("text").GetString()!;
         Assert.Contains("人の判断が必要な理由:", message, StringComparison.Ordinal);
+        Assert.Contains("ReviewerはAgent IDの扱いと配送監査に問題があると報告しました。", message, StringComparison.Ordinal);
         Assert.Contains("Agent IDの扱いと配送監査に問題があると報告しました。", message, StringComparison.Ordinal);
         Assert.Contains("修正を依頼するか判断してください。", message, StringComparison.Ordinal);
         Assert.DoesNotContain("Run ID", message, StringComparison.OrdinalIgnoreCase);

@@ -304,12 +304,15 @@ public sealed class SlackLifecycleNotificationDispatcher : IDisposable
     {
         var sanitized = SanitizeAgentMessage(message, maximumLength);
         if (sanitized is null) return null;
-        sanitized = Regex.Replace(sanitized, @"(?im)^.*\b(?:run|role|event|status|state|at)=\S+.*(?:\r?\n|$)", string.Empty,
-            RegexOptions.CultureInvariant);
-        sanitized = Regex.Replace(sanitized, @"(?im)^\s*\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\s*$", string.Empty,
-            RegexOptions.CultureInvariant);
-        sanitized = Regex.Replace(sanitized, @"(?im)^.*\brun[\s_-]*id\s*[:=].*(?:\r?\n|$)", string.Empty, RegexOptions.CultureInvariant);
+        sanitized = Regex.Replace(sanitized, @"\b(?:run|role|event|status|state|at)=\S+", string.Empty,
+            RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+        sanitized = Regex.Replace(sanitized, @"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\b", string.Empty,
+            RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+        sanitized = Regex.Replace(sanitized, @"\bRun[\s_-]*ID\s*[:=]\s*[\da-f-]+", string.Empty,
+            RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
         sanitized = sanitized.Replace(runId, string.Empty, StringComparison.OrdinalIgnoreCase).Trim();
+        sanitized = Regex.Replace(sanitized, @"[ \t]{2,}", " ", RegexOptions.CultureInvariant);
+        sanitized = Regex.Replace(sanitized, @"\n{3,}", "\n\n", RegexOptions.CultureInvariant);
         if (sanitized.Length > maximumLength)
         {
             const string omitted = "\n\n（通知の文字数上限に達しました。続きは実行記録を確認してください。）";
